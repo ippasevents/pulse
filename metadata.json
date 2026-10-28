@@ -1,0 +1,6 @@
+{
+  "name": "IPPAS Pulse - Catering Manager",
+  "description": "Catering event management: events, clients, quotes, menu recipes, stock, staff scheduling, invoices, and payments.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
