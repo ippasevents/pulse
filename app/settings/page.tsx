@@ -6,12 +6,16 @@ import { isSupabaseConfigured } from '@/lib/supabase';
 
 export default function SettingsPage() {
   const [state, setState] = useState(store.getState());
+  const [syncStatus, setSyncStatus] = useState(store.getSyncStatus());
   const [form, setForm] = useState(state.settings);
   const [savedNotice, setSavedNotice] = useState(false);
 
   useEffect(() => {
     const unsub = store.subscribe(() => {
-      setState(store.getState());
+      const next = store.getState();
+      setState(next);
+      setSyncStatus(store.getSyncStatus());
+      setForm(next.settings);
     });
     return unsub;
   }, []);
@@ -211,32 +215,68 @@ export default function SettingsPage() {
           <div className="card" style={{ marginBottom: '1.25rem' }}>
             <h2 className="card-title">Database &amp; Supabase Integration</h2>
             <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                <span
-                  style={{
-                    display: 'inline-block',
-                    width: '10px',
-                    height: '10px',
-                    borderRadius: '50%',
-                    background: isSupabaseConfigured ? 'var(--success)' : '#f59e0b'
-                  }}
-                />
-                <strong>
-                  {isSupabaseConfigured
-                    ? 'Connected to Remote Supabase Backend'
-                    : 'Active In-Memory & LocalStorage Mode'}
-                </strong>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
+                      background: syncStatus.error ? '#ef4444' : isSupabaseConfigured ? 'var(--success)' : '#f59e0b'
+                    }}
+                  />
+                  <strong>
+                    {isSupabaseConfigured
+                      ? syncStatus.isSyncing
+                        ? 'Syncing with Supabase Database...'
+                        : syncStatus.error
+                        ? 'Supabase Schema / Policy Error'
+                        : 'Live Connected & Syncing with Supabase'
+                      : 'Active In-Memory & LocalStorage Mode'}
+                  </strong>
+                </div>
+
+                {isSupabaseConfigured && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={syncStatus.isSyncing}
+                    onClick={() => store.syncFromSupabase()}
+                  >
+                    {syncStatus.isSyncing ? 'Syncing...' : '↻ Sync Now'}
+                  </button>
+                )}
               </div>
 
+              {syncStatus.error && (
+                <div
+                  style={{
+                    background: '#fee2e2',
+                    border: '1px solid #fecaca',
+                    color: '#991b1b',
+                    padding: '0.65rem 0.8rem',
+                    borderRadius: '6px',
+                    fontSize: '0.8rem',
+                    marginBottom: '0.75rem'
+                  }}
+                >
+                  <strong>Database Error:</strong> {syncStatus.error}
+                  <div style={{ marginTop: '0.25rem' }}>
+                    Please run <code>migration_06.sql</code> in your Supabase SQL Editor to add the new columns and enable write policies.
+                  </div>
+                </div>
+              )}
+
               <p style={{ marginBottom: '0.75rem' }}>
-                The application schema is completely synchronized with <code>schema.sql</code> and updates 2 through 5.
+                All newly created and edited records (clients, events, quotes, menu items, stock, purchases, staff, shifts, invoices, payments, and users) sync directly with your Supabase tables when configured.
               </p>
 
               <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
                 <div style={{ fontWeight: 600, fontSize: '0.8rem', color: '#0f172a' }}>To connect remote Supabase:</div>
                 <ol style={{ paddingLeft: '1.25rem', marginTop: '0.35rem', fontSize: '0.75rem' }}>
-                  <li>Run <code>schema.sql</code> in your Supabase SQL editor</li>
-                  <li>Provide <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in <code>.env.local</code></li>
+                  <li>Run <code>schema.sql</code> followed by <code>migration_06.sql</code> in your Supabase SQL Editor</li>
+                  <li>Set <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your environment variables</li>
                 </ol>
               </div>
             </div>
