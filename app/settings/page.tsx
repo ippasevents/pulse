@@ -10,6 +10,8 @@ export default function SettingsPage() {
   const [syncStatus, setSyncStatus] = useState(store.getSyncStatus());
   const [form, setForm] = useState(state.settings);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [isPushingSql, setIsPushingSql] = useState(false);
+  const [pushFeedback, setPushFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
     const unsub = store.subscribe(() => {
@@ -37,6 +39,27 @@ export default function SettingsPage() {
       setForm(store.getState().settings);
     }
   };
+
+  const handlePushAllToSql = async () => {
+    setIsPushingSql(true);
+    setPushFeedback(null);
+    const res = await store.pushAllToSupabase();
+    setIsPushingSql(false);
+    if (res.success) {
+      setPushFeedback({
+        type: 'success',
+        message: '✓ All 18 SQL tables have been synchronized with your current app records!'
+      });
+      setTimeout(() => setPushFeedback(null), 5000);
+    } else {
+      setPushFeedback({
+        type: 'error',
+        message: res.error || 'Could not push records to SQL database.'
+      });
+    }
+  };
+
+  const isSqlActive = syncStatus.isConnected || isSupabaseConfigured;
 
   return (
     <div>
@@ -270,7 +293,7 @@ export default function SettingsPage() {
         <div>
           {/* Connection & Architecture Card */}
           <div className="card" style={{ marginBottom: '1.25rem' }}>
-            <h2 className="card-title">Database &amp; Supabase Integration</h2>
+            <h2 className="card-title">Database &amp; Supabase SQL Integration</h2>
             <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.6 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -280,31 +303,62 @@ export default function SettingsPage() {
                       width: '10px',
                       height: '10px',
                       borderRadius: '50%',
-                      background: syncStatus.error ? '#ef4444' : isSupabaseConfigured ? 'var(--success)' : '#f59e0b'
+                      background: syncStatus.error ? '#ef4444' : isSqlActive ? 'var(--success)' : '#f59e0b'
                     }}
                   />
                   <strong>
-                    {isSupabaseConfigured
-                      ? syncStatus.isSyncing
-                        ? 'Syncing with Supabase Database...'
+                    {isSqlActive
+                      ? syncStatus.isWriting
+                        ? `Updating SQL Database (${syncStatus.pendingCount} queued)...`
+                        : syncStatus.isSyncing
+                        ? 'Syncing with Supabase SQL Database...'
                         : syncStatus.error
-                        ? 'Supabase Schema / Policy Error'
-                        : 'Live Connected & Syncing with Supabase'
-                      : 'Active In-Memory & LocalStorage Mode'}
+                        ? 'Supabase SQL Schema / Policy Error'
+                        : 'Live Connected — Auto-Updating SQL on Every Change'
+                      : 'Active Local Mode (Connect Supabase Env Vars for SQL Sync)'}
                   </strong>
                 </div>
 
-                {isSupabaseConfigured && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    disabled={syncStatus.isSyncing}
-                    onClick={() => store.syncFromSupabase()}
-                  >
-                    {syncStatus.isSyncing ? 'Syncing...' : '↻ Sync Now'}
-                  </button>
+                {isSqlActive && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={syncStatus.isSyncing || isPushingSql}
+                      onClick={() => store.syncFromSupabase()}
+                    >
+                      {syncStatus.isSyncing ? 'Syncing...' : '↻ Pull from SQL'}
+                    </button>
+                    {isOwner && (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={isPushingSql || syncStatus.isWriting}
+                        onClick={handlePushAllToSql}
+                      >
+                        {isPushingSql ? 'Pushing to SQL...' : '⬆️ Push All Data to SQL'}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
+
+              {pushFeedback && (
+                <div
+                  style={{
+                    background: pushFeedback.type === 'success' ? '#dcfce7' : '#fee2e2',
+                    border: `1px solid ${pushFeedback.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
+                    color: pushFeedback.type === 'success' ? '#15803d' : '#991b1b',
+                    padding: '0.6rem 0.8rem',
+                    borderRadius: '6px',
+                    fontSize: '0.8rem',
+                    marginBottom: '0.75rem',
+                    fontWeight: 500
+                  }}
+                >
+                  {pushFeedback.message}
+                </div>
+              )}
 
               {syncStatus.error && (
                 <div
@@ -320,20 +374,20 @@ export default function SettingsPage() {
                 >
                   <strong>Database Error:</strong> {syncStatus.error}
                   <div style={{ marginTop: '0.25rem' }}>
-                    Please run <code>migration_06.sql</code> in your Supabase SQL Editor to add the new columns and enable write policies.
+                    Please run the updated <code>schema.sql</code> (or <code>migration_06.sql</code> + <code>migration_07.sql</code>) in your Supabase SQL Editor so all tables, cascade keys, and write policies are active.
                   </div>
                 </div>
               )}
 
               <p style={{ marginBottom: '0.75rem' }}>
-                All newly created and edited records (clients, events, quotes, menu items, stock, purchases, staff, shifts, invoices, payments, and users) sync directly with your Supabase tables when configured.
+                Every create, edit, stock adjustment, recipe change, quotation update, shift assignment, salary entry, invoice, payment, and deletion automatically writes to your PostgreSQL (Supabase) tables in strict foreign-key order with offline retry protection.
               </p>
 
               <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                <div style={{ fontWeight: 600, fontSize: '0.8rem', color: '#0f172a' }}>To connect Supabase &amp; Automatic Email on Vercel:</div>
+                <div style={{ fontWeight: 600, fontSize: '0.8rem', color: '#0f172a' }}>Supabase SQL &amp; Vercel Setup Checklist:</div>
                 <ol style={{ paddingLeft: '1.25rem', marginTop: '0.35rem', fontSize: '0.75rem' }}>
-                  <li>Run <code>schema.sql</code> followed by <code>migration_06.sql</code> and <code>migration_07.sql</code> in your Supabase SQL Editor (enables <code>activity_logs</code> &amp; direct DB change triggers)</li>
-                  <li>Set <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in Vercel Environment Variables</li>
+                  <li>Run <code>schema.sql</code> in your Supabase SQL Editor (idempotent — configures all 18 tables, RLS write policies, Realtime, and <code>activity_logs</code> triggers in one run)</li>
+                  <li>Set <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> (and optional <code>SUPABASE_SERVICE_ROLE_KEY</code>) in Environment Variables</li>
                   <li>Set <code>SMTP_HOST=smtp.gmail.com</code>, <code>SMTP_PORT=465</code>, <code>SMTP_USER=ippassales@gmail.com</code>, <code>SMTP_PASS</code>, and <code>INVOICE_NOTIFICATION_EMAIL=ippasevents@gmail.com</code> in Vercel Environment Variables for automatic background invoice delivery</li>
                 </ol>
               </div>

@@ -57,6 +57,12 @@ alter table staff_members
 alter table shifts alter column staff_id drop not null;
 alter table shifts add column if not exists staff_member_id uuid references staff_members on delete cascade;
 alter table shifts drop constraint if exists shifts_check;
+alter table shifts drop constraint if exists shifts_staff_id_fkey;
+alter table shifts add constraint shifts_staff_id_fkey
+  foreign key (staff_id) references profiles(id) on delete set null;
+alter table shifts drop constraint if exists shifts_staff_member_id_fkey;
+alter table shifts add constraint shifts_staff_member_id_fkey
+  foreign key (staff_member_id) references staff_members(id) on delete cascade;
 
 create table if not exists staff_salary_records (
   id uuid primary key default gen_random_uuid(),
@@ -87,7 +93,11 @@ alter table event_items
 
 update event_items set price_per_unit = price_per_guest where price_per_unit is null;
 
--- Allow deleting menu items or events cleanly without FK restrict errors
+-- Allow deleting clients, menu items, or events cleanly without FK restrict errors
+alter table events drop constraint if exists events_client_id_fkey;
+alter table events add constraint events_client_id_fkey
+  foreign key (client_id) references clients(id) on delete cascade;
+
 alter table event_items drop constraint if exists event_items_menu_item_id_fkey;
 alter table event_items add constraint event_items_menu_item_id_fkey
   foreign key (menu_item_id) references menu_items(id) on delete cascade;

@@ -551,12 +551,47 @@ interface AppState {
 
 const STORAGE_KEY = 'ippas_catering_manager_state';
 const SESSION_KEY = 'ippas_catering_auth_session';
+const PENDING_SQL_OPS_KEY = 'ippas_catering_pending_sql_ops';
+
+type SqlOperation =
+  | {
+      type: 'upsert';
+      table: string;
+      values: Record<string, any> | Record<string, any>[];
+      onConflict?: string;
+    }
+  | {
+      type: 'insert';
+      table: string;
+      values: Record<string, any> | Record<string, any>[];
+    }
+  | {
+      type: 'update';
+      table: string;
+      values: Record<string, any>;
+      match: Record<string, any>;
+    }
+  | {
+      type: 'delete';
+      table: string;
+      match: Record<string, any>;
+    };
+
+interface PendingSqlBatch {
+  id: string;
+  label: string;
+  operations: SqlOperation[];
+}
 
 class DataStore {
   private state: AppState;
   private listeners: Set<() => void> = new Set();
   private syncError: string | null = null;
   private isSyncingState: boolean = false;
+  private isWritingState: boolean = false;
+  private serverDbConfigured: boolean = false;
+  private pendingSqlBatches: PendingSqlBatch[] = [];
+  private writeChain: Promise<void> = Promise.resolve();
   private realtimeSyncTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSilentSyncAt: number = 0;
   private recentLocalMutations: Map<string, number> = new Map();
@@ -564,6 +599,8 @@ class DataStore {
   constructor() {
     this.state = this.loadInitial();
     if (typeof window !== 'undefined') {
+      this.loadPendingSqlBatches();
+
       // Cross-tab instant localStorage sync
       window.addEventListener('storage', (e) => {
         if (e.key === STORAGE_KEY && e.newValue) {
@@ -581,10 +618,17 @@ class DataStore {
         }
       });
 
-      // Auto-refresh when returning to window/tab
+      // Automatically flush any queued SQL updates as soon as network comes back online
+      window.addEventListener('online', () => {
+        if (this.isSqlConnected()) {
+          this.flushPendingSqlWrites().then(() => this.scheduleSilentSync(200));
+        }
+      });
+
+      // Auto-refresh & flush pending SQL writes when returning to window/tab
       window.addEventListener('focus', () => {
-        if (isSupabaseConfigured && supabase) {
-          this.scheduleSilentSync(150);
+        if (this.isSqlConnected()) {
+          this.flushPendingSqlWrites().then(() => this.scheduleSilentSync(150));
         } else {
           this.notify();
         }
@@ -592,19 +636,726 @@ class DataStore {
 
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-          if (isSupabaseConfigured && supabase) {
-            this.scheduleSilentSync(150);
+          if (this.isSqlConnected()) {
+            this.flushPendingSqlWrites().then(() => this.scheduleSilentSync(150));
           } else {
             this.notify();
           }
         }
       });
 
-      if (isSupabaseConfigured && supabase) {
-        this.syncFromSupabase();
-        this.setupRealtimeSubscription();
+      this.initializeSqlSync();
+    }
+  }
+
+  public isSqlConnected(): boolean {
+    return Boolean(isSupabaseConfigured || this.serverDbConfigured);
+  }
+
+  private async initializeSqlSync() {
+    if (isSupabaseConfigured && supabase) {
+      await this.flushPendingSqlWrites();
+      await this.syncFromSupabase();
+      this.setupRealtimeSubscription();
+      return;
+    }
+
+    // Check if Supabase credentials are configured on the server (/api/db)
+    try {
+      const res = await fetch('/api/db?mode=status');
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.configured) {
+          this.serverDbConfigured = true;
+          await this.flushPendingSqlWrites();
+          await this.syncFromSupabase();
+        }
+      }
+    } catch {
+      // Offline or server unavailable; local queue remains intact
+    }
+  }
+
+  private loadPendingSqlBatches() {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(PENDING_SQL_OPS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          this.pendingSqlBatches = parsed;
+        }
+      }
+    } catch {
+      this.pendingSqlBatches = [];
+    }
+  }
+
+  private savePendingSqlBatches() {
+    if (typeof window === 'undefined') return;
+    try {
+      if (this.pendingSqlBatches.length === 0) {
+        localStorage.removeItem(PENDING_SQL_OPS_KEY);
+      } else {
+        localStorage.setItem(PENDING_SQL_OPS_KEY, JSON.stringify(this.pendingSqlBatches));
+      }
+    } catch {
+      // ignore storage quota errors
+    }
+  }
+
+  private extractMissingColumn(errMsg: string): string | null {
+    const m1 = errMsg.match(/Could not find the '([^']+)' column/i);
+    if (m1?.[1]) return m1[1];
+    const m2 = errMsg.match(/column "([^"]+)" of relation/i);
+    if (m2?.[1]) return m2[1];
+    return null;
+  }
+
+  private stripColFromValues(
+    values: Record<string, any> | Record<string, any>[],
+    col: string
+  ): Record<string, any> | Record<string, any>[] {
+    if (Array.isArray(values)) {
+      return values.map((r) => {
+        const copy = { ...r };
+        delete copy[col];
+        return copy;
+      });
+    }
+    const copy = { ...values };
+    delete copy[col];
+    return copy;
+  }
+
+  private async runClientSingleOperation(op: SqlOperation): Promise<{ error: any | null }> {
+    if (!supabase) return { error: { message: 'Client Supabase not initialized' } };
+
+    if (op.type === 'delete') {
+      let q = supabase.from(op.table).delete();
+      for (const [k, v] of Object.entries(op.match || {})) {
+        q = q.eq(k, v);
+      }
+      const { error } = await q;
+      return { error };
+    }
+
+    if (op.type === 'update') {
+      const currentValues = { ...op.values };
+      for (let attempt = 0; attempt < 5; attempt++) {
+        let q = supabase.from(op.table).update(currentValues);
+        for (const [k, v] of Object.entries(op.match || {})) {
+          q = q.eq(k, v);
+        }
+        const { error } = await q;
+        if (!error) return { error: null };
+
+        const missingCol = this.extractMissingColumn(String(error.message || ''));
+        if (missingCol && missingCol in currentValues) {
+          delete currentValues[missingCol];
+          if (Object.keys(currentValues).length === 0) return { error: null };
+          continue;
+        }
+        return { error };
+      }
+      return { error: null };
+    }
+
+    let currentValues = Array.isArray(op.values)
+      ? op.values.map((r) => ({ ...r }))
+      : { ...op.values };
+
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const q =
+        op.type === 'upsert'
+          ? supabase.from(op.table).upsert(currentValues, {
+              onConflict: op.onConflict || 'id'
+            })
+          : supabase.from(op.table).insert(currentValues);
+
+      const { error } = await q;
+      if (!error) return { error: null };
+
+      const msg = String(error.message || '');
+      const missingCol = this.extractMissingColumn(msg);
+      if (missingCol) {
+        currentValues = this.stripColFromValues(currentValues, missingCol);
+        continue;
+      }
+
+      if (
+        op.table === 'ingredients' &&
+        !Array.isArray(currentValues) &&
+        currentValues.name &&
+        (msg.includes('ingredients_name_key') || error.code === '23505')
+      ) {
+        const upd = { ...currentValues };
+        delete upd.id;
+        const { error: nameErr } = await supabase
+          .from('ingredients')
+          .update(upd)
+          .eq('name', currentValues.name);
+        if (!nameErr) return { error: null };
+      }
+
+      if (
+        op.table === 'profiles' &&
+        !Array.isArray(currentValues) &&
+        currentValues.username &&
+        (msg.includes('profiles_username_key') || error.code === '23505')
+      ) {
+        const upd = { ...currentValues };
+        delete upd.id;
+        const { error: userErr } = await supabase
+          .from('profiles')
+          .update(upd)
+          .eq('username', currentValues.username);
+        if (!userErr) return { error: null };
+      }
+
+      if (
+        op.table === 'invoices' &&
+        !Array.isArray(currentValues) &&
+        currentValues.invoice_number &&
+        (msg.includes('invoices_invoice_number_key') || error.code === '23505')
+      ) {
+        const suffix = String(Date.now()).slice(-4);
+        currentValues = {
+          ...currentValues,
+          invoice_number: `${currentValues.invoice_number}-${suffix}`
+        };
+        continue;
+      }
+
+      return { error };
+    }
+
+    return { error: null };
+  }
+
+  private async sendBatchViaServerApi(operations: SqlOperation[]): Promise<{
+    configured: boolean;
+    success: boolean;
+    error?: string;
+    networkFailed?: boolean;
+  }> {
+    try {
+      const res = await fetch('/api/db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operations })
+      });
+      const data = await res.json();
+      if (data?.configured) {
+        this.serverDbConfigured = true;
+      }
+      return {
+        configured: Boolean(data?.configured),
+        success: Boolean(data?.success),
+        error: data?.error
+      };
+    } catch (err: any) {
+      return {
+        configured: this.serverDbConfigured,
+        success: false,
+        networkFailed: true,
+        error: err?.message || 'Network error while updating SQL database'
+      };
+    }
+  }
+
+  private isTransientNetworkError(err: any): boolean {
+    const msg = String(err?.message || err || '').toLowerCase();
+    return (
+      msg.includes('failed to fetch') ||
+      msg.includes('network') ||
+      msg.includes('load failed') ||
+      msg.includes('timeout')
+    );
+  }
+
+  public flushPendingSqlWrites(): Promise<void> {
+    this.writeChain = this.writeChain.then(async () => {
+      if (this.pendingSqlBatches.length === 0) return;
+      if (!isSupabaseConfigured && !this.serverDbConfigured) {
+        // Double-check server API once if batches were queued before status check resolved
+        try {
+          const st = await fetch('/api/db?mode=status').then((r) => r.json());
+          if (st?.configured) {
+            this.serverDbConfigured = true;
+          } else {
+            // No SQL database configured at all; clear queue silently
+            this.pendingSqlBatches = [];
+            this.savePendingSqlBatches();
+            return;
+          }
+        } catch {
+          return;
+        }
+      }
+
+      this.isWritingState = true;
+
+      while (this.pendingSqlBatches.length > 0) {
+        const batch = this.pendingSqlBatches[0];
+        let succeeded = false;
+        let lastError: any = null;
+        let transientFailure = false;
+
+        if (isSupabaseConfigured && supabase) {
+          let clientFailed = false;
+          for (const op of batch.operations) {
+            const { error } = await this.runClientSingleOperation(op);
+            if (error) {
+              clientFailed = true;
+              lastError = error;
+              if (this.isTransientNetworkError(error)) {
+                transientFailure = true;
+              }
+              break;
+            }
+          }
+
+          if (!clientFailed) {
+            succeeded = true;
+          } else if (!transientFailure) {
+            // Fallback to server API (e.g. if SUPABASE_SERVICE_ROLE_KEY is configured server-side)
+            const serverRes = await this.sendBatchViaServerApi(batch.operations);
+            if (serverRes.success) {
+              succeeded = true;
+            } else if (serverRes.networkFailed) {
+              transientFailure = true;
+            } else if (serverRes.error) {
+              lastError = { message: serverRes.error };
+            }
+          }
+        } else {
+          const serverRes = await this.sendBatchViaServerApi(batch.operations);
+          if (serverRes.success) {
+            succeeded = true;
+          } else if (serverRes.networkFailed) {
+            transientFailure = true;
+            lastError = { message: serverRes.error };
+          } else if (!serverRes.configured) {
+            this.pendingSqlBatches = [];
+            this.savePendingSqlBatches();
+            break;
+          } else {
+            lastError = { message: serverRes.error };
+          }
+        }
+
+        if (succeeded) {
+          this.pendingSqlBatches.shift();
+          this.savePendingSqlBatches();
+          this.clearDbError();
+        } else if (transientFailure) {
+          // Keep in persistent queue to auto-retry when network recovers
+          break;
+        } else {
+          // Schema / constraint error: report clearly and drop offending batch so subsequent changes aren't blocked
+          this.pendingSqlBatches.shift();
+          this.savePendingSqlBatches();
+          this.reportDbError(batch.label, lastError);
+        }
+      }
+
+      this.isWritingState = false;
+    });
+
+    return this.writeChain;
+  }
+
+  private enqueueSqlOperations(label: string, operations: SqlOperation[]) {
+    if (!operations || operations.length === 0) return;
+    this.pendingSqlBatches.push({
+      id: generateUUID(),
+      label,
+      operations
+    });
+    this.savePendingSqlBatches();
+    this.flushPendingSqlWrites();
+  }
+
+  // Row Serializers & Automatic Parent-FK Guarantees so edits NEVER fail due to missing parent rows
+  private toClientSqlRow(c: Client) {
+    return {
+      id: c.id,
+      name: c.name,
+      email: c.email || null,
+      phone: c.phone || null,
+      company: c.company || null,
+      notes: c.notes || null,
+      created_at: c.created_at || new Date().toISOString()
+    };
+  }
+
+  private toEventSqlRow(e: EventRecord) {
+    return {
+      id: e.id,
+      client_id: e.client_id,
+      title: e.title,
+      event_date: e.event_date,
+      start_time: e.start_time || null,
+      end_time: e.end_time || null,
+      venue: e.venue || null,
+      guest_count: Math.max(1, Math.round(Number(e.guest_count) || 1)),
+      status: e.status,
+      notes: e.notes || null,
+      created_at: e.created_at || new Date().toISOString()
+    };
+  }
+
+  private toIngredientSqlRow(i: Ingredient) {
+    return {
+      id: i.id,
+      name: i.name,
+      unit: i.unit || 'kg',
+      cost_per_unit: Number(i.cost_per_unit || 0),
+      stock_qty: Number(i.stock_qty || 0),
+      low_stock_level: Number(i.low_stock_level || 0)
+    };
+  }
+
+  private toMenuItemSqlRow(m: MenuItem) {
+    const unitPrice = Number(m.price_per_unit ?? m.price_per_guest ?? 0);
+    return {
+      id: m.id,
+      name: m.name,
+      description: m.description || null,
+      category: m.category || 'Main',
+      pricing_type: m.pricing_type || 'per_guest',
+      price_per_unit: unitPrice,
+      price_per_guest: unitPrice,
+      active: m.active !== false
+    };
+  }
+
+  private toStaffSqlRow(s: StaffMember) {
+    return {
+      id: s.id,
+      name: s.name,
+      phone: s.phone || null,
+      password: s.password || 'password123',
+      role_title: s.role_title || null,
+      hourly_rate: Number(s.hourly_rate || 0),
+      active: s.active !== false
+    };
+  }
+
+  private toInvoiceSqlRow(inv: Invoice) {
+    return {
+      id: inv.id,
+      event_id: inv.event_id,
+      invoice_number: inv.invoice_number,
+      kind: inv.kind,
+      subtotal: Number(inv.subtotal ?? inv.amount ?? 0),
+      discount: Number(inv.discount || 0),
+      amount: Number(inv.amount || 0),
+      due_date: inv.due_date || null,
+      status: inv.status,
+      notes: inv.notes || null,
+      created_at: inv.created_at || new Date().toISOString()
+    };
+  }
+
+  private toStockPurchaseSqlRow(sp: StockPurchase) {
+    return {
+      id: sp.id,
+      purchase_date: sp.purchase_date,
+      vendor_name: sp.vendor_name,
+      vendor_location: sp.vendor_location || null,
+      vendor_phone: sp.vendor_phone || null,
+      bill_number: sp.bill_number || null,
+      total_amount: Number(sp.total_amount || 0),
+      paid_amount: Number(sp.paid_amount || 0),
+      balance_amount: Number(sp.balance_amount || 0),
+      payment_status: sp.payment_status,
+      payment_method: sp.payment_method || 'Cash',
+      notes: sp.notes || null,
+      created_at: sp.created_at || new Date().toISOString()
+    };
+  }
+
+  private ensureClientParentOps(clientId?: string): SqlOperation[] {
+    if (!clientId || !isValidUUID(clientId)) return [];
+    const client = this.state.clients.find((c) => c.id === clientId);
+    if (!client) return [];
+    return [{ type: 'upsert', table: 'clients', values: this.toClientSqlRow(client), onConflict: 'id' }];
+  }
+
+  private ensureEventParentOps(eventId?: string): SqlOperation[] {
+    if (!eventId || !isValidUUID(eventId)) return [];
+    const evt = this.state.events.find((e) => e.id === eventId);
+    if (!evt || !isValidUUID(evt.client_id)) return [];
+    return [
+      ...this.ensureClientParentOps(evt.client_id),
+      { type: 'upsert', table: 'events', values: this.toEventSqlRow(evt), onConflict: 'id' }
+    ];
+  }
+
+  private ensureMenuItemParentOps(menuItemId?: string): SqlOperation[] {
+    if (!menuItemId || !isValidUUID(menuItemId)) return [];
+    const mi = this.state.menuItems.find((m) => m.id === menuItemId);
+    if (!mi) return [];
+    return [{ type: 'upsert', table: 'menu_items', values: this.toMenuItemSqlRow(mi), onConflict: 'id' }];
+  }
+
+  private ensureIngredientParentOps(ingredientId?: string): SqlOperation[] {
+    if (!ingredientId || !isValidUUID(ingredientId)) return [];
+    const ing = this.state.ingredients.find((i) => i.id === ingredientId);
+    if (!ing) return [];
+    return [{ type: 'upsert', table: 'ingredients', values: this.toIngredientSqlRow(ing), onConflict: 'id' }];
+  }
+
+  private ensureStaffParentOps(staffId?: string): SqlOperation[] {
+    if (!staffId || !isValidUUID(staffId)) return [];
+    const st = this.state.staff.find((s) => s.id === staffId);
+    if (!st) return [];
+    return [{ type: 'upsert', table: 'staff_members', values: this.toStaffSqlRow(st), onConflict: 'id' }];
+  }
+
+  private ensureInvoiceParentOps(invoiceId?: string): SqlOperation[] {
+    if (!invoiceId || !isValidUUID(invoiceId)) return [];
+    const inv = this.state.invoices.find((i) => i.id === invoiceId);
+    if (!inv || !isValidUUID(inv.event_id)) return [];
+    return [
+      ...this.ensureEventParentOps(inv.event_id),
+      { type: 'upsert', table: 'invoices', values: this.toInvoiceSqlRow(inv), onConflict: 'id' }
+    ];
+  }
+
+  private ensurePurchaseParentOps(purchaseId?: string): SqlOperation[] {
+    if (!purchaseId || !isValidUUID(purchaseId)) return [];
+    const sp = (this.state.stockPurchases || []).find((p) => p.id === purchaseId);
+    if (!sp) return [];
+    return [{ type: 'upsert', table: 'stock_purchases', values: this.toStockPurchaseSqlRow(sp), onConflict: 'id' }];
+  }
+
+  // Push complete current application state to SQL database in strict Foreign-Key dependency order
+  public async pushAllToSupabase(): Promise<{ success: boolean; error?: string }> {
+    if (!this.isSqlConnected()) {
+      return { success: false, error: 'Supabase SQL database is not configured yet.' };
+    }
+
+    const s = this.state.settings;
+    const ops: SqlOperation[] = [
+      {
+        type: 'upsert',
+        table: 'business_settings',
+        values: {
+          id: 1,
+          name: s.name,
+          address: s.address || null,
+          phone: s.phone || null,
+          email: s.email || null,
+          bank_name: s.bank_name || null,
+          account_name: s.account_name || null,
+          account_number: s.account_number || null,
+          ifsc_code: s.ifsc_code || null,
+          upi_id: s.upi_id || null,
+          payment_terms: s.payment_terms || null,
+          auto_email_invoices: s.auto_email_invoices !== false,
+          invoice_notification_email: s.invoice_notification_email || 'ippasevents@gmail.com'
+        },
+        onConflict: 'id'
+      }
+    ];
+
+    for (const p of this.state.profiles.filter((x) => isValidUUID(x.id))) {
+      ops.push({
+        type: 'upsert',
+        table: 'profiles',
+        values: {
+          id: p.id,
+          username: p.username,
+          password: p.password || null,
+          full_name: p.full_name,
+          phone: p.phone || null,
+          role: p.role
+        },
+        onConflict: 'id'
+      });
+    }
+
+    for (const c of this.state.clients.filter((x) => isValidUUID(x.id))) {
+      ops.push({ type: 'upsert', table: 'clients', values: this.toClientSqlRow(c), onConflict: 'id' });
+    }
+
+    for (const i of this.state.ingredients.filter((x) => isValidUUID(x.id))) {
+      ops.push({ type: 'upsert', table: 'ingredients', values: this.toIngredientSqlRow(i), onConflict: 'id' });
+    }
+
+    for (const m of this.state.menuItems.filter((x) => isValidUUID(x.id))) {
+      ops.push({ type: 'upsert', table: 'menu_items', values: this.toMenuItemSqlRow(m), onConflict: 'id' });
+    }
+
+    const validRecipes = this.state.recipes.filter(
+      (r) => isValidUUID(r.menu_item_id) && isValidUUID(r.ingredient_id)
+    );
+    if (validRecipes.length > 0) {
+      ops.push({
+        type: 'upsert',
+        table: 'menu_item_ingredients',
+        values: validRecipes.map((r) => ({
+          menu_item_id: r.menu_item_id,
+          ingredient_id: r.ingredient_id,
+          qty_per_guest: r.qty_per_guest
+        })),
+        onConflict: 'menu_item_id,ingredient_id'
+      });
+    }
+
+    for (const st of this.state.staff.filter((x) => isValidUUID(x.id))) {
+      ops.push({ type: 'upsert', table: 'staff_members', values: this.toStaffSqlRow(st), onConflict: 'id' });
+    }
+
+    for (const e of this.state.events.filter((x) => isValidUUID(x.id) && isValidUUID(x.client_id))) {
+      ops.push({ type: 'upsert', table: 'events', values: this.toEventSqlRow(e), onConflict: 'id' });
+    }
+
+    for (const ei of this.state.eventItems.filter(
+      (x) => isValidUUID(x.id) && isValidUUID(x.event_id) && isValidUUID(x.menu_item_id)
+    )) {
+      ops.push({
+        type: 'upsert',
+        table: 'event_items',
+        values: {
+          id: ei.id,
+          event_id: ei.event_id,
+          menu_item_id: ei.menu_item_id,
+          pricing_type: ei.pricing_type || 'per_guest',
+          price_per_unit: ei.price_per_unit,
+          price_per_guest: ei.price_per_guest,
+          quantity: ei.quantity ?? null
+        },
+        onConflict: 'event_id,menu_item_id'
+      });
+    }
+
+    for (const ex of this.state.eventExtras.filter((x) => isValidUUID(x.id) && isValidUUID(x.event_id))) {
+      ops.push({
+        type: 'upsert',
+        table: 'event_extras',
+        values: {
+          id: ex.id,
+          event_id: ex.event_id,
+          description: ex.description,
+          amount: ex.amount
+        },
+        onConflict: 'id'
+      });
+    }
+
+    for (const sh of this.state.shifts.filter(
+      (x) => isValidUUID(x.id) && isValidUUID(x.event_id) && isValidUUID(x.staff_member_id)
+    )) {
+      ops.push({
+        type: 'upsert',
+        table: 'shifts',
+        values: {
+          id: sh.id,
+          event_id: sh.event_id,
+          staff_member_id: sh.staff_member_id,
+          role_label: sh.role_label || null,
+          starts_at: sh.starts_at,
+          ends_at: sh.ends_at
+        },
+        onConflict: 'id'
+      });
+    }
+
+    for (const sr of (this.state.staffSalaryRecords || []).filter(
+      (x) => isValidUUID(x.id) && isValidUUID(x.staff_member_id)
+    )) {
+      ops.push({
+        type: 'upsert',
+        table: 'staff_salary_records',
+        values: {
+          id: sr.id,
+          staff_member_id: sr.staff_member_id,
+          event_id: isValidUUID(sr.event_id) ? sr.event_id : null,
+          record_type: sr.record_type,
+          amount: sr.amount,
+          method: sr.method,
+          note: sr.note || null,
+          recorded_at: sr.recorded_at
+        },
+        onConflict: 'id'
+      });
+    }
+
+    for (const inv of this.state.invoices.filter((x) => isValidUUID(x.id) && isValidUUID(x.event_id))) {
+      ops.push({ type: 'upsert', table: 'invoices', values: this.toInvoiceSqlRow(inv), onConflict: 'id' });
+    }
+
+    for (const pay of this.state.payments.filter((x) => isValidUUID(x.id) && isValidUUID(x.invoice_id))) {
+      ops.push({
+        type: 'upsert',
+        table: 'payments',
+        values: {
+          id: pay.id,
+          invoice_id: pay.invoice_id,
+          amount: pay.amount,
+          method: pay.method,
+          note: pay.note || null,
+          paid_at: pay.paid_at
+        },
+        onConflict: 'id'
+      });
+    }
+
+    for (const sp of (this.state.stockPurchases || []).filter((x) => isValidUUID(x.id))) {
+      ops.push({
+        type: 'upsert',
+        table: 'stock_purchases',
+        values: this.toStockPurchaseSqlRow(sp),
+        onConflict: 'id'
+      });
+
+      for (const spi of (sp.items || []).filter((it) => isValidUUID(it.id))) {
+        ops.push({
+          type: 'upsert',
+          table: 'stock_purchase_items',
+          values: {
+            id: spi.id,
+            purchase_id: sp.id,
+            ingredient_id: isValidUUID(spi.ingredient_id) ? spi.ingredient_id : null,
+            item_name: spi.item_name,
+            quantity: spi.quantity,
+            unit: spi.unit,
+            unit_price: spi.unit_price,
+            total_price: spi.total_price
+          },
+          onConflict: 'id'
+        });
       }
     }
+
+    for (const spp of (this.state.stockPurchasePayments || []).filter(
+      (x) => isValidUUID(x.id) && isValidUUID(x.purchase_id)
+    )) {
+      ops.push({
+        type: 'upsert',
+        table: 'stock_purchase_payments',
+        values: {
+          id: spp.id,
+          purchase_id: spp.purchase_id,
+          amount: spp.amount,
+          paid_at: spp.paid_at,
+          method: spp.method,
+          note: spp.note || null
+        },
+        onConflict: 'id'
+      });
+    }
+
+    this.enqueueSqlOperations('Full SQL Database Push', ops);
+    await this.flushPendingSqlWrites();
+    if (this.syncError) {
+      return { success: false, error: this.syncError };
+    }
+    return { success: true };
   }
 
   private setupRealtimeSubscription() {
@@ -725,10 +1476,11 @@ class DataStore {
       this.state.auditLogs = this.deduplicateAuditLogs([dbAlert, ...(this.state.auditLogs || [])]);
       this.save();
 
-      if (isSupabaseConfigured && supabase) {
-        supabase
-          .from('activity_logs')
-          .insert({
+      this.enqueueSqlOperations('Log Database Activity', [
+        {
+          type: 'upsert',
+          table: 'activity_logs',
+          values: {
             id: dbAlert.id,
             entity_type: dbAlert.entity_type,
             entity_id: dbAlert.entity_id,
@@ -742,9 +1494,10 @@ class DataStore {
             source: dbAlert.source,
             is_read_by_owner: false,
             created_at: dbAlert.created_at
-          })
-          .then(() => {});
-      }
+          },
+          onConflict: 'id'
+        }
+      ]);
     }, 1400);
   }
 
@@ -817,10 +1570,11 @@ class DataStore {
 
     this.state.auditLogs = this.deduplicateAuditLogs([entry, ...(this.state.auditLogs || [])]);
 
-    if (isSupabaseConfigured && supabase) {
-      supabase
-        .from('activity_logs')
-        .insert({
+    this.enqueueSqlOperations('Record Audit Log', [
+      {
+        type: 'upsert',
+        table: 'activity_logs',
+        values: {
           id: entry.id,
           entity_type: entry.entity_type,
           entity_id: entry.entity_id,
@@ -835,9 +1589,10 @@ class DataStore {
           source: 'app',
           is_read_by_owner: entry.is_read_by_owner,
           created_at: entry.created_at
-        })
-        .then(() => {});
-    }
+        },
+        onConflict: 'id'
+      }
+    ]);
 
     return entry;
   }
@@ -884,12 +1639,15 @@ class DataStore {
     );
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(logId)) {
-      supabase
-        .from('activity_logs')
-        .update({ is_read_by_owner: true })
-        .eq('id', logId)
-        .then(() => {});
+    if (isValidUUID(logId)) {
+      this.enqueueSqlOperations('Mark Audit Log Read', [
+        {
+          type: 'update',
+          table: 'activity_logs',
+          values: { is_read_by_owner: true },
+          match: { id: logId }
+        }
+      ]);
     }
   }
 
@@ -906,17 +1664,18 @@ class DataStore {
     }));
     this.save();
 
-    if (isSupabaseConfigured && supabase) {
-      supabase
-        .from('activity_logs')
-        .update({ is_read_by_owner: true })
-        .eq('is_read_by_owner', false)
-        .then(() => {});
-    }
+    this.enqueueSqlOperations('Mark All Audit Logs Read', [
+      {
+        type: 'update',
+        table: 'activity_logs',
+        values: { is_read_by_owner: true },
+        match: { is_read_by_owner: false }
+      }
+    ]);
   }
 
   private scheduleSilentSync(delayMs: number = 250) {
-    if (!isSupabaseConfigured || !supabase) return;
+    if (!this.isSqlConnected()) return;
     if (this.realtimeSyncTimer) {
       clearTimeout(this.realtimeSyncTimer);
     }
@@ -928,7 +1687,7 @@ class DataStore {
   public refreshOnNavigation() {
     // Emit fresh state reference immediately for instant UI responsiveness across pages
     this.notify();
-    if (isSupabaseConfigured && supabase) {
+    if (this.isSqlConnected()) {
       const now = Date.now();
       if (now - this.lastSilentSyncAt > 1200) {
         this.lastSilentSyncAt = now;
@@ -937,8 +1696,20 @@ class DataStore {
     }
   }
 
-  public getSyncStatus(): { isSyncing: boolean; error: string | null } {
-    return { isSyncing: this.isSyncingState, error: this.syncError };
+  public getSyncStatus(): {
+    isSyncing: boolean;
+    isWriting: boolean;
+    pendingCount: number;
+    isConnected: boolean;
+    error: string | null;
+  } {
+    return {
+      isSyncing: this.isSyncingState,
+      isWriting: this.isWritingState,
+      pendingCount: this.pendingSqlBatches.length,
+      isConnected: this.isSqlConnected(),
+      error: this.syncError
+    };
   }
 
   private reportDbError(context: string, err: any) {
@@ -999,54 +1770,106 @@ class DataStore {
   }
 
   public async syncFromSupabase(silent: boolean = false): Promise<void> {
-    if (!isSupabaseConfigured || !supabase) return;
+    if (!this.isSqlConnected()) return;
     if (!silent) {
       this.isSyncingState = true;
       this.notify();
     }
 
     try {
-      const [
-        settingsRes,
-        profilesRes,
-        clientsRes,
-        ingredientsRes,
-        menuItemsRes,
-        recipesRes,
-        eventsRes,
-        eventItemsRes,
-        eventExtrasRes,
-        staffRes,
-        shiftsRes,
-        salaryRecordsRes,
-        invoicesRes,
-        paymentsRes,
-        purchasesRes,
-        purchaseItemsRes,
-        purchasePaymentsRes,
-        activityLogsRes
-      ] = await Promise.all([
-        supabase.from('business_settings').select('*').eq('id', 1).maybeSingle(),
-        supabase.from('profiles').select('*'),
-        supabase.from('clients').select('*').order('created_at', { ascending: false }),
-        supabase.from('ingredients').select('*').order('name', { ascending: true }),
-        supabase.from('menu_items').select('*').order('name', { ascending: true }),
-        supabase.from('menu_item_ingredients').select('*'),
-        supabase.from('events').select('*').order('event_date', { ascending: true }),
-        supabase.from('event_items').select('*'),
-        supabase.from('event_extras').select('*'),
-        supabase.from('staff_members').select('*').order('name', { ascending: true }),
-        supabase.from('shifts').select('*'),
-        supabase.from('staff_salary_records').select('*').order('recorded_at', { ascending: false }),
-        supabase.from('invoices').select('*').order('created_at', { ascending: false }),
-        supabase.from('payments').select('*').order('paid_at', { ascending: false }),
-        supabase.from('stock_purchases').select('*').order('created_at', { ascending: false }),
-        supabase.from('stock_purchase_items').select('*'),
-        supabase.from('stock_purchase_payments').select('*').order('paid_at', { ascending: false }),
-        supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(400)
-      ]);
+      // CRITICAL: Always flush any pending or in-flight SQL writes first so we never overwrite new changes with stale DB rows
+      await this.flushPendingSqlWrites();
 
-      // Surface schema/RLS errors clearly so user knows if migration_06.sql hasn't been run
+      let settingsRes: any;
+      let profilesRes: any;
+      let clientsRes: any;
+      let ingredientsRes: any;
+      let menuItemsRes: any;
+      let recipesRes: any;
+      let eventsRes: any;
+      let eventItemsRes: any;
+      let eventExtrasRes: any;
+      let staffRes: any;
+      let shiftsRes: any;
+      let salaryRecordsRes: any;
+      let invoicesRes: any;
+      let paymentsRes: any;
+      let purchasesRes: any;
+      let purchaseItemsRes: any;
+      let purchasePaymentsRes: any;
+      let activityLogsRes: any;
+
+      if (isSupabaseConfigured && supabase) {
+        [
+          settingsRes,
+          profilesRes,
+          clientsRes,
+          ingredientsRes,
+          menuItemsRes,
+          recipesRes,
+          eventsRes,
+          eventItemsRes,
+          eventExtrasRes,
+          staffRes,
+          shiftsRes,
+          salaryRecordsRes,
+          invoicesRes,
+          paymentsRes,
+          purchasesRes,
+          purchaseItemsRes,
+          purchasePaymentsRes,
+          activityLogsRes
+        ] = await Promise.all([
+          supabase.from('business_settings').select('*').eq('id', 1).maybeSingle(),
+          supabase.from('profiles').select('*'),
+          supabase.from('clients').select('*').order('created_at', { ascending: false }),
+          supabase.from('ingredients').select('*').order('name', { ascending: true }),
+          supabase.from('menu_items').select('*').order('name', { ascending: true }),
+          supabase.from('menu_item_ingredients').select('*'),
+          supabase.from('events').select('*').order('event_date', { ascending: true }),
+          supabase.from('event_items').select('*'),
+          supabase.from('event_extras').select('*'),
+          supabase.from('staff_members').select('*').order('name', { ascending: true }),
+          supabase.from('shifts').select('*'),
+          supabase.from('staff_salary_records').select('*').order('recorded_at', { ascending: false }),
+          supabase.from('invoices').select('*').order('created_at', { ascending: false }),
+          supabase.from('payments').select('*').order('paid_at', { ascending: false }),
+          supabase.from('stock_purchases').select('*').order('created_at', { ascending: false }),
+          supabase.from('stock_purchase_items').select('*'),
+          supabase.from('stock_purchase_payments').select('*').order('paid_at', { ascending: false }),
+          supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(400)
+        ]);
+      } else {
+        const apiRes = await fetch('/api/db');
+        const apiJson = await apiRes.json();
+        if (!apiJson?.configured || !apiJson?.results) {
+          this.isSyncingState = false;
+          this.notify();
+          return;
+        }
+        ({
+          settingsRes,
+          profilesRes,
+          clientsRes,
+          ingredientsRes,
+          menuItemsRes,
+          recipesRes,
+          eventsRes,
+          eventItemsRes,
+          eventExtrasRes,
+          staffRes,
+          shiftsRes,
+          salaryRecordsRes,
+          invoicesRes,
+          paymentsRes,
+          purchasesRes,
+          purchaseItemsRes,
+          purchasePaymentsRes,
+          activityLogsRes
+        } = apiJson.results);
+      }
+
+      // Surface schema/RLS errors clearly so user knows if schema.sql / migration_06.sql needs to be run
       const firstCriticalErr =
         clientsRes.error ||
         eventsRes.error ||
@@ -1055,43 +1878,83 @@ class DataStore {
         invoicesRes.error;
 
       if (firstCriticalErr) {
-        this.reportDbError('Database Read Error (Run migration_06.sql in Supabase)', firstCriticalErr);
+        this.reportDbError('Database Read Error (Run schema.sql in Supabase)', firstCriticalErr);
         this.isSyncingState = false;
         this.notify();
         return;
       }
 
       if (purchasesRes.error) {
-        this.reportDbError('Stock Purchases Table Missing (Run migration_06.sql in Supabase)', purchasesRes.error);
+        this.reportDbError('Stock Purchases Table Missing (Run schema.sql in Supabase)', purchasesRes.error);
       } else {
         this.clearDbError();
       }
 
-      // Seed default profiles & settings into Supabase if profiles table has no login accounts yet
+      // Seed default profiles & settings into SQL if profiles table has no login accounts yet
       let rawProfiles = profilesRes.data || [];
       const usableProfiles = rawProfiles.filter(
         (p: any) => p.role === 'owner' || p.role === 'manager' || p.role === 'accountant'
       );
 
       if (!profilesRes.error && usableProfiles.length === 0) {
-        const seedRes = await supabase.from('profiles').upsert(
-          INITIAL_PROFILES.map((p) => ({
-            id: p.id,
-            username: p.username,
-            password: p.password,
-            full_name: p.full_name,
-            role: p.role,
-            phone: p.phone || null
-          })),
-          { onConflict: 'id' }
-        );
-        if (!seedRes.error) {
-          rawProfiles = INITIAL_PROFILES;
-        }
+        this.enqueueSqlOperations('Seed Default Login Profiles', [
+          {
+            type: 'upsert',
+            table: 'profiles',
+            values: INITIAL_PROFILES.map((p) => ({
+              id: p.id,
+              username: p.username,
+              password: p.password,
+              full_name: p.full_name,
+              role: p.role,
+              phone: p.phone || null
+            })),
+            onConflict: 'id'
+          }
+        ]);
+        rawProfiles = INITIAL_PROFILES;
       }
 
       if (!settingsRes.error && !settingsRes.data) {
-        await supabase.from('business_settings').upsert(INITIAL_SETTINGS, { onConflict: 'id' });
+        this.enqueueSqlOperations('Seed Business Settings', [
+          {
+            type: 'upsert',
+            table: 'business_settings',
+            values: INITIAL_SETTINGS,
+            onConflict: 'id'
+          }
+        ]);
+      }
+
+      const sqlCoreRowCount =
+        (clientsRes.data || []).length +
+        (eventsRes.data || []).length +
+        (menuItemsRes.data || []).length +
+        (ingredientsRes.data || []).length +
+        (staffRes.data || []).length +
+        (invoicesRes.data || []).length +
+        (purchasesRes.data || []).length;
+
+      const localCoreRowCount =
+        this.state.clients.length +
+        this.state.events.length +
+        this.state.menuItems.length +
+        this.state.ingredients.length +
+        this.state.staff.length +
+        this.state.invoices.length +
+        (this.state.stockPurchases || []).length;
+
+      if (typeof window !== 'undefined') {
+        const BOOTSTRAP_KEY = 'ippas_catering_sql_bootstrapped';
+        if (sqlCoreRowCount > 0) {
+          localStorage.setItem(BOOTSTRAP_KEY, '1');
+        } else if (localCoreRowCount > 0 && !localStorage.getItem(BOOTSTRAP_KEY)) {
+          localStorage.setItem(BOOTSTRAP_KEY, '1');
+          await this.pushAllToSupabase();
+          this.isSyncingState = false;
+          this.notify();
+          return;
+        }
       }
 
       const loadedProfiles: Profile[] =
@@ -1532,7 +2395,7 @@ class DataStore {
       this.state.currentRole = profile.role;
       this.state.isAuthenticated = true;
       this.save();
-      if (isSupabaseConfigured && supabase) {
+      if (this.isSqlConnected()) {
         this.syncFromSupabase();
       }
       return { success: true, user: profile };
@@ -1577,7 +2440,7 @@ class DataStore {
       this.state.currentRole = 'staff';
       this.state.isAuthenticated = true;
       this.save();
-      if (isSupabaseConfigured && supabase) {
+      if (this.isSqlConnected()) {
         this.syncFromSupabase();
       }
       return { success: true, user: staffProfile };
@@ -1629,22 +2492,21 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase) {
-      supabase
-        .from('profiles')
-        .insert({
+    this.enqueueSqlOperations('Add User Account', [
+      {
+        type: 'upsert',
+        table: 'profiles',
+        values: {
           id: newProfile.id,
           username: newProfile.username,
           password: newProfile.password,
           full_name: newProfile.full_name,
           phone: newProfile.phone || null,
           role: newProfile.role
-        })
-        .then(({ error }) => {
-          if (error) this.reportDbError('Add User Failed', error);
-          else this.clearDbError();
-        });
-    }
+        },
+        onConflict: 'id'
+      }
+    ]);
 
     return { success: true, profile: newProfile };
   }
@@ -1683,24 +2545,22 @@ class DataStore {
     }
     this.save();
 
-    if (isSupabaseConfigured && supabase && updatedRecord && isValidUUID(profileId)) {
-      supabase
-        .from('profiles')
-        .upsert(
-          {
+    if (updatedRecord && isValidUUID(profileId)) {
+      this.enqueueSqlOperations('Update User Account', [
+        {
+          type: 'upsert',
+          table: 'profiles',
+          values: {
             id: updatedRecord.id,
             username: updatedRecord.username,
-            password: updatedRecord.password,
+            password: updatedRecord.password || null,
             full_name: updatedRecord.full_name,
             phone: updatedRecord.phone || null,
             role: updatedRecord.role
           },
-          { onConflict: 'id' }
-        )
-        .then(({ error }) => {
-          if (error) this.reportDbError('Update User Failed', error);
-          else this.clearDbError();
-        });
+          onConflict: 'id'
+        }
+      ]);
     }
 
     return { success: true };
@@ -1729,35 +2589,30 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(profileId)) {
-      supabase
-        .from('profiles')
-        .delete()
-        .eq('id', profileId)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Delete User Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(profileId)) {
+      this.enqueueSqlOperations('Delete User Account', [
+        { type: 'delete', table: 'profiles', match: { id: profileId } }
+      ]);
     }
 
     return { success: true };
   }
 
   public resetToDefault() {
+    const keepAuth = this.state.isAuthenticated;
+    const keepRole = this.state.currentRole;
+    const keepUserId = this.state.currentUserId;
+
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem(SESSION_KEY);
     }
-    if (isSupabaseConfigured && supabase) {
-      this.syncFromSupabase();
-      return;
-    }
+
     this.state = {
       settings: INITIAL_SETTINGS,
       profiles: INITIAL_PROFILES,
-      currentRole: 'owner',
-      currentUserId: INITIAL_PROFILES[0].id,
-      isAuthenticated: false,
+      currentRole: keepAuth ? keepRole : 'owner',
+      currentUserId: keepAuth ? keepUserId : INITIAL_PROFILES[0].id,
+      isAuthenticated: keepAuth,
       clients: INITIAL_CLIENTS,
       ingredients: INITIAL_INGREDIENTS,
       menuItems: INITIAL_MENU_ITEMS,
@@ -1775,6 +2630,10 @@ class DataStore {
       auditLogs: INITIAL_AUDIT_LOGS
     };
     this.save();
+
+    if (this.isSqlConnected()) {
+      this.pushAllToSupabase();
+    }
   }
 
   // Clients
@@ -1794,65 +2653,52 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase) {
-      supabase
-        .from('clients')
-        .insert({
-          id: newClient.id,
-          name: newClient.name,
-          email: newClient.email || null,
-          phone: newClient.phone || null,
-          company: newClient.company || null,
-          notes: newClient.notes || null,
-          created_at: newClient.created_at
-        })
-        .then(({ error }) => {
-          if (error) this.reportDbError('Add Client Failed', error);
-          else this.clearDbError();
-        });
-    }
+    this.enqueueSqlOperations('Add Client', [
+      { type: 'upsert', table: 'clients', values: this.toClientSqlRow(newClient), onConflict: 'id' }
+    ]);
 
     return newClient;
   }
 
   public updateClient(id: string, updates: Partial<Client>) {
-    let targetName = 'Client';
+    let updatedClient: Client | undefined;
     this.state.clients = this.state.clients.map((c) => {
       if (c.id !== id) return c;
-      const merged = { ...c, ...updates };
-      targetName = merged.name;
-      return merged;
+      updatedClient = { ...c, ...updates };
+      return updatedClient;
     });
     this.logMutation({
       entity_type: 'client',
       entity_id: id,
       action: 'update',
-      summary: `Updated client profile "${targetName}"`
+      summary: `Updated client profile "${updatedClient?.name || 'Client'}"`
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
-      const dbUpdates: Record<string, any> = {};
-      if (updates.name !== undefined) dbUpdates.name = updates.name;
-      if (updates.email !== undefined) dbUpdates.email = updates.email || null;
-      if (updates.phone !== undefined) dbUpdates.phone = updates.phone || null;
-      if (updates.company !== undefined) dbUpdates.company = updates.company || null;
-      if (updates.notes !== undefined) dbUpdates.notes = updates.notes || null;
-
-      supabase
-        .from('clients')
-        .update(dbUpdates)
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Update Client Failed', error);
-          else this.clearDbError();
-        });
+    if (updatedClient && isValidUUID(id)) {
+      this.enqueueSqlOperations('Update Client', [
+        { type: 'upsert', table: 'clients', values: this.toClientSqlRow(updatedClient), onConflict: 'id' }
+      ]);
     }
   }
 
   public deleteClient(id: string) {
     const existing = this.state.clients.find((c) => c.id === id);
+    const clientEventIds = this.state.events.filter((e) => e.client_id === id).map((e) => e.id);
+    const clientInvoiceIds = this.state.invoices
+      .filter((inv) => clientEventIds.includes(inv.event_id))
+      .map((inv) => inv.id);
+
     this.state.clients = this.state.clients.filter((c) => c.id !== id);
+    if (clientEventIds.length > 0) {
+      this.state.events = this.state.events.filter((e) => e.client_id !== id);
+      this.state.eventItems = this.state.eventItems.filter((ei) => !clientEventIds.includes(ei.event_id));
+      this.state.eventExtras = this.state.eventExtras.filter((ex) => !clientEventIds.includes(ex.event_id));
+      this.state.shifts = this.state.shifts.filter((sh) => !clientEventIds.includes(sh.event_id));
+      this.state.invoices = this.state.invoices.filter((inv) => !clientEventIds.includes(inv.event_id));
+      this.state.payments = this.state.payments.filter((p) => !clientInvoiceIds.includes(p.invoice_id));
+    }
+
     this.logMutation({
       entity_type: 'client',
       entity_id: id,
@@ -1861,15 +2707,20 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
-      supabase
-        .from('clients')
-        .delete()
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Delete Client Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(id)) {
+      const ops: SqlOperation[] = [];
+      for (const invId of clientInvoiceIds.filter(isValidUUID)) {
+        ops.push({ type: 'delete', table: 'payments', match: { invoice_id: invId } });
+      }
+      for (const evtId of clientEventIds.filter(isValidUUID)) {
+        ops.push({ type: 'delete', table: 'invoices', match: { event_id: evtId } });
+        ops.push({ type: 'delete', table: 'event_items', match: { event_id: evtId } });
+        ops.push({ type: 'delete', table: 'event_extras', match: { event_id: evtId } });
+        ops.push({ type: 'delete', table: 'shifts', match: { event_id: evtId } });
+        ops.push({ type: 'delete', table: 'events', match: { id: evtId } });
+      }
+      ops.push({ type: 'delete', table: 'clients', match: { id } });
+      this.enqueueSqlOperations('Delete Client', ops);
     }
   }
 
@@ -1891,26 +2742,11 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(newEvent.client_id)) {
-      supabase
-        .from('events')
-        .insert({
-          id: newEvent.id,
-          client_id: newEvent.client_id,
-          title: newEvent.title,
-          event_date: newEvent.event_date,
-          start_time: newEvent.start_time || null,
-          end_time: newEvent.end_time || null,
-          venue: newEvent.venue || null,
-          guest_count: Math.max(1, Number(newEvent.guest_count) || 1),
-          status: newEvent.status,
-          notes: newEvent.notes || null,
-          created_at: newEvent.created_at
-        })
-        .then(({ error }) => {
-          if (error) this.reportDbError('Create Event Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(newEvent.client_id)) {
+      this.enqueueSqlOperations('Create Event', [
+        ...this.ensureClientParentOps(newEvent.client_id),
+        { type: 'upsert', table: 'events', values: this.toEventSqlRow(newEvent), onConflict: 'id' }
+      ]);
     }
 
     return newEvent;
@@ -1935,26 +2771,11 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
-      const dbUpdates: Record<string, any> = {};
-      if (updates.title !== undefined) dbUpdates.title = updates.title;
-      if (updates.event_date !== undefined) dbUpdates.event_date = updates.event_date;
-      if (updates.start_time !== undefined) dbUpdates.start_time = updates.start_time || null;
-      if (updates.end_time !== undefined) dbUpdates.end_time = updates.end_time || null;
-      if (updates.venue !== undefined) dbUpdates.venue = updates.venue || null;
-      if (updates.guest_count !== undefined) dbUpdates.guest_count = Math.max(1, Number(updates.guest_count) || 1);
-      if (updates.status !== undefined) dbUpdates.status = updates.status;
-      if (updates.notes !== undefined) dbUpdates.notes = updates.notes || null;
-      if (updates.client_id !== undefined && isValidUUID(updates.client_id)) dbUpdates.client_id = updates.client_id;
-
-      supabase
-        .from('events')
-        .update(dbUpdates)
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Update Event Failed', error);
-          else this.clearDbError();
-        });
+    if (updatedEvt && isValidUUID(id) && isValidUUID(updatedEvt.client_id)) {
+      this.enqueueSqlOperations('Update Event', [
+        ...this.ensureClientParentOps(updatedEvt.client_id),
+        { type: 'upsert', table: 'events', values: this.toEventSqlRow(updatedEvt), onConflict: 'id' }
+      ]);
     }
   }
 
@@ -1976,22 +2797,19 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
-      Promise.all([
-        supabase.from('invoices').delete().eq('event_id', id),
-        supabase.from('event_items').delete().eq('event_id', id),
-        supabase.from('event_extras').delete().eq('event_id', id),
-        supabase.from('shifts').delete().eq('event_id', id)
-      ]).then(() => {
-        supabase!
-          .from('events')
-          .delete()
-          .eq('id', id)
-          .then(({ error }) => {
-            if (error) this.reportDbError('Delete Event Failed', error);
-            else this.clearDbError();
-          });
-      });
+    if (isValidUUID(id)) {
+      const ops: SqlOperation[] = [];
+      for (const invId of invIds.filter(isValidUUID)) {
+        ops.push({ type: 'delete', table: 'payments', match: { invoice_id: invId } });
+      }
+      ops.push(
+        { type: 'delete', table: 'invoices', match: { event_id: id } },
+        { type: 'delete', table: 'event_items', match: { event_id: id } },
+        { type: 'delete', table: 'event_extras', match: { event_id: id } },
+        { type: 'delete', table: 'shifts', match: { event_id: id } },
+        { type: 'delete', table: 'events', match: { id } }
+      );
+      this.enqueueSqlOperations('Delete Event', ops);
     }
   }
 
@@ -2041,11 +2859,14 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(eventId) && isValidUUID(menuItemId)) {
-      supabase
-        .from('event_items')
-        .upsert(
-          {
+    if (isValidUUID(eventId) && isValidUUID(menuItemId)) {
+      this.enqueueSqlOperations('Save Quotation Dish', [
+        ...this.ensureEventParentOps(eventId),
+        ...this.ensureMenuItemParentOps(menuItemId),
+        {
+          type: 'upsert',
+          table: 'event_items',
+          values: {
             id: targetItem.id,
             event_id: targetItem.event_id,
             menu_item_id: targetItem.menu_item_id,
@@ -2054,25 +2875,34 @@ class DataStore {
             price_per_guest: targetItem.price_per_guest,
             quantity: targetItem.quantity ?? null
           },
-          { onConflict: 'event_id,menu_item_id' }
-        )
-        .then(({ error }) => {
-          if (error) this.reportDbError('Save Quote Dish Failed', error);
-          else this.clearDbError();
-        });
+          onConflict: 'event_id,menu_item_id'
+        }
+      ]);
     }
   }
 
   public updateEventItem(id: string, updates: Partial<EventItem>) {
-    const existingItem = this.state.eventItems.find((ei) => ei.id === id);
-    const evt = existingItem ? this.state.events.find((e) => e.id === existingItem.event_id) : undefined;
-    const dish = existingItem ? this.state.menuItems.find((m) => m.id === existingItem.menu_item_id) : undefined;
+    let updatedItem: EventItem | undefined;
+    this.state.eventItems = this.state.eventItems.map((ei) => {
+      if (ei.id !== id) return ei;
+      const nextRate =
+        updates.price_per_unit !== undefined ? updates.price_per_unit : ei.price_per_unit;
+      updatedItem = {
+        ...ei,
+        ...updates,
+        price_per_unit: nextRate,
+        price_per_guest: nextRate
+      };
+      return updatedItem;
+    });
 
-    this.state.eventItems = this.state.eventItems.map((ei) => (ei.id === id ? { ...ei, ...updates } : ei));
+    const evt = updatedItem ? this.state.events.find((e) => e.id === updatedItem!.event_id) : undefined;
+    const dish = updatedItem ? this.state.menuItems.find((m) => m.id === updatedItem!.menu_item_id) : undefined;
+
     this.logMutation({
       entity_type: 'quotation',
       entity_id: id,
-      parent_event_id: existingItem?.event_id,
+      parent_event_id: updatedItem?.event_id,
       action: 'update',
       summary: `Edited quotation item "${dish?.name || 'Dish'}" on "${evt?.title || 'Event'}"`,
       details:
@@ -2084,23 +2914,25 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
-      const dbUpdates: Record<string, any> = {};
-      if (updates.quantity !== undefined) dbUpdates.quantity = updates.quantity;
-      if (updates.price_per_unit !== undefined) {
-        dbUpdates.price_per_unit = updates.price_per_unit;
-        dbUpdates.price_per_guest = updates.price_per_unit;
-      }
-      if (updates.pricing_type !== undefined) dbUpdates.pricing_type = updates.pricing_type;
-
-      supabase
-        .from('event_items')
-        .update(dbUpdates)
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Update Quote Quantity Failed', error);
-          else this.clearDbError();
-        });
+    if (updatedItem && isValidUUID(updatedItem.event_id) && isValidUUID(updatedItem.menu_item_id)) {
+      this.enqueueSqlOperations('Update Quotation Dish', [
+        ...this.ensureEventParentOps(updatedItem.event_id),
+        ...this.ensureMenuItemParentOps(updatedItem.menu_item_id),
+        {
+          type: 'upsert',
+          table: 'event_items',
+          values: {
+            id: updatedItem.id,
+            event_id: updatedItem.event_id,
+            menu_item_id: updatedItem.menu_item_id,
+            pricing_type: updatedItem.pricing_type,
+            price_per_unit: updatedItem.price_per_unit,
+            price_per_guest: updatedItem.price_per_guest,
+            quantity: updatedItem.quantity ?? null
+          },
+          onConflict: 'event_id,menu_item_id'
+        }
+      ]);
     }
   }
 
@@ -2123,16 +2955,14 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(eventId) && isValidUUID(menuItemId)) {
-      supabase
-        .from('event_items')
-        .delete()
-        .eq('event_id', eventId)
-        .eq('menu_item_id', menuItemId)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Remove Quote Dish Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(eventId) && isValidUUID(menuItemId)) {
+      this.enqueueSqlOperations('Remove Quotation Dish', [
+        {
+          type: 'delete',
+          table: 'event_items',
+          match: { event_id: eventId, menu_item_id: menuItemId }
+        }
+      ]);
     }
   }
 
@@ -2155,19 +2985,21 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(eventId)) {
-      supabase
-        .from('event_extras')
-        .insert({
-          id: newExtra.id,
-          event_id: newExtra.event_id,
-          description: newExtra.description,
-          amount: newExtra.amount
-        })
-        .then(({ error }) => {
-          if (error) this.reportDbError('Add Extra Charge Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(eventId)) {
+      this.enqueueSqlOperations('Add Extra Charge', [
+        ...this.ensureEventParentOps(eventId),
+        {
+          type: 'upsert',
+          table: 'event_extras',
+          values: {
+            id: newExtra.id,
+            event_id: newExtra.event_id,
+            description: newExtra.description,
+            amount: newExtra.amount
+          },
+          onConflict: 'id'
+        }
+      ]);
     }
   }
 
@@ -2187,15 +3019,10 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
-      supabase
-        .from('event_extras')
-        .delete()
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Delete Extra Charge Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(id)) {
+      this.enqueueSqlOperations('Remove Extra Charge', [
+        { type: 'delete', table: 'event_extras', match: { id } }
+      ]);
     }
   }
 
@@ -2220,24 +3047,9 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase) {
-      supabase
-        .from('menu_items')
-        .insert({
-          id: newItem.id,
-          name: newItem.name,
-          description: newItem.description || null,
-          category: newItem.category,
-          pricing_type: newItem.pricing_type,
-          price_per_unit: newItem.price_per_unit,
-          price_per_guest: newItem.price_per_guest,
-          active: newItem.active
-        })
-        .then(({ error }) => {
-          if (error) this.reportDbError('Add Menu Item Failed', error);
-          else this.clearDbError();
-        });
-    }
+    this.enqueueSqlOperations('Add Menu Item', [
+      { type: 'upsert', table: 'menu_items', values: this.toMenuItemSqlRow(newItem), onConflict: 'id' }
+    ]);
 
     return newItem;
   }
@@ -2271,23 +3083,10 @@ class DataStore {
     }
     this.save();
 
-    if (isSupabaseConfigured && supabase && updatedItem && isValidUUID(id)) {
-      supabase
-        .from('menu_items')
-        .update({
-          name: updatedItem.name,
-          description: updatedItem.description || null,
-          category: updatedItem.category,
-          pricing_type: updatedItem.pricing_type,
-          price_per_unit: updatedItem.price_per_unit,
-          price_per_guest: updatedItem.price_per_guest,
-          active: updatedItem.active
-        })
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Update Menu Item Failed', error);
-          else this.clearDbError();
-        });
+    if (updatedItem && isValidUUID(id)) {
+      this.enqueueSqlOperations('Update Menu Item', [
+        { type: 'upsert', table: 'menu_items', values: this.toMenuItemSqlRow(updatedItem), onConflict: 'id' }
+      ]);
     }
   }
 
@@ -2295,6 +3094,7 @@ class DataStore {
     const targetDish = this.state.menuItems.find((m) => m.id === id);
     this.state.menuItems = this.state.menuItems.filter((m) => m.id !== id);
     this.state.recipes = this.state.recipes.filter((r) => r.menu_item_id !== id);
+    this.state.eventItems = this.state.eventItems.filter((ei) => ei.menu_item_id !== id);
     this.logMutation({
       entity_type: 'menu',
       entity_id: id,
@@ -2303,15 +3103,12 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
-      supabase
-        .from('menu_items')
-        .delete()
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Delete Menu Item Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(id)) {
+      this.enqueueSqlOperations('Delete Menu Item', [
+        { type: 'delete', table: 'event_items', match: { menu_item_id: id } },
+        { type: 'delete', table: 'menu_item_ingredients', match: { menu_item_id: id } },
+        { type: 'delete', table: 'menu_items', match: { id } }
+      ]);
     }
   }
 
@@ -2335,33 +3132,35 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(menuItemId)) {
-      supabase
-        .from('menu_item_ingredients')
-        .delete()
-        .eq('menu_item_id', menuItemId)
-        .then(({ error: delErr }) => {
-          if (delErr) {
-            this.reportDbError('Update Recipe Failed', delErr);
-            return;
-          }
-          const rows = validLines
-            .filter((l) => isValidUUID(l.ingredient_id))
-            .map((l) => ({
-              menu_item_id: menuItemId,
-              ingredient_id: l.ingredient_id,
-              qty_per_guest: l.qty_per_guest
-            }));
-          if (rows.length > 0 && supabase) {
-            supabase
-              .from('menu_item_ingredients')
-              .insert(rows)
-              .then(({ error: insErr }) => {
-                if (insErr) this.reportDbError('Save Recipe Ingredients Failed', insErr);
-                else this.clearDbError();
-              });
-          }
+    if (isValidUUID(menuItemId)) {
+      const ops: SqlOperation[] = [...this.ensureMenuItemParentOps(menuItemId)];
+      const rows = validLines
+        .filter((l) => isValidUUID(l.ingredient_id))
+        .map((l) => {
+          ops.push(...this.ensureIngredientParentOps(l.ingredient_id));
+          return {
+            menu_item_id: menuItemId,
+            ingredient_id: l.ingredient_id,
+            qty_per_guest: l.qty_per_guest
+          };
         });
+
+      ops.push({
+        type: 'delete',
+        table: 'menu_item_ingredients',
+        match: { menu_item_id: menuItemId }
+      });
+
+      if (rows.length > 0) {
+        ops.push({
+          type: 'upsert',
+          table: 'menu_item_ingredients',
+          values: rows,
+          onConflict: 'menu_item_id,ingredient_id'
+        });
+      }
+
+      this.enqueueSqlOperations('Save Dish Recipe', ops);
     }
   }
 
@@ -2378,22 +3177,9 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase) {
-      supabase
-        .from('ingredients')
-        .insert({
-          id: newIng.id,
-          name: newIng.name,
-          unit: newIng.unit,
-          cost_per_unit: newIng.cost_per_unit,
-          stock_qty: newIng.stock_qty,
-          low_stock_level: newIng.low_stock_level
-        })
-        .then(({ error }) => {
-          if (error) this.reportDbError('Add Ingredient Failed', error);
-          else this.clearDbError();
-        });
-    }
+    this.enqueueSqlOperations('Add Stock Ingredient', [
+      { type: 'upsert', table: 'ingredients', values: this.toIngredientSqlRow(newIng), onConflict: 'id' }
+    ]);
 
     return newIng;
   }
@@ -2416,35 +3202,40 @@ class DataStore {
     }
     this.save();
 
-    if (isSupabaseConfigured && supabase && updatedIng && isValidUUID(id)) {
-      supabase
-        .from('ingredients')
-        .update({
-          name: updatedIng.name,
-          unit: updatedIng.unit,
-          cost_per_unit: updatedIng.cost_per_unit,
-          stock_qty: updatedIng.stock_qty,
-          low_stock_level: updatedIng.low_stock_level
-        })
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Update Ingredient Failed', error);
-          else this.clearDbError();
-        });
+    if (updatedIng && isValidUUID(id)) {
+      this.enqueueSqlOperations('Update Stock Ingredient', [
+        { type: 'upsert', table: 'ingredients', values: this.toIngredientSqlRow(updatedIng), onConflict: 'id' }
+      ]);
+    }
+  }
+
+  public deleteIngredient(id: string) {
+    const existing = this.state.ingredients.find((i) => i.id === id);
+    this.state.ingredients = this.state.ingredients.filter((i) => i.id !== id);
+    this.state.recipes = this.state.recipes.filter((r) => r.ingredient_id !== id);
+    this.logMutation({
+      entity_type: 'stock',
+      entity_id: id,
+      action: 'delete',
+      summary: `Deleted stock ingredient "${existing?.name || id}"`
+    });
+    this.save();
+
+    if (isValidUUID(id)) {
+      this.enqueueSqlOperations('Delete Stock Ingredient', [
+        { type: 'delete', table: 'menu_item_ingredients', match: { ingredient_id: id } },
+        { type: 'delete', table: 'ingredients', match: { id } }
+      ]);
     }
   }
 
   public adjustStock(id: string, delta: number) {
-    let nextQty: number | undefined;
-    let ingName = 'Stock Item';
-    let ingUnit = '';
+    let updatedIng: Ingredient | undefined;
     this.state.ingredients = this.state.ingredients.map((i) => {
       if (i.id === id) {
         const next = Math.max(0, Number((i.stock_qty + delta).toFixed(3)));
-        nextQty = next;
-        ingName = i.name;
-        ingUnit = i.unit;
-        return { ...i, stock_qty: next };
+        updatedIng = { ...i, stock_qty: next };
+        return updatedIng;
       }
       return i;
     });
@@ -2452,20 +3243,15 @@ class DataStore {
       entity_type: 'stock',
       entity_id: id,
       action: 'update',
-      summary: `Adjusted stock "${ingName}" (${delta >= 0 ? `+${delta}` : delta} ${ingUnit})`,
-      details: nextQty !== undefined ? `New Stock Balance: ${nextQty} ${ingUnit}` : undefined
+      summary: `Adjusted stock "${updatedIng?.name || 'Stock Item'}" (${delta >= 0 ? `+${delta}` : delta} ${updatedIng?.unit || ''})`,
+      details: updatedIng ? `New Stock Balance: ${updatedIng.stock_qty} ${updatedIng.unit}` : undefined
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && nextQty !== undefined && isValidUUID(id)) {
-      supabase
-        .from('ingredients')
-        .update({ stock_qty: nextQty })
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Adjust Stock Failed', error);
-          else this.clearDbError();
-        });
+    if (updatedIng && isValidUUID(id)) {
+      this.enqueueSqlOperations('Adjust Stock Quantity', [
+        { type: 'upsert', table: 'ingredients', values: this.toIngredientSqlRow(updatedIng), onConflict: 'id' }
+      ]);
     }
   }
 
@@ -2565,80 +3351,59 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase) {
-      supabase
-        .from('stock_purchases')
-        .insert({
-          id: newPurchase.id,
-          purchase_date: newPurchase.purchase_date,
-          vendor_name: newPurchase.vendor_name,
-          vendor_location: newPurchase.vendor_location || null,
-          vendor_phone: newPurchase.vendor_phone || null,
-          bill_number: newPurchase.bill_number || null,
-          total_amount: newPurchase.total_amount,
-          paid_amount: newPurchase.paid_amount,
-          balance_amount: newPurchase.balance_amount,
-          payment_status: newPurchase.payment_status,
-          payment_method: newPurchase.payment_method,
-          notes: newPurchase.notes || null,
-          created_at: newPurchase.created_at
-        })
-        .then(({ error }) => {
-          if (error) {
-            this.reportDbError('Add Stock Purchase Failed', error);
-            return;
-          }
-          this.clearDbError();
+    const ops: SqlOperation[] = [
+      {
+        type: 'upsert',
+        table: 'stock_purchases',
+        values: this.toStockPurchaseSqlRow(newPurchase),
+        onConflict: 'id'
+      }
+    ];
 
-          if (purchaseItems.length > 0 && supabase) {
-            supabase
-              .from('stock_purchase_items')
-              .insert(
-                purchaseItems.map((it) => ({
-                  id: it.id,
-                  purchase_id: newPurchase.id,
-                  ingredient_id: isValidUUID(it.ingredient_id) ? it.ingredient_id : null,
-                  item_name: it.item_name,
-                  quantity: it.quantity,
-                  unit: it.unit,
-                  unit_price: it.unit_price,
-                  total_price: it.total_price
-                }))
-              )
-              .then(({ error: itemErr }) => {
-                if (itemErr) this.reportDbError('Save Purchase Items Failed', itemErr);
-              });
-          }
-
-          if (initialPayment && supabase) {
-            supabase
-              .from('stock_purchase_payments')
-              .insert({
-                id: initialPayment.id,
-                purchase_id: initialPayment.purchase_id,
-                amount: initialPayment.amount,
-                paid_at: initialPayment.paid_at,
-                method: initialPayment.method,
-                note: initialPayment.note || null
-              })
-              .then(({ error: payErr }) => {
-                if (payErr) this.reportDbError('Save Initial Vendor Payment Failed', payErr);
-              });
-          }
-
-          updatedIngredients.forEach((ing) => {
-            if (isValidUUID(ing.id) && supabase) {
-              supabase
-                .from('ingredients')
-                .update({ stock_qty: ing.stock_qty, cost_per_unit: ing.cost_per_unit })
-                .eq('id', ing.id)
-                .then(({ error: ingErr }) => {
-                  if (ingErr) this.reportDbError('Auto-Update Warehouse Stock Failed', ingErr);
-                });
-            }
-          });
-        });
+    for (const ing of updatedIngredients.filter((x) => isValidUUID(x.id))) {
+      ops.push({
+        type: 'upsert',
+        table: 'ingredients',
+        values: this.toIngredientSqlRow(ing),
+        onConflict: 'id'
+      });
     }
+
+    if (purchaseItems.length > 0) {
+      ops.push({
+        type: 'upsert',
+        table: 'stock_purchase_items',
+        values: purchaseItems.map((it) => ({
+          id: it.id,
+          purchase_id: newPurchase.id,
+          ingredient_id: isValidUUID(it.ingredient_id) ? it.ingredient_id : null,
+          item_name: it.item_name,
+          quantity: it.quantity,
+          unit: it.unit,
+          unit_price: it.unit_price,
+          total_price: it.total_price
+        })),
+        onConflict: 'id'
+      });
+    }
+
+    if (initialPayment) {
+      ops.push({
+        type: 'upsert',
+        table: 'stock_purchase_payments',
+        values: {
+          id: initialPayment.id,
+          purchase_id: initialPayment.purchase_id,
+          amount: initialPayment.amount,
+          paid_at: initialPayment.paid_at,
+          method: initialPayment.method,
+          note: initialPayment.note || null
+        },
+        onConflict: 'id'
+      });
+    }
+
+    this.enqueueSqlOperations('Add Stock Purchase', ops);
 
     return newPurchase;
   }
@@ -2690,29 +3455,23 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(purchaseId)) {
-      Promise.all([
-        supabase.from('stock_purchase_payments').insert({
-          id: newPayment.id,
-          purchase_id: newPayment.purchase_id,
-          amount: newPayment.amount,
-          method: newPayment.method,
-          note: newPayment.note || null,
-          paid_at: newPayment.paid_at
-        }),
-        supabase
-          .from('stock_purchases')
-          .update({
-            paid_amount: purchase.paid_amount,
-            balance_amount: purchase.balance_amount,
-            payment_status: purchase.payment_status
-          })
-          .eq('id', purchaseId)
-      ]).then(([insRes, updRes]) => {
-        const err = insRes.error || updRes.error;
-        if (err) this.reportDbError('Record Vendor Payment Failed', err);
-        else this.clearDbError();
-      });
+    if (isValidUUID(purchaseId)) {
+      this.enqueueSqlOperations('Record Vendor Payment', [
+        ...this.ensurePurchaseParentOps(purchaseId),
+        {
+          type: 'upsert',
+          table: 'stock_purchase_payments',
+          values: {
+            id: newPayment.id,
+            purchase_id: newPayment.purchase_id,
+            amount: newPayment.amount,
+            method: newPayment.method,
+            note: newPayment.note || null,
+            paid_at: newPayment.paid_at
+          },
+          onConflict: 'id'
+        }
+      ]);
     }
 
     return newPayment;
@@ -2749,25 +3508,15 @@ class DataStore {
     }
     this.save();
 
-    if (isSupabaseConfigured && supabase && updatedPurchase && isValidUUID(id)) {
-      supabase
-        .from('stock_purchases')
-        .update({
-          vendor_name: updatedPurchase.vendor_name,
-          vendor_location: updatedPurchase.vendor_location || null,
-          vendor_phone: updatedPurchase.vendor_phone || null,
-          bill_number: updatedPurchase.bill_number || null,
-          total_amount: updatedPurchase.total_amount,
-          paid_amount: updatedPurchase.paid_amount,
-          balance_amount: updatedPurchase.balance_amount,
-          payment_status: updatedPurchase.payment_status,
-          notes: updatedPurchase.notes || null
-        })
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Update Stock Purchase Failed', error);
-          else this.clearDbError();
-        });
+    if (updatedPurchase && isValidUUID(id)) {
+      this.enqueueSqlOperations('Update Stock Purchase', [
+        {
+          type: 'upsert',
+          table: 'stock_purchases',
+          values: this.toStockPurchaseSqlRow(updatedPurchase),
+          onConflict: 'id'
+        }
+      ]);
     }
   }
 
@@ -2787,15 +3536,12 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(purchaseId)) {
-      supabase
-        .from('stock_purchases')
-        .delete()
-        .eq('id', purchaseId)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Delete Stock Purchase Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(purchaseId)) {
+      this.enqueueSqlOperations('Delete Stock Purchase', [
+        { type: 'delete', table: 'stock_purchase_payments', match: { purchase_id: purchaseId } },
+        { type: 'delete', table: 'stock_purchase_items', match: { purchase_id: purchaseId } },
+        { type: 'delete', table: 'stock_purchases', match: { id: purchaseId } }
+      ]);
     }
   }
 
@@ -2824,25 +3570,19 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(paymentId)) {
-      supabase
-        .from('stock_purchase_payments')
-        .delete()
-        .eq('id', paymentId)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Delete Vendor Payment Failed', error);
-          else if (purchase && isValidUUID(purchaseId) && supabase) {
-            supabase
-              .from('stock_purchases')
-              .update({
-                paid_amount: purchase.paid_amount,
-                balance_amount: purchase.balance_amount,
-                payment_status: purchase.payment_status
-              })
-              .eq('id', purchaseId)
-              .then(() => {});
-          }
+    if (isValidUUID(paymentId)) {
+      const ops: SqlOperation[] = [
+        { type: 'delete', table: 'stock_purchase_payments', match: { id: paymentId } }
+      ];
+      if (purchase && isValidUUID(purchaseId)) {
+        ops.push({
+          type: 'upsert',
+          table: 'stock_purchases',
+          values: this.toStockPurchaseSqlRow(purchase),
+          onConflict: 'id'
         });
+      }
+      this.enqueueSqlOperations('Delete Vendor Payment', ops);
     }
   }
 
@@ -2859,23 +3599,9 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase) {
-      supabase
-        .from('staff_members')
-        .insert({
-          id: newStaff.id,
-          name: newStaff.name,
-          phone: newStaff.phone || null,
-          password: newStaff.password || 'password123',
-          role_title: newStaff.role_title || null,
-          hourly_rate: newStaff.hourly_rate,
-          active: newStaff.active
-        })
-        .then(({ error }) => {
-          if (error) this.reportDbError('Register Staff Failed', error);
-          else this.clearDbError();
-        });
-    }
+    this.enqueueSqlOperations('Register Staff Member', [
+      { type: 'upsert', table: 'staff_members', values: this.toStaffSqlRow(newStaff), onConflict: 'id' }
+    ]);
 
     return newStaff;
   }
@@ -2898,22 +3624,36 @@ class DataStore {
     }
     this.save();
 
-    if (isSupabaseConfigured && supabase && updatedStaff && isValidUUID(id)) {
-      supabase
-        .from('staff_members')
-        .update({
-          name: updatedStaff.name,
-          phone: updatedStaff.phone || null,
-          password: updatedStaff.password || 'password123',
-          role_title: updatedStaff.role_title || null,
-          hourly_rate: updatedStaff.hourly_rate,
-          active: updatedStaff.active
-        })
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Update Staff Failed', error);
-          else this.clearDbError();
-        });
+    if (updatedStaff && isValidUUID(id)) {
+      this.enqueueSqlOperations('Update Staff Member', [
+        { type: 'upsert', table: 'staff_members', values: this.toStaffSqlRow(updatedStaff), onConflict: 'id' }
+      ]);
+    }
+  }
+
+  public deleteStaff(id: string) {
+    const existing = this.state.staff.find((s) => s.id === id);
+    this.state.staff = this.state.staff.filter((s) => s.id !== id);
+    this.state.shifts = this.state.shifts.filter((sh) => sh.staff_member_id !== id);
+    if (Array.isArray(this.state.staffSalaryRecords)) {
+      this.state.staffSalaryRecords = this.state.staffSalaryRecords.filter(
+        (sr) => sr.staff_member_id !== id
+      );
+    }
+    this.logMutation({
+      entity_type: 'staff',
+      entity_id: id,
+      action: 'delete',
+      summary: `Deleted staff member "${existing?.name || id}"`
+    });
+    this.save();
+
+    if (isValidUUID(id)) {
+      this.enqueueSqlOperations('Delete Staff Member', [
+        { type: 'delete', table: 'staff_salary_records', match: { staff_member_id: id } },
+        { type: 'delete', table: 'shifts', match: { staff_member_id: id } },
+        { type: 'delete', table: 'staff_members', match: { id } }
+      ]);
     }
   }
 
@@ -2941,21 +3681,24 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(newShift.event_id) && isValidUUID(newShift.staff_member_id)) {
-      supabase
-        .from('shifts')
-        .insert({
-          id: newShift.id,
-          event_id: newShift.event_id,
-          staff_member_id: newShift.staff_member_id,
-          role_label: newShift.role_label || null,
-          starts_at: newShift.starts_at,
-          ends_at: newShift.ends_at
-        })
-        .then(({ error }) => {
-          if (error) this.reportDbError('Schedule Shift Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(newShift.event_id) && isValidUUID(newShift.staff_member_id)) {
+      this.enqueueSqlOperations('Schedule Staff Shift', [
+        ...this.ensureEventParentOps(newShift.event_id),
+        ...this.ensureStaffParentOps(newShift.staff_member_id),
+        {
+          type: 'upsert',
+          table: 'shifts',
+          values: {
+            id: newShift.id,
+            event_id: newShift.event_id,
+            staff_member_id: newShift.staff_member_id,
+            role_label: newShift.role_label || null,
+            starts_at: newShift.starts_at,
+            ends_at: newShift.ends_at
+          },
+          onConflict: 'id'
+        }
+      ]);
     }
 
     return newShift;
@@ -2980,15 +3723,10 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
-      supabase
-        .from('shifts')
-        .delete()
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Remove Shift Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(id)) {
+      this.enqueueSqlOperations('Remove Staff Shift', [
+        { type: 'delete', table: 'shifts', match: { id } }
+      ]);
     }
   }
 
@@ -3112,10 +3850,15 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(newRecord.staff_member_id)) {
-      supabase
-        .from('staff_salary_records')
-        .insert({
+    if (isValidUUID(newRecord.staff_member_id)) {
+      const ops: SqlOperation[] = [...this.ensureStaffParentOps(newRecord.staff_member_id)];
+      if (newRecord.event_id && isValidUUID(newRecord.event_id)) {
+        ops.push(...this.ensureEventParentOps(newRecord.event_id));
+      }
+      ops.push({
+        type: 'upsert',
+        table: 'staff_salary_records',
+        values: {
           id: newRecord.id,
           staff_member_id: newRecord.staff_member_id,
           event_id: isValidUUID(newRecord.event_id) ? newRecord.event_id : null,
@@ -3124,11 +3867,10 @@ class DataStore {
           method: newRecord.method,
           note: newRecord.note || null,
           recorded_at: newRecord.recorded_at
-        })
-        .then(({ error }) => {
-          if (error) this.reportDbError('Save Staff Salary Record Failed (Run migration_06.sql)', error);
-          else this.clearDbError();
-        });
+        },
+        onConflict: 'id'
+      });
+      this.enqueueSqlOperations('Save Staff Salary Record', ops);
     }
 
     return newRecord;
@@ -3150,15 +3892,10 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
-      supabase
-        .from('staff_salary_records')
-        .delete()
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Delete Staff Salary Record Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(id)) {
+      this.enqueueSqlOperations('Delete Staff Salary Record', [
+        { type: 'delete', table: 'staff_salary_records', match: { id } }
+      ]);
     }
   }
 
@@ -3218,26 +3955,11 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(newInv.event_id)) {
-      supabase
-        .from('invoices')
-        .insert({
-          id: newInv.id,
-          event_id: newInv.event_id,
-          invoice_number: newInv.invoice_number,
-          kind: newInv.kind,
-          subtotal: newInv.subtotal,
-          discount: newInv.discount,
-          amount: newInv.amount,
-          due_date: newInv.due_date || null,
-          status: newInv.status,
-          notes: newInv.notes || null,
-          created_at: newInv.created_at
-        })
-        .then(({ error }) => {
-          if (error) this.reportDbError('Create Invoice Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(newInv.event_id)) {
+      this.enqueueSqlOperations('Create Invoice', [
+        ...this.ensureEventParentOps(newInv.event_id),
+        { type: 'upsert', table: 'invoices', values: this.toInvoiceSqlRow(newInv), onConflict: 'id' }
+      ]);
     }
 
     return newInv;
@@ -3266,23 +3988,11 @@ class DataStore {
     }
     this.save();
 
-    if (isSupabaseConfigured && supabase && updatedInv && isValidUUID(id)) {
-      supabase
-        .from('invoices')
-        .update({
-          kind: updatedInv.kind,
-          subtotal: updatedInv.subtotal,
-          discount: updatedInv.discount,
-          amount: updatedInv.amount,
-          due_date: updatedInv.due_date || null,
-          status: updatedInv.status,
-          notes: updatedInv.notes || null
-        })
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Update Invoice Failed', error);
-          else this.clearDbError();
-        });
+    if (updatedInv && isValidUUID(id) && isValidUUID(updatedInv.event_id)) {
+      this.enqueueSqlOperations('Update Invoice', [
+        ...this.ensureEventParentOps(updatedInv.event_id),
+        { type: 'upsert', table: 'invoices', values: this.toInvoiceSqlRow(updatedInv), onConflict: 'id' }
+      ]);
     }
   }
 
@@ -3299,15 +4009,11 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
-      supabase
-        .from('invoices')
-        .delete()
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Delete Invoice Failed', error);
-          else this.clearDbError();
-        });
+    if (isValidUUID(id)) {
+      this.enqueueSqlOperations('Delete Invoice', [
+        { type: 'delete', table: 'payments', match: { invoice_id: id } },
+        { type: 'delete', table: 'invoices', match: { id } }
+      ]);
     }
   }
 
@@ -3350,31 +4056,23 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(newPayment.invoice_id)) {
-      supabase
-        .from('payments')
-        .insert({
-          id: newPayment.id,
-          invoice_id: newPayment.invoice_id,
-          amount: newPayment.amount,
-          method: newPayment.method,
-          note: newPayment.note || null,
-          paid_at: newPayment.paid_at
-        })
-        .then(({ error }) => {
-          if (error) {
-            this.reportDbError('Record Payment Failed', error);
-          } else {
-            this.clearDbError();
-            if (invoice && isValidUUID(invoice.id) && supabase) {
-              supabase
-                .from('invoices')
-                .update({ status: invoice.status })
-                .eq('id', invoice.id)
-                .then(() => {});
-            }
-          }
-        });
+    if (isValidUUID(newPayment.invoice_id)) {
+      this.enqueueSqlOperations('Record Invoice Payment', [
+        ...this.ensureInvoiceParentOps(newPayment.invoice_id),
+        {
+          type: 'upsert',
+          table: 'payments',
+          values: {
+            id: newPayment.id,
+            invoice_id: newPayment.invoice_id,
+            amount: newPayment.amount,
+            method: newPayment.method,
+            note: newPayment.note || null,
+            paid_at: newPayment.paid_at
+          },
+          onConflict: 'id'
+        }
+      ]);
     }
 
     return newPayment;
@@ -3409,21 +4107,19 @@ class DataStore {
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase && isValidUUID(paymentId)) {
-      supabase
-        .from('payments')
-        .delete()
-        .eq('id', paymentId)
-        .then(({ error }) => {
-          if (error) this.reportDbError('Delete Payment Failed', error);
-          else if (invoice && isValidUUID(invoice.id) && supabase) {
-            supabase
-              .from('invoices')
-              .update({ status: invoice.status })
-              .eq('id', invoice.id)
-              .then(() => {});
-          }
+    if (isValidUUID(paymentId)) {
+      const ops: SqlOperation[] = [
+        { type: 'delete', table: 'payments', match: { id: paymentId } }
+      ];
+      if (invoice && isValidUUID(invoice.id)) {
+        ops.push({
+          type: 'upsert',
+          table: 'invoices',
+          values: this.toInvoiceSqlRow(invoice),
+          onConflict: 'id'
         });
+      }
+      this.enqueueSqlOperations('Delete Invoice Payment', ops);
     }
   }
 
@@ -3432,53 +4128,35 @@ class DataStore {
     this.state.settings = { ...this.state.settings, ...updates };
     this.logMutation({
       entity_type: 'settings',
-      entity_id: 'business_settings',
+      entity_id: String(this.state.settings.id || 1),
       action: 'update',
       summary: 'Updated business profile, bank details, or auto-email settings'
     });
     this.save();
 
-    if (isSupabaseConfigured && supabase) {
-      const s = this.state.settings;
-      const baseRow = {
-        id: 1,
-        name: s.name,
-        address: s.address || null,
-        phone: s.phone || null,
-        email: s.email || null,
-        bank_name: s.bank_name || null,
-        account_name: s.account_name || null,
-        account_number: s.account_number || null,
-        ifsc_code: s.ifsc_code || null,
-        upi_id: s.upi_id || null,
-        payment_terms: s.payment_terms || null
-      };
-
-      supabase
-        .from('business_settings')
-        .upsert(
-          {
-            ...baseRow,
-            auto_email_invoices: s.auto_email_invoices !== false,
-            invoice_notification_email: s.invoice_notification_email || 'ippasevents@gmail.com'
-          },
-          { onConflict: 'id' }
-        )
-        .then(({ error }) => {
-          if (error) {
-            // Fallback upsert without new columns if migration_06.sql was not re-run yet
-            supabase!
-              .from('business_settings')
-              .upsert(baseRow, { onConflict: 'id' })
-              .then(({ error: fallbackErr }) => {
-                if (fallbackErr) this.reportDbError('Update Settings Failed', fallbackErr);
-                else this.clearDbError();
-              });
-          } else {
-            this.clearDbError();
-          }
-        });
-    }
+    const s = this.state.settings;
+    this.enqueueSqlOperations('Update Business Settings', [
+      {
+        type: 'upsert',
+        table: 'business_settings',
+        values: {
+          id: 1,
+          name: s.name,
+          address: s.address || null,
+          phone: s.phone || null,
+          email: s.email || null,
+          bank_name: s.bank_name || null,
+          account_name: s.account_name || null,
+          account_number: s.account_number || null,
+          ifsc_code: s.ifsc_code || null,
+          upi_id: s.upi_id || null,
+          payment_terms: s.payment_terms || null,
+          auto_email_invoices: s.auto_email_invoices !== false,
+          invoice_notification_email: s.invoice_notification_email || 'ippasevents@gmail.com'
+        },
+        onConflict: 'id'
+      }
+    ]);
   }
 
   // Event Totals: supports per_guest and per_kg

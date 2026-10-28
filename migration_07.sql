@@ -122,6 +122,9 @@ begin
       v_entity_type := 'stock';
     when 'stock_purchases' then
       v_entity_type := 'purchase';
+    when 'stock_purchase_items' then
+      v_entity_type := 'purchase';
+      v_entity_id := coalesce(v_row->>'purchase_id', v_entity_id);
     when 'stock_purchase_payments' then
       v_entity_type := 'purchase';
       v_entity_id := coalesce(v_row->>'purchase_id', v_entity_id);
@@ -222,6 +225,7 @@ begin
     'payments',
     'business_settings',
     'stock_purchases',
+    'stock_purchase_items',
     'stock_purchase_payments'
   ] loop
     if exists (
