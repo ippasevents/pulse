@@ -169,6 +169,7 @@ export default function Navbar() {
             {visibleNavItems.map((item) => {
               const isActive =
                 pathname === item.href ||
+                (item.href === '/dashboard' && pathname === '/') ||
                 (item.href !== '/dashboard' && pathname.startsWith(item.href));
               return (
                 <Link

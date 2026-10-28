@@ -112,6 +112,7 @@ export default function EventDetailPage() {
   const role = state.currentRole;
   const canEditOps = role === 'owner' || role === 'manager';
   const isFinance = role === 'owner' || role === 'accountant';
+  const canEditQuote = canEditOps || isFinance;
 
   const { menuTotal, extrasTotal, grandTotal } = store.getEventTotal(event.id);
   const displayTotal = isFinance ? grandTotal : menuTotal;
@@ -344,34 +345,42 @@ export default function EventDetailPage() {
         >
           🍽️ Menu &amp; Quote ({eventItems.length})
         </button>
-        <button
-          className={`btn ${activeTab === 'stock' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
-          onClick={() => setActiveTab('stock')}
-        >
-          📦 Stock Estimation A4 ({stockEst.items.length})
-        </button>
-        <button
-          className={`btn ${activeTab === 'shifts' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
-          onClick={() => setActiveTab('shifts')}
-        >
-          👥 Staff Shifts ({shifts.length})
-        </button>
-        <button
-          className={`btn ${activeTab === 'invoices' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
-          onClick={() => setActiveTab('invoices')}
-        >
-          🧾 Invoices &amp; Part-Payments ({invoices.length})
-        </button>
-        <button
-          className={`btn ${activeTab === 'details' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
-          onClick={() => setActiveTab('details')}
-        >
-          ⚙️ Edit Details
-        </button>
+        {canEditOps && (
+          <button
+            className={`btn ${activeTab === 'stock' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
+            onClick={() => setActiveTab('stock')}
+          >
+            📦 Stock Estimation A4 ({stockEst.items.length})
+          </button>
+        )}
+        {canEditOps && (
+          <button
+            className={`btn ${activeTab === 'shifts' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
+            onClick={() => setActiveTab('shifts')}
+          >
+            👥 Staff Shifts ({shifts.length})
+          </button>
+        )}
+        {isFinance && (
+          <button
+            className={`btn ${activeTab === 'invoices' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
+            onClick={() => setActiveTab('invoices')}
+          >
+            🧾 Invoices &amp; Part-Payments ({invoices.length})
+          </button>
+        )}
+        {canEditOps && (
+          <button
+            className={`btn ${activeTab === 'details' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
+            onClick={() => setActiveTab('details')}
+          >
+            ⚙️ Edit Details
+          </button>
+        )}
       </div>
 
       {/* ----------------------------------------------------------------------------------- */}
@@ -409,7 +418,7 @@ export default function EventDetailPage() {
                         <th style={{ textAlign: 'center' }}>Qty</th>
                         <th style={{ textAlign: 'right' }}>Rate</th>
                         <th style={{ textAlign: 'right' }}>Subtotal</th>
-                        {canEditOps && <th style={{ textAlign: 'center' }}>Remove</th>}
+                        {canEditQuote && <th style={{ textAlign: 'center' }}>Remove</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -466,7 +475,7 @@ export default function EventDetailPage() {
                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--primary)' }}>
                               ₹{lineTotal.toLocaleString('en-IN')}
                             </td>
-                            {canEditOps && (
+                            {canEditQuote && (
                               <td style={{ textAlign: 'center' }}>
                                 <button
                                   className="btn btn-danger btn-sm"
@@ -498,7 +507,7 @@ export default function EventDetailPage() {
                         <tr>
                           <th>Description</th>
                           <th style={{ textAlign: 'right' }}>Amount</th>
-                          {canEditOps && <th style={{ textAlign: 'center' }}>Remove</th>}
+                          {canEditQuote && <th style={{ textAlign: 'center' }}>Remove</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -508,7 +517,7 @@ export default function EventDetailPage() {
                             <td style={{ textAlign: 'right', fontWeight: 600 }}>
                               ₹{ex.amount.toLocaleString('en-IN')}
                             </td>
-                            {canEditOps && (
+                            {canEditQuote && (
                               <td style={{ textAlign: 'center' }}>
                                 <button
                                   className="btn btn-danger btn-sm"
@@ -526,7 +535,7 @@ export default function EventDetailPage() {
                 )}
 
                 {/* Add Extra Charge Form */}
-                {canEditOps && (
+                {canEditQuote && (
                   <form onSubmit={handleAddExtra} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
                     <input
                       type="text"
@@ -632,7 +641,7 @@ export default function EventDetailPage() {
                               ✓ Added
                             </span>
                           ) : (
-                            canEditOps && (
+                            canEditQuote && (
                               <button
                                 className="btn btn-secondary btn-sm"
                                 onClick={() => handleAddDish(dish)}

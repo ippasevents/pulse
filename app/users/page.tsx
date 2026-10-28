@@ -2,12 +2,29 @@
 
 import React, { useEffect, useState } from 'react';
 import { store } from '@/lib/store';
-import { UserRole, Profile } from '@/lib/types';
+import { UserRole, Profile, StaffMember } from '@/lib/types';
 
 export default function UsersPage() {
   const [state, setState] = useState(store.getState());
-  const [editingUser, setEditingUser] = useState<Profile | null>(null);
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
+  const [savedNotice, setSavedNotice] = useState('');
+  const [errorNotice, setErrorNotice] = useState('');
+
+  // Add New User Modal State
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [addForm, setAddForm] = useState({
+    full_name: '',
+    role: 'manager' as UserRole,
+    username: '',
+    password: '',
+    phone: '',
+    role_title: 'Buffet Server',
+    hourly_rate: 200
+  });
+  const [addError, setAddError] = useState('');
+
+  // Edit Management User Modal State
+  const [editingUser, setEditingUser] = useState<Profile | null>(null);
   const [editForm, setEditForm] = useState({
     full_name: '',
     username: '',
@@ -15,7 +32,19 @@ export default function UsersPage() {
     phone: '',
     role: 'manager' as UserRole
   });
-  const [savedNotice, setSavedNotice] = useState('');
+  const [editError, setEditError] = useState('');
+
+  // Edit Staff Login Modal State
+  const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+  const [staffEditForm, setStaffEditForm] = useState({
+    name: '',
+    phone: '',
+    password: '',
+    role_title: ''
+  });
+
+  // Delete Confirmation State
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = store.subscribe(() => {
@@ -27,30 +56,100 @@ export default function UsersPage() {
   const role = state.currentRole;
   const isOwner = role === 'owner';
 
+  const notifySuccess = (msg: string) => {
+    setErrorNotice('');
+    setSavedNotice(msg);
+    setTimeout(() => setSavedNotice(''), 3500);
+  };
+
   const roleDescriptions: Record<UserRole, { title: string; desc: string; color: string }> = {
     owner: {
       title: 'Owner',
-      desc: 'Full administrative access across all modules: executive dashboard, sales revenue, quotes, operations, invoices, bank details, and user passwords.',
+      desc: 'Full administrative access across all modules: executive dashboard, sales revenue, quotes, operations, invoices, bank details, and user accounts.',
       color: '#e11d48'
     },
     manager: {
       title: 'Manager',
-      desc: 'Dedicated operational dashboard focusing on upcoming events & bookings, menu dishes & recipe formulations, warehouse pantry stock adjustments, and staff shifts.',
+      desc: 'Dedicated operational dashboard focusing on upcoming events & bookings, menu dishes & recipe formulations, warehouse pantry stock, and staff shifts.',
       color: '#2563eb'
     },
     accountant: {
       title: 'Accountant',
-      desc: 'Dedicated financial dashboard displaying total sales, monthly sales revenue chart, invoicing, client payments collection, and upcoming works billing details.',
+      desc: 'Dedicated financial dashboard displaying total sales, monthly sales revenue chart, quotations, invoicing, client payment collections, and upcoming works billing.',
       color: '#059669'
     },
     staff: {
       title: 'Staff Member',
-      desc: 'Dedicated restricted view showing only upcoming assigned catering functions, venue location, reporting time, and duty role using phone number login.',
+      desc: 'Restricted crew login using mobile phone number as username, showing only upcoming assigned catering function and venue location.',
       color: '#7c3aed'
     }
   };
 
+  const handleOpenAddModal = () => {
+    setAddError('');
+    setAddForm({
+      full_name: '',
+      role: 'manager',
+      username: '',
+      password: '',
+      phone: '',
+      role_title: 'Buffet Server',
+      hourly_rate: 200
+    });
+    setIsAddModalOpen(true);
+  };
+
+  const handleAddUserSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddError('');
+
+    if (!addForm.full_name.trim()) {
+      setAddError('Full name is required.');
+      return;
+    }
+
+    if (addForm.role === 'staff') {
+      if (!addForm.phone.trim()) {
+        setAddError('Phone number is required for Staff login.');
+        return;
+      }
+      store.addStaff({
+        name: addForm.full_name.trim(),
+        phone: addForm.phone.trim(),
+        password: addForm.password.trim() || 'password123',
+        role_title: addForm.role_title.trim() || 'Service Crew',
+        hourly_rate: Number(addForm.hourly_rate) || 200,
+        active: true
+      });
+      setIsAddModalOpen(false);
+      notifySuccess(`Added staff login for ${addForm.full_name.trim()} (Username: ${addForm.phone.trim()})`);
+      return;
+    }
+
+    if (!addForm.username.trim() || !addForm.password.trim()) {
+      setAddError('Username and password are required.');
+      return;
+    }
+
+    const res = store.addProfile({
+      full_name: addForm.full_name,
+      username: addForm.username,
+      password: addForm.password,
+      phone: addForm.phone,
+      role: addForm.role
+    });
+
+    if (!res.success) {
+      setAddError(res.error || 'Could not create user.');
+      return;
+    }
+
+    setIsAddModalOpen(false);
+    notifySuccess(`Created ${addForm.role.toUpperCase()} account for ${addForm.full_name.trim()}!`);
+  };
+
   const handleOpenEdit = (profile: Profile) => {
+    setEditError('');
     setEditingUser(profile);
     setEditForm({
       full_name: profile.full_name,
@@ -64,15 +163,53 @@ export default function UsersPage() {
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
-    if (!editForm.username || !editForm.password) {
-      alert('Username and password are required.');
+    if (!editForm.username.trim() || !editForm.password.trim()) {
+      setEditError('Username and password are required.');
       return;
     }
 
-    store.updateProfile(editingUser.id, editForm);
-    setSavedNotice(`Updated profile for ${editForm.full_name}!`);
+    const res = store.updateProfile(editingUser.id, editForm);
+    if (!res.success) {
+      setEditError(res.error || 'Could not update profile.');
+      return;
+    }
+
     setEditingUser(null);
-    setTimeout(() => setSavedNotice(''), 3000);
+    notifySuccess(`Updated credentials for ${editForm.full_name}!`);
+  };
+
+  const handleDeleteUser = (profile: Profile) => {
+    const res = store.deleteProfile(profile.id);
+    setConfirmDeleteId(null);
+    if (!res.success) {
+      setErrorNotice(res.error || 'Cannot delete this account.');
+      setTimeout(() => setErrorNotice(''), 4000);
+      return;
+    }
+    notifySuccess(`Removed user account "${profile.full_name}".`);
+  };
+
+  const handleOpenStaffEdit = (staff: StaffMember) => {
+    setEditingStaff(staff);
+    setStaffEditForm({
+      name: staff.name,
+      phone: staff.phone || '',
+      password: staff.password || 'password123',
+      role_title: staff.role_title || 'Service Crew'
+    });
+  };
+
+  const handleSaveStaffEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStaff || !staffEditForm.phone.trim()) return;
+    store.updateStaff(editingStaff.id, {
+      name: staffEditForm.name.trim(),
+      phone: staffEditForm.phone.trim(),
+      password: staffEditForm.password.trim() || 'password123',
+      role_title: staffEditForm.role_title.trim()
+    });
+    setEditingStaff(null);
+    notifySuccess(`Updated staff login credentials for ${staffEditForm.name.trim()}!`);
   };
 
   const togglePasswordVisibility = (id: string) => {
@@ -85,9 +222,16 @@ export default function UsersPage() {
         <div>
           <h1 className="page-title">User Accounts &amp; Access Roles</h1>
           <p className="page-subtitle">
-            Manage system logins, access permissions, and passwords for Owner, Manager, Accountant, and Staff.
+            Create and manage system logins, access permissions, and passwords for Owner, Manager, Accountant, and Staff.
           </p>
         </div>
+        {isOwner && (
+          <div>
+            <button type="button" onClick={handleOpenAddModal} className="btn btn-primary">
+              + Add New User
+            </button>
+          </div>
+        )}
       </div>
 
       {!isOwner && (
@@ -102,7 +246,7 @@ export default function UsersPage() {
             marginBottom: '1.25rem'
           }}
         >
-          ℹ️ <strong>Owner privilege:</strong> You are currently logged in as <em>{role}</em>. Only the Owner can modify system usernames and passwords.
+          ℹ️ <strong>Owner privilege:</strong> You are currently logged in as <em>{role}</em>. Only the Owner can create or modify system user accounts and passwords.
         </div>
       )}
 
@@ -122,11 +266,27 @@ export default function UsersPage() {
         </div>
       )}
 
+      {errorNotice && (
+        <div
+          style={{
+            background: '#fee2e2',
+            border: '1px solid #fecaca',
+            color: '#dc2626',
+            padding: '0.65rem 0.85rem',
+            borderRadius: '8px',
+            fontSize: '0.85rem',
+            marginBottom: '1.25rem'
+          }}
+        >
+          ⚠️ {errorNotice}
+        </div>
+      )}
+
       {/* Role Definitions Cards */}
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <h2 className="card-title">System Role Hierarchy &amp; Access Rights</h2>
-        <div className="grid-3">
-          {(['owner', 'manager', 'accountant'] as UserRole[]).map((rKey) => {
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+          {(['owner', 'manager', 'accountant', 'staff'] as UserRole[]).map((rKey) => {
             const rInfo = roleDescriptions[rKey];
             return (
               <div
@@ -160,12 +320,17 @@ export default function UsersPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div>
             <h2 className="card-title" style={{ margin: 0 }}>
-              Authorized User Credentials
+              Authorized User Credentials ({state.profiles.length})
             </h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-              Username and password login credentials for Owner, Manager, and Accountant
+              Username and password login credentials for Owner, Manager, and Accountant accounts
             </p>
           </div>
+          {isOwner && (
+            <button type="button" onClick={handleOpenAddModal} className="btn btn-secondary btn-sm">
+              + Add User Account
+            </button>
+          )}
         </div>
 
         <div className="data-table-container">
@@ -183,7 +348,9 @@ export default function UsersPage() {
             <tbody>
               {state.profiles.map((profile) => {
                 const isShowingPass = showPasswords[profile.id];
-                const isActiveUser = state.currentUserId === profile.id || state.currentRole === profile.role;
+                const isActiveUser = state.currentUserId === profile.id;
+                const ownerCount = state.profiles.filter((p) => p.role === 'owner').length;
+                const canDelete = isOwner && !isActiveUser && !(profile.role === 'owner' && ownerCount <= 1);
 
                 return (
                   <tr key={profile.id} style={{ background: isActiveUser ? '#f8fafc' : 'transparent' }}>
@@ -192,7 +359,7 @@ export default function UsersPage() {
                         {profile.full_name}
                         {isActiveUser && (
                           <span className="badge" style={{ background: '#dcfce7', color: '#15803d', fontSize: '0.65rem' }}>
-                            ✓ Active
+                            ✓ Signed In
                           </span>
                         )}
                       </div>
@@ -255,19 +422,48 @@ export default function UsersPage() {
                     </td>
                     <td>{profile.phone || '—'}</td>
                     <td style={{ textAlign: 'center' }}>
-                      <div style={{ display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
-                        {isOwner ? (
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            onClick={() => handleOpenEdit(profile)}
-                          >
-                            Edit Credentials
-                          </button>
+                      {isOwner ? (
+                        confirmDeleteId === profile.id ? (
+                          <div style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              onClick={() => handleDeleteUser(profile)}
+                            >
+                              Confirm Delete
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => setConfirmDeleteId(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
                         ) : (
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Protected</span>
-                        )}
-                      </div>
+                          <div style={{ display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => handleOpenEdit(profile)}
+                            >
+                              Edit Credentials
+                            </button>
+                            {canDelete && (
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                onClick={() => setConfirmDeleteId(profile.id)}
+                                title="Delete user account"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        )
+                      ) : (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Protected</span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -285,9 +481,30 @@ export default function UsersPage() {
               Staff Phone Logins (Crew Mobile Access)
             </h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-              Staff members log in using their registered mobile phone number to check their next assigned event and venue.
+              Staff members log in using their registered mobile phone number as username to check their next assigned event and venue.
             </p>
           </div>
+          {isOwner && (
+            <button
+              type="button"
+              onClick={() => {
+                setAddError('');
+                setAddForm({
+                  full_name: '',
+                  role: 'staff',
+                  username: '',
+                  password: 'password123',
+                  phone: '',
+                  role_title: 'Buffet Server',
+                  hourly_rate: 200
+                });
+                setIsAddModalOpen(true);
+              }}
+              className="btn btn-secondary btn-sm"
+            >
+              + Add Staff Login
+            </button>
+          )}
         </div>
 
         <div className="data-table-container">
@@ -299,6 +516,7 @@ export default function UsersPage() {
                 <th>Login Username (Phone Number)</th>
                 <th>Password</th>
                 <th>Status</th>
+                {isOwner && <th style={{ textAlign: 'center' }}>Action</th>}
               </tr>
             </thead>
             <tbody>
@@ -317,16 +535,191 @@ export default function UsersPage() {
                     </code>
                   </td>
                   <td>
-                    <span className="badge" style={{ background: '#dcfce7', color: '#15803d' }}>
-                      Active Crew
+                    <span className="badge" style={{ background: staff.active ? '#dcfce7' : '#f1f5f9', color: staff.active ? '#15803d' : '#64748b' }}>
+                      {staff.active ? 'Active Crew' : 'Inactive'}
                     </span>
                   </td>
+                  {isOwner && (
+                    <td style={{ textAlign: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleOpenStaffEdit(staff)}
+                      >
+                        Edit Login
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Add New User Modal */}
+      {isAddModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsAddModalOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <div>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+                  Add New User Account
+                </h2>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                  Create login credentials and assign role permissions
+                </p>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => setIsAddModalOpen(false)}>
+                ✕
+              </button>
+            </div>
+
+            {addError && (
+              <div
+                style={{
+                  background: '#fee2e2',
+                  border: '1px solid #fecaca',
+                  color: '#dc2626',
+                  padding: '0.6rem 0.8rem',
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  marginBottom: '1rem'
+                }}
+              >
+                {addError}
+              </div>
+            )}
+
+            <form onSubmit={handleAddUserSubmit}>
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Access Role *</label>
+                <select
+                  className="form-control"
+                  value={addForm.role}
+                  onChange={(e) => setAddForm({ ...addForm, role: e.target.value as UserRole })}
+                >
+                  <option value="manager">Manager (Events, Menus, Stock &amp; Staff)</option>
+                  <option value="accountant">Accountant (Sales, Quotations, Invoices &amp; Payments)</option>
+                  <option value="owner">Owner (Full Administrative Access)</option>
+                  <option value="staff">Staff Member (Phone Login - Next Function Only)</option>
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Full Name *</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. Nithin Nair"
+                  value={addForm.full_name}
+                  onChange={(e) => setAddForm({ ...addForm, full_name: e.target.value })}
+                  required
+                />
+              </div>
+
+              {addForm.role === 'staff' ? (
+                <>
+                  <div className="form-group" style={{ marginBottom: '1rem' }}>
+                    <label className="form-label">Staff Phone Number (Used as Login Username) *</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. 9745111009"
+                      value={addForm.phone}
+                      onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div className="grid-2">
+                    <div className="form-group" style={{ marginBottom: '1rem' }}>
+                      <label className="form-label">Duty Designation</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. Buffet Server"
+                        value={addForm.role_title}
+                        onChange={(e) => setAddForm({ ...addForm, role_title: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '1rem' }}>
+                      <label className="form-label">Hourly Rate (₹)</label>
+                      <input
+                        type="number"
+                        className="form-control"
+                        value={addForm.hourly_rate}
+                        onChange={(e) => setAddForm({ ...addForm, hourly_rate: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '1rem' }}>
+                    <label className="form-label">Login Password *</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Default: password123"
+                      value={addForm.password}
+                      onChange={(e) => setAddForm({ ...addForm, password: e.target.value })}
+                      required
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid-2">
+                    <div className="form-group" style={{ marginBottom: '1rem' }}>
+                      <label className="form-label">Login Username *</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. manager2"
+                        value={addForm.username}
+                        onChange={(e) => setAddForm({ ...addForm, username: e.target.value.toLowerCase().trim() })}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '1rem' }}>
+                      <label className="form-label">Login Password *</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Enter password"
+                        value={addForm.password}
+                        onChange={(e) => setAddForm({ ...addForm, password: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '1rem' }}>
+                    <label className="form-label">Contact Phone</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="+91 98470 00000"
+                      value={addForm.phone}
+                      onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })}
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setIsAddModalOpen(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ fontWeight: 600 }}>
+                  Create User Account
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Edit User Credentials Modal */}
       {editingUser && (
@@ -338,13 +731,29 @@ export default function UsersPage() {
                   Edit Credentials for {editingUser.full_name}
                 </h2>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                  Update username, password, or contact phone
+                  Update role, username, password, or contact phone
                 </p>
               </div>
               <button className="btn btn-secondary btn-sm" onClick={() => setEditingUser(null)}>
                 ✕
               </button>
             </div>
+
+            {editError && (
+              <div
+                style={{
+                  background: '#fee2e2',
+                  border: '1px solid #fecaca',
+                  color: '#dc2626',
+                  padding: '0.6rem 0.8rem',
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  marginBottom: '1rem'
+                }}
+              >
+                {editError}
+              </div>
+            )}
 
             <form onSubmit={handleSaveEdit}>
               <div className="form-group" style={{ marginBottom: '1rem' }}>
@@ -356,6 +765,20 @@ export default function UsersPage() {
                   onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })}
                   required
                 />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Role *</label>
+                <select
+                  className="form-control"
+                  value={editForm.role}
+                  onChange={(e) => setEditForm({ ...editForm, role: e.target.value as UserRole })}
+                  disabled={editingUser.role === 'owner' && state.profiles.filter((p) => p.role === 'owner').length <= 1}
+                >
+                  <option value="owner">Owner</option>
+                  <option value="manager">Manager</option>
+                  <option value="accountant">Accountant</option>
+                </select>
               </div>
 
               <div className="form-group" style={{ marginBottom: '1rem' }}>
@@ -399,6 +822,81 @@ export default function UsersPage() {
                 </button>
                 <button type="submit" className="btn btn-primary" style={{ fontWeight: 600 }}>
                   Save Credentials
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Staff Login Modal */}
+      {editingStaff && (
+        <div className="modal-overlay" onClick={() => setEditingStaff(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '460px' }}>
+            <div className="modal-header">
+              <div>
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0 }}>
+                  Edit Staff Login: {editingStaff.name}
+                </h2>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                  Staff members sign in using their phone number as username
+                </p>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => setEditingStaff(null)}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveStaffEdit}>
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Staff Name *</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={staffEditForm.name}
+                  onChange={(e) => setStaffEditForm({ ...staffEditForm, name: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Phone Number (Login Username) *</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={staffEditForm.phone}
+                  onChange={(e) => setStaffEditForm({ ...staffEditForm, phone: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Login Password *</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={staffEditForm.password}
+                  onChange={(e) => setStaffEditForm({ ...staffEditForm, password: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label">Designation</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={staffEditForm.role_title}
+                  onChange={(e) => setStaffEditForm({ ...staffEditForm, role_title: e.target.value })}
+                />
+              </div>
+
+              <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setEditingStaff(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ fontWeight: 600 }}>
+                  Save Staff Login
                 </button>
               </div>
             </form>

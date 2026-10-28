@@ -1,12 +1,46 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { store } from '@/lib/store';
+import { UserRole } from '@/lib/types';
 import Navbar from '@/components/Navbar';
 import MobileBottomNav from '@/components/MobileBottomNav';
+import DashboardPage from '@/app/dashboard/page';
+
+function isRouteAllowed(role: UserRole, pathname: string): boolean {
+  if (role === 'owner') return true;
+  if (role === 'staff') {
+    return pathname === '/' || pathname === '/dashboard';
+  }
+  if (role === 'manager') {
+    return (
+      pathname === '/' ||
+      pathname === '/dashboard' ||
+      pathname.startsWith('/events') ||
+      pathname.startsWith('/clients') ||
+      pathname.startsWith('/menu') ||
+      pathname.startsWith('/stock') ||
+      pathname.startsWith('/staff')
+    );
+  }
+  if (role === 'accountant') {
+    return (
+      pathname === '/' ||
+      pathname === '/dashboard' ||
+      pathname.startsWith('/events') ||
+      pathname.startsWith('/clients') ||
+      pathname.startsWith('/invoices')
+    );
+  }
+  return false;
+}
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [role, setRole] = useState<UserRole>('owner');
   const [isMounted, setIsMounted] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -15,13 +49,25 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setIsMounted(true);
-    setIsAuthenticated(store.getState().isAuthenticated);
+    const s = store.getState();
+    setIsAuthenticated(s.isAuthenticated);
+    setRole(s.currentRole);
 
     const unsub = store.subscribe(() => {
-      setIsAuthenticated(store.getState().isAuthenticated);
+      const next = store.getState();
+      setIsAuthenticated(next.isAuthenticated);
+      setRole(next.currentRole);
     });
     return unsub;
   }, []);
+
+  const allowed = isRouteAllowed(role, pathname);
+
+  useEffect(() => {
+    if (isMounted && isAuthenticated && !allowed) {
+      router.replace('/dashboard');
+    }
+  }, [isMounted, isAuthenticated, allowed, router]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,11 +203,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Authenticated: Render full application
+  // Authenticated: Render full application with strict role route enforcement
   return (
     <div className="app-container">
       <Navbar />
-      <main className="main-content">{children}</main>
+      <main className="main-content">{allowed ? children : <DashboardPage />}</main>
       <MobileBottomNav />
     </div>
   );

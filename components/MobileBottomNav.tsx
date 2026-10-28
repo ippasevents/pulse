@@ -125,6 +125,7 @@ export default function MobileBottomNav() {
 
           const isActive =
             pathname === item.href ||
+            (item.href === '/dashboard' && pathname === '/') ||
             (item.href !== '/dashboard' && pathname.startsWith(item.href));
 
           return (

@@ -10,6 +10,7 @@ export interface Profile {
   full_name: string;
   phone?: string;
   role: UserRole;
+  role_title?: string;
   hourly_rate?: number;
 }
 

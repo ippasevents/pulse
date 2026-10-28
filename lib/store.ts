@@ -443,21 +443,22 @@ class DataStore {
           const parsed = JSON.parse(stored);
 
           let normalizedProfiles: Profile[] = Array.isArray(parsed.profiles)
-            ? parsed.profiles.filter((p: any) => p.role === 'owner' || p.role === 'manager' || p.role === 'accountant')
+            ? parsed.profiles
+                .filter((p: any) => p && (p.role === 'owner' || p.role === 'manager' || p.role === 'accountant'))
+                .map((p: any) => {
+                  const initMatch = INITIAL_PROFILES.find((ip) => ip.id === p.id);
+                  return {
+                    ...p,
+                    username: p.username || initMatch?.username || p.role,
+                    password: p.password || initMatch?.password || `${p.role}123`
+                  };
+                })
             : [];
 
           if (normalizedProfiles.length === 0) {
             normalizedProfiles = INITIAL_PROFILES;
-          } else {
-            normalizedProfiles = INITIAL_PROFILES.map((initP) => {
-              const found = normalizedProfiles.find((p) => p.role === initP.role || p.id === initP.id);
-              return {
-                ...initP,
-                ...(found || {}),
-                username: found?.username || initP.username,
-                password: found?.password || initP.password
-              };
-            });
+          } else if (!normalizedProfiles.some((p) => p.role === 'owner')) {
+            normalizedProfiles = [INITIAL_PROFILES[0], ...normalizedProfiles];
           }
 
           let currentRole: UserRole = parsed.currentRole;
@@ -553,7 +554,8 @@ class DataStore {
           username: staffMember.phone,
           full_name: staffMember.name,
           phone: staffMember.phone,
-          role: 'staff'
+          role: 'staff',
+          role_title: staffMember.role_title
         };
       }
     }
@@ -619,7 +621,8 @@ class DataStore {
         username: staffMember.phone,
         full_name: staffMember.name,
         phone: staffMember.phone,
-        role: 'staff'
+        role: 'staff',
+        role_title: staffMember.role_title
       };
 
       this.state.currentUserId = staffMember.id;
@@ -637,11 +640,80 @@ class DataStore {
     this.save();
   }
 
-  public updateProfile(profileId: string, updates: Partial<Profile>) {
+  public addProfile(profileData: {
+    full_name: string;
+    username: string;
+    password: string;
+    phone?: string;
+    role: UserRole;
+  }): { success: boolean; error?: string; profile?: Profile } {
+    const cleanUsername = profileData.username.trim().toLowerCase();
+    if (!cleanUsername || !profileData.password.trim()) {
+      return { success: false, error: 'Username and password are required.' };
+    }
+
+    const exists = this.state.profiles.some(
+      (p) => (p.username || '').toLowerCase() === cleanUsername
+    );
+    if (exists) {
+      return { success: false, error: `Username "${cleanUsername}" is already in use.` };
+    }
+
+    const newProfile: Profile = {
+      id: 'u-' + Date.now(),
+      full_name: profileData.full_name.trim(),
+      username: cleanUsername,
+      password: profileData.password.trim(),
+      phone: (profileData.phone || '').trim(),
+      role: profileData.role
+    };
+
+    this.state.profiles.push(newProfile);
+    this.save();
+    return { success: true, profile: newProfile };
+  }
+
+  public updateProfile(profileId: string, updates: Partial<Profile>): { success: boolean; error?: string } {
+    if (updates.username) {
+      const cleanUsername = updates.username.trim().toLowerCase();
+      const duplicate = this.state.profiles.some(
+        (p) => p.id !== profileId && (p.username || '').toLowerCase() === cleanUsername
+      );
+      if (duplicate) {
+        return { success: false, error: `Username "${cleanUsername}" is already in use.` };
+      }
+      updates = { ...updates, username: cleanUsername };
+    }
+
     this.state.profiles = this.state.profiles.map((p) =>
       p.id === profileId ? { ...p, ...updates } : p
     );
+
+    if (this.state.currentUserId === profileId && updates.role) {
+      this.state.currentRole = updates.role;
+    }
+
     this.save();
+    return { success: true };
+  }
+
+  public deleteProfile(profileId: string): { success: boolean; error?: string } {
+    if (this.state.currentUserId === profileId) {
+      return { success: false, error: 'You cannot delete the currently signed-in account.' };
+    }
+    const target = this.state.profiles.find((p) => p.id === profileId);
+    if (!target) {
+      return { success: false, error: 'User profile not found.' };
+    }
+    if (target.role === 'owner') {
+      const ownerCount = this.state.profiles.filter((p) => p.role === 'owner').length;
+      if (ownerCount <= 1) {
+        return { success: false, error: 'At least one Owner account must remain in the system.' };
+      }
+    }
+    this.state.profiles = this.state.profiles.filter((p) => p.id !== profileId);
+    this.save();
+    return { success: true };
   }
 
   public resetToDefault() {

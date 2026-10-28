@@ -13,6 +13,7 @@ export default function StaffPage() {
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
+    password: 'password123',
     role_title: 'Buffet Server',
     hourly_rate: 200,
     active: true
@@ -39,7 +40,7 @@ export default function StaffPage() {
     }
     setIsModalOpen(false);
     setEditingStaff(null);
-    setFormData({ name: '', phone: '', role_title: 'Buffet Server', hourly_rate: 200, active: true });
+    setFormData({ name: '', phone: '', password: 'password123', role_title: 'Buffet Server', hourly_rate: 200, active: true });
   };
 
   return (
@@ -56,7 +57,7 @@ export default function StaffPage() {
             <button
               onClick={() => {
                 setEditingStaff(null);
-                setFormData({ name: '', phone: '', role_title: 'Buffet Server', hourly_rate: 200, active: true });
+                setFormData({ name: '', phone: '', password: 'password123', role_title: 'Buffet Server', hourly_rate: 200, active: true });
                 setIsModalOpen(true);
               }}
               className="btn btn-primary"
@@ -115,6 +116,7 @@ export default function StaffPage() {
                             setFormData({
                               name: staff.name,
                               phone: staff.phone || '',
+                              password: staff.password || 'password123',
                               role_title: staff.role_title || '',
                               hourly_rate: staff.hourly_rate,
                               active: staff.active
@@ -214,16 +216,31 @@ export default function StaffPage() {
 
               <div className="grid-2">
                 <div className="form-group">
-                  <label className="form-label">Phone Contact</label>
+                  <label className="form-label">Phone Number (Login Username) *</label>
                   <input
                     type="text"
                     className="form-control"
-                    placeholder="+91 97451 00000"
+                    placeholder="e.g. 9745111001"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    required
                   />
                 </div>
 
+                <div className="form-group">
+                  <label className="form-label">Login Password *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Default: password123"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid-2">
                 <div className="form-group">
                   <label className="form-label">Primary Role</label>
                   <input
@@ -234,17 +251,17 @@ export default function StaffPage() {
                     onChange={(e) => setFormData({ ...formData, role_title: e.target.value })}
                   />
                 </div>
-              </div>
 
-              <div className="form-group">
-                <label className="form-label">Hourly Wage Rate (INR ₹) *</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  value={formData.hourly_rate}
-                  onChange={(e) => setFormData({ ...formData, hourly_rate: parseFloat(e.target.value) || 0 })}
-                  required
-                />
+                <div className="form-group">
+                  <label className="form-label">Hourly Wage Rate (INR ₹) *</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={formData.hourly_rate}
+                    onChange={(e) => setFormData({ ...formData, hourly_rate: parseFloat(e.target.value) || 0 })}
+                    required
+                  />
+                </div>
               </div>
 
               <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
