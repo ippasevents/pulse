@@ -7,12 +7,21 @@ import { Invoice, Payment } from '@/lib/types';
 import { downloadElementAsPdf } from '@/lib/downloadPdf';
 import EditBankDetailsModal from '@/components/EditBankDetailsModal';
 import { getMaxDueDate, getDefaultDueDate, clampDueDate } from '@/lib/dateUtils';
+import { sendInvoiceEmailNotification } from '@/lib/emailInvoice';
+import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 
 export default function InvoicesPage() {
   const [state, setState] = useState(store.getState());
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isBankModalOpen, setIsBankModalOpen] = useState(false);
+  const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
+  const [emailStatus, setEmailStatus] = useState<{
+    type: 'success' | 'info';
+    message: string;
+    gmailWebUrl?: string;
+    mailtoUrl?: string;
+  } | null>(null);
 
   // Edit Invoice modal state (no unlock requirement)
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
@@ -35,6 +44,7 @@ export default function InvoicesPage() {
   });
 
   useEffect(() => {
+    setState(store.getState());
     const unsub = store.subscribe(() => {
       setState(store.getState());
     });
@@ -135,16 +145,75 @@ export default function InvoicesPage() {
     setPartPayInvoice(null);
   };
 
+  const targetGmail = state.settings.invoice_notification_email || 'ippasevents@gmail.com';
+  const isAutoEmailOn = state.settings.auto_email_invoices !== false;
+
+  const handleEmailInvoice = async (inv: Invoice) => {
+    setSendingEmailId(inv.id);
+    const res = await sendInvoiceEmailNotification(inv, targetGmail);
+    setSendingEmailId(null);
+
+    if (res.success) {
+      setEmailStatus({
+        type: 'success',
+        message: `Invoice ${inv.invoice_number} sent to ${res.sentTo}.`
+      });
+    } else if (!res.configured) {
+      setEmailStatus({
+        type: 'info',
+        message: `Configure SMTP_USER & SMTP_PASS in Vercel Environment Variables for silent background email, or send Invoice ${inv.invoice_number} to ${res.sentTo} now:`,
+        gmailWebUrl: res.gmailWebUrl,
+        mailtoUrl: res.mailtoUrl
+      });
+    } else {
+      setEmailStatus({
+        type: 'info',
+        message: `Automatic email error (${res.error}). Use quick send for Invoice ${inv.invoice_number} to ${res.sentTo}:`,
+        gmailWebUrl: res.gmailWebUrl,
+        mailtoUrl: res.mailtoUrl
+      });
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
         <div>
           <h1 className="page-title">Invoicing &amp; Accounts Receivable</h1>
           <p className="page-subtitle">
-            All amounts in INR (₹) with invoice discount &amp; part-payment recording. Strictly standard A4 Portrait format PDF &amp; Print.
+            All amounts in INR (₹) with invoice discount, part-payments, A4 PDF export, and automatic Gmail copy to <strong>{targetGmail}</strong>.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <label
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.45rem',
+              padding: '0.4rem 0.75rem',
+              borderRadius: '6px',
+              background: isAutoEmailOn ? '#eff6ff' : '#f8fafc',
+              border: `1px solid ${isAutoEmailOn ? '#93c5fd' : 'var(--border)'}`,
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              color: isAutoEmailOn ? '#1d4ed8' : '#475569',
+              cursor: 'pointer'
+            }}
+            title={`Toggle automatic sending of newly created invoices to ${targetGmail}`}
+          >
+            <input
+              type="checkbox"
+              checked={isAutoEmailOn}
+              onChange={(e) =>
+                store.updateSettings({
+                  auto_email_invoices: e.target.checked,
+                  invoice_notification_email: targetGmail
+                })
+              }
+            />
+            <span>📧 Auto-Send to {targetGmail}</span>
+          </label>
+
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -155,6 +224,56 @@ export default function InvoicesPage() {
           </button>
         </div>
       </div>
+
+      {emailStatus && (
+        <div
+          style={{
+            background: emailStatus.type === 'success' ? '#dcfce7' : '#eff6ff',
+            border: `1px solid ${emailStatus.type === 'success' ? '#86efac' : '#93c5fd'}`,
+            color: emailStatus.type === 'success' ? '#166534' : '#1e3a8a',
+            padding: '0.75rem 1rem',
+            borderRadius: '8px',
+            marginBottom: '1.25rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '0.75rem',
+            flexWrap: 'wrap',
+            fontSize: '0.86rem'
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>{emailStatus.message}</span>
+          <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            {emailStatus.gmailWebUrl && (
+              <a
+                href={emailStatus.gmailWebUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-primary btn-sm"
+                style={{ fontWeight: 600 }}
+              >
+                📧 Open Gmail Compose
+              </a>
+            )}
+            {emailStatus.mailtoUrl && (
+              <a
+                href={emailStatus.mailtoUrl}
+                className="btn btn-secondary btn-sm"
+                style={{ fontWeight: 600 }}
+              >
+                ✉️ Mail App
+              </a>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setEmailStatus(null)}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid-3" style={{ marginBottom: '1.5rem' }}>
@@ -230,6 +349,13 @@ export default function InvoicesPage() {
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                           Client: {client?.name}
                         </div>
+                        {role === 'owner' && (
+                          <OwnerAuditBadge
+                            role={role}
+                            entry={store.getInvoiceAudit(inv.id)}
+                            prefixLabel="Updated by"
+                          />
+                        )}
                       </td>
                       <td>
                         <span className="badge" style={{ background: '#f1f5f9' }}>
@@ -282,6 +408,17 @@ export default function InvoicesPage() {
                               ✏️ Edit
                             </button>
                           )}
+
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ background: '#eff6ff', borderColor: '#bfdbfe', color: '#1d4ed8', fontWeight: 600 }}
+                            title={`Send Invoice Copy to ${targetGmail}`}
+                            disabled={sendingEmailId === inv.id}
+                            onClick={() => handleEmailInvoice(inv)}
+                          >
+                            {sendingEmailId === inv.id ? '⏳...' : '📧 Gmail'}
+                          </button>
 
                           <a
                             href={waUrl}

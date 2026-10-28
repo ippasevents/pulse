@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { store } from '@/lib/store';
 import { MenuItem, PricingType } from '@/lib/types';
+import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 
 export default function MenuPage() {
   const [state, setState] = useState(store.getState());
@@ -205,6 +206,13 @@ export default function MenuPage() {
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem', minHeight: '38px' }}>
                   {dish.description || 'No description added.'}
                 </p>
+                {role === 'owner' && (
+                  <OwnerAuditBadge
+                    role={role}
+                    entry={store.getEntityAudit(dish.id, ['menu', 'recipe'])}
+                    prefixLabel="Updated by"
+                  />
+                )}
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '0.75rem', marginTop: '0.5rem' }}>

@@ -15,6 +15,7 @@ export default function MobileBottomNav() {
   const [role, setRole] = useState<UserRole>('owner');
   const [currentUser, setCurrentUser] = useState(store.getCurrentUser());
   const [lowStockCount, setLowStockCount] = useState(0);
+  const [unreadAuditCount, setUnreadAuditCount] = useState(0);
 
   useEffect(() => {
     const update = () => {
@@ -23,6 +24,9 @@ export default function MobileBottomNav() {
       setCurrentUser(store.getCurrentUser());
       const lowCount = state.ingredients.filter((i) => i.stock_qty <= i.low_stock_level).length;
       setLowStockCount(lowCount);
+      setUnreadAuditCount(
+        state.currentRole === 'owner' ? store.getUnreadOwnerAlerts().length : 0
+      );
     };
 
     update();
@@ -41,7 +45,7 @@ export default function MobileBottomNav() {
   const getNavItems = () => {
     if (isStaff) {
       return [
-        { label: 'Next Function', href: '/dashboard', icon: '📍' },
+        { label: 'Duty & Salary', href: '/dashboard', icon: '📍' },
         { label: 'Logout', href: '#logout', icon: '🚪', isLogout: true }
       ];
     }
@@ -83,8 +87,15 @@ export default function MobileBottomNav() {
     { label: 'Clients Directory', href: '/clients', icon: '👥', desc: 'Customer profiles & past history', roles: ['owner', 'manager', 'accountant'] },
     { label: 'Menu & Recipes', href: '/menu', icon: '🍽️', desc: 'Dishes (per guest & per kg)', roles: ['owner', 'manager'] },
     { label: 'Stock & Inventory', href: '/stock', icon: '📦', desc: 'Pantry ingredients & stock purchases', roles: ['owner', 'manager'] },
-    { label: 'Staff Roster & Shifts', href: '/staff', icon: '🧑‍🍳', desc: 'Banquet service crew & shifts', roles: ['owner', 'manager'] },
+    { label: 'Staff & Salary Management', href: '/staff', icon: '🧑‍🍳', desc: 'Crew wages, paid salary & pending balances', roles: ['owner', 'manager', 'accountant'] },
     { label: 'Invoices & Receipts', href: '/invoices', icon: '🧾', desc: 'Billing, A4 prints & payments', roles: ['owner', 'accountant'] },
+    {
+      label: unreadAuditCount > 0 ? `Activity & Audit (${unreadAuditCount} New)` : 'Activity & Audit Log',
+      href: '/activity',
+      icon: '🕵️',
+      desc: 'Track user login IDs & live database updates',
+      roles: ['owner']
+    },
     { label: 'User Roles & Passwords', href: '/users', icon: '🛡️', desc: 'System user accounts & passwords', roles: ['owner'] },
     { label: 'Business Settings', href: '/settings', icon: '⚙️', desc: 'Bank details & payment terms', roles: ['owner'] }
   ];

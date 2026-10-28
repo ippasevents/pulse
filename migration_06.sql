@@ -1,6 +1,6 @@
 -- migration_06.sql
 -- Run this script in your Supabase SQL Editor (Dashboard -> SQL Editor -> New Query -> Run).
--- It updates your tables, columns, foreign keys, and RLS policies so the app can read & write all new data live.
+-- It updates your tables, columns, foreign keys, staff salary records, realtime publication, and RLS policies.
 
 -- 1. Ensure Enums Exist
 do $$ begin
@@ -40,7 +40,7 @@ values
   ('00000000-0000-4000-8000-000000000003', 'accountant', 'accountant123', 'Rahul (Accountant)', 'accountant', '+91 98470 33333')
 on conflict (username) do nothing;
 
--- 3. Staff Members Phone Login Password
+-- 3. Staff Members Phone Login Password & Staff Salary Records
 create table if not exists staff_members (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -57,6 +57,17 @@ alter table staff_members
 alter table shifts alter column staff_id drop not null;
 alter table shifts add column if not exists staff_member_id uuid references staff_members on delete cascade;
 alter table shifts drop constraint if exists shifts_check;
+
+create table if not exists staff_salary_records (
+  id uuid primary key default gen_random_uuid(),
+  staff_member_id uuid not null references staff_members(id) on delete cascade,
+  event_id uuid references events(id) on delete set null,
+  record_type text not null default 'payment' check (record_type in ('payment', 'earning')),
+  amount numeric(12,2) not null default 0,
+  method text not null default 'Cash',
+  note text,
+  recorded_at timestamptz not null default now()
+);
 
 -- 4. Per-Guest & Per-Kg Pricing on Menu Items & Event Quotes
 alter table ingredients
@@ -100,7 +111,7 @@ alter table invoices add constraint invoices_event_id_fkey
 alter table payments
   add column if not exists note text;
 
--- 6. Business Settings & Bank Details
+-- 6. Business Settings, Bank Details & Automatic Invoice Email Option
 create table if not exists business_settings (
   id int primary key default 1 check (id = 1),
   name text,
@@ -112,7 +123,9 @@ create table if not exists business_settings (
   account_number text,
   ifsc_code text,
   upi_id text,
-  payment_terms text
+  payment_terms text,
+  auto_email_invoices boolean default true,
+  invoice_notification_email text default 'ippasevents@gmail.com'
 );
 
 alter table business_settings
@@ -121,10 +134,12 @@ alter table business_settings
   add column if not exists account_number text,
   add column if not exists ifsc_code text,
   add column if not exists upi_id text,
-  add column if not exists payment_terms text;
+  add column if not exists payment_terms text,
+  add column if not exists auto_email_invoices boolean default true,
+  add column if not exists invoice_notification_email text default 'ippasevents@gmail.com';
 
-insert into business_settings (id, name)
-values (1, 'IPPAS Food Service & Events')
+insert into business_settings (id, name, auto_email_invoices, invoice_notification_email)
+values (1, 'IPPAS Food Service & Events', true, 'ippasevents@gmail.com')
 on conflict (id) do nothing;
 
 -- 7. Stock Purchases & Vendor Dues Tables
@@ -208,9 +223,29 @@ join menu_item_ingredients mii on mii.menu_item_id = ei.menu_item_id
 join ingredients i on i.id = mii.ingredient_id
 group by ei.event_id, i.id, i.name, i.unit;
 
--- 9. Configure RLS Policies so App Client (anon & authenticated) Can Read & Write Data
--- Note: Since the app uses its own custom Username/Phone + Password login screen rather than Supabase Email Auth,
--- client requests use NEXT_PUBLIC_SUPABASE_ANON_KEY ('anon' role). Without 'anon' policies, Supabase rejects all updates!
+-- 9. Owner Activity & Database Audit Logs Table
+create table if not exists activity_logs (
+  id uuid primary key default gen_random_uuid(),
+  entity_type text not null,
+  entity_id text not null,
+  parent_event_id text,
+  action text not null check (action in ('create', 'update', 'delete')),
+  summary text not null,
+  details text,
+  actor_id text,
+  actor_username text not null default 'supabase_db',
+  actor_name text not null default 'Direct Database Change',
+  actor_role text not null default 'database',
+  source text not null default 'database' check (source in ('app', 'database')),
+  is_read_by_owner boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_activity_logs_created_at on activity_logs (created_at desc);
+create index if not exists idx_activity_logs_entity_id on activity_logs (entity_id);
+create index if not exists idx_activity_logs_parent_event_id on activity_logs (parent_event_id);
+
+-- 10. Configure RLS Policies & Enable Realtime Publication Across All App Tables
 do $$
 declare
   tbl text;
@@ -226,12 +261,14 @@ begin
     'event_extras',
     'staff_members',
     'shifts',
+    'staff_salary_records',
     'invoices',
     'payments',
     'business_settings',
     'stock_purchases',
     'stock_purchase_items',
-    'stock_purchase_payments'
+    'stock_purchase_payments',
+    'activity_logs'
   ] loop
     execute format('alter table %I enable row level security', tbl);
     execute format('drop policy if exists app_full_access on %I', tbl);
@@ -239,5 +276,11 @@ begin
       'create policy app_full_access on %I for all to anon, authenticated using (true) with check (true)',
       tbl
     );
+    begin
+      execute format('alter publication supabase_realtime add table %I', tbl);
+    exception
+      when others then null;
+    end;
   end loop;
 end $$;
+

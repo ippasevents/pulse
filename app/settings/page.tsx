@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { store } from '@/lib/store';
 import { isSupabaseConfigured } from '@/lib/supabase';
+import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 
 export default function SettingsPage() {
   const [state, setState] = useState(store.getState());
@@ -51,6 +52,17 @@ export default function SettingsPage() {
       <div className="grid-2">
         <div className="card">
           <h2 className="card-title">Company Identity &amp; Invoice Info</h2>
+          {isOwner && (
+            <div style={{ marginBottom: '0.85rem' }}>
+              <OwnerAuditBadge
+                role={role}
+                entry={store.getEntityAudit(String(form.id), ['settings'])}
+                prefixLabel="Settings last updated by"
+                variant="banner"
+                showSummary
+              />
+            </div>
+          )}
 
           {savedNotice && (
             <div
@@ -200,6 +212,51 @@ export default function SettingsPage() {
               </div>
             </div>
 
+            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.65rem', color: '#0f172a' }}>
+                📧 Automatic Invoice Email Copy
+              </h3>
+
+              <div
+                className="form-group"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  background: '#eff6ff',
+                  border: '1px solid #bfdbfe',
+                  padding: '0.65rem 0.85rem',
+                  borderRadius: '6px'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  id="autoEmailInvoicesSetting"
+                  checked={form.auto_email_invoices !== false}
+                  onChange={(e) => setForm({ ...form, auto_email_invoices: e.target.checked })}
+                  disabled={!isOwner}
+                />
+                <label
+                  htmlFor="autoEmailInvoicesSetting"
+                  style={{ fontSize: '0.85rem', fontWeight: 600, color: '#1e3a8a', cursor: 'pointer' }}
+                >
+                  Automatically email every newly created invoice to Gmail
+                </label>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Recipient Gmail Address for Invoices</label>
+                <input
+                  type="email"
+                  className="form-control"
+                  value={form.invoice_notification_email ?? 'ippasevents@gmail.com'}
+                  onChange={(e) => setForm({ ...form, invoice_notification_email: e.target.value })}
+                  disabled={!isOwner}
+                  placeholder="ippasevents@gmail.com"
+                />
+              </div>
+            </div>
+
             {isOwner && (
               <div style={{ marginTop: '1.25rem' }}>
                 <button type="submit" className="btn btn-primary">
@@ -273,10 +330,11 @@ export default function SettingsPage() {
               </p>
 
               <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                <div style={{ fontWeight: 600, fontSize: '0.8rem', color: '#0f172a' }}>To connect remote Supabase:</div>
+                <div style={{ fontWeight: 600, fontSize: '0.8rem', color: '#0f172a' }}>To connect Supabase &amp; Automatic Email on Vercel:</div>
                 <ol style={{ paddingLeft: '1.25rem', marginTop: '0.35rem', fontSize: '0.75rem' }}>
-                  <li>Run <code>schema.sql</code> followed by <code>migration_06.sql</code> in your Supabase SQL Editor</li>
-                  <li>Set <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your environment variables</li>
+                  <li>Run <code>schema.sql</code> followed by <code>migration_06.sql</code> and <code>migration_07.sql</code> in your Supabase SQL Editor (enables <code>activity_logs</code> &amp; direct DB change triggers)</li>
+                  <li>Set <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in Vercel Environment Variables</li>
+                  <li>Set <code>SMTP_USER</code> (sender Gmail) and <code>SMTP_PASS</code> (16-digit Gmail App Password) in Vercel Environment Variables for silent background invoice emails to <code>ippasevents@gmail.com</code></li>
                 </ol>
               </div>
             </div>

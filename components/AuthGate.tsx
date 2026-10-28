@@ -30,7 +30,8 @@ function isRouteAllowed(role: UserRole, pathname: string): boolean {
       pathname === '/dashboard' ||
       pathname.startsWith('/events') ||
       pathname.startsWith('/clients') ||
-      pathname.startsWith('/invoices')
+      pathname.startsWith('/invoices') ||
+      pathname.startsWith('/staff')
     );
   }
   return false;
@@ -62,6 +63,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   const allowed = isRouteAllowed(role, pathname);
+
+  useEffect(() => {
+    if (isMounted && isAuthenticated) {
+      store.refreshOnNavigation();
+    }
+  }, [isMounted, isAuthenticated, pathname]);
 
   useEffect(() => {
     if (isMounted && isAuthenticated && !allowed) {

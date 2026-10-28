@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { store } from '@/lib/store';
 import { Ingredient, StockPurchase, StockPaymentStatus, StockPurchaseItem } from '@/lib/types';
+import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 
 export default function StockPage() {
   const [state, setState] = useState(store.getState());
@@ -12,6 +13,7 @@ export default function StockPage() {
   // Search & Filter state
   const [search, setSearch] = useState('');
   const [purchaseStatusFilter, setPurchaseStatusFilter] = useState<'all' | 'unpaid' | 'partially_paid' | 'paid'>('all');
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
 
   // Ingredient modal state
   const [isIngModalOpen, setIsIngModalOpen] = useState(false);
@@ -176,9 +178,10 @@ export default function StockPage() {
 
     const validItems = purchaseItems.filter((it) => it.item_name.trim() !== '');
     if (validItems.length === 0) {
-      alert('Please enter at least one item purchased.');
+      setPurchaseError('Please enter at least one item purchased.');
       return;
     }
+    setPurchaseError(null);
 
     const totalAmt = totalCalculatedBill;
     const paidAmt = Math.min(totalAmt, Number(purchaseForm.paid_amount) || 0);
@@ -395,6 +398,13 @@ export default function StockPage() {
                       <tr key={item.id} style={{ background: isLow ? '#fffbeb' : 'transparent' }}>
                         <td>
                           <div style={{ fontWeight: 600 }}>{item.name}</div>
+                          {role === 'owner' && (
+                            <OwnerAuditBadge
+                              role={role}
+                              entry={store.getEntityAudit(item.id, ['stock'])}
+                              prefixLabel="Updated by"
+                            />
+                          )}
                         </td>
                         <td>{item.unit}</td>
                         <td style={{ textAlign: 'right' }}>₹{item.cost_per_unit}</td>
@@ -624,6 +634,13 @@ export default function StockPage() {
                           <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
                             Bill: {purchase.bill_number || purchase.id}
                           </div>
+                          {role === 'owner' && (
+                            <OwnerAuditBadge
+                              role={role}
+                              entry={store.getEntityAudit(purchase.id, ['purchase'])}
+                              prefixLabel="Updated by"
+                            />
+                          )}
                         </td>
                         <td>
                           <div style={{ fontWeight: 700, color: '#0f172a' }}>
@@ -851,6 +868,22 @@ export default function StockPage() {
             </div>
 
             <form onSubmit={handleCreatePurchase}>
+              {purchaseError && (
+                <div
+                  style={{
+                    background: '#fee2e2',
+                    border: '1px solid #fca5a5',
+                    color: '#991b1b',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '6px',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    marginBottom: '0.85rem'
+                  }}
+                >
+                  {purchaseError}
+                </div>
+              )}
               {/* Vendor & Location info */}
               <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', marginBottom: '1.25rem', border: '1px solid #e2e8f0' }}>
                 <div className="grid-2">

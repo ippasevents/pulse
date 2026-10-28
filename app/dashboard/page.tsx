@@ -13,6 +13,8 @@ import {
   Tooltip,
   CartesianGrid
 } from 'recharts';
+import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
+import { getAuditTargetLink } from '@/components/OwnerActivityAlertModal';
 
 export default function DashboardPage() {
   const [state, setState] = useState(store.getState());
@@ -47,6 +49,15 @@ export default function DashboardPage() {
   const totalStockPurchases = (state.stockPurchases || []).reduce((sum, sp) => sum + sp.total_amount, 0);
   const totalVendorPaid = (state.stockPurchases || []).reduce((sum, sp) => sum + sp.paid_amount, 0);
   const totalVendorDues = (state.stockPurchases || []).reduce((sum, sp) => sum + sp.balance_amount, 0);
+
+  const totalStaffSalaryPaid = state.staff.reduce(
+    (sum, st) => sum + store.getStaffSalarySummary(st.id).totalPaid,
+    0
+  );
+  const totalStaffSalaryPayable = state.staff.reduce(
+    (sum, st) => sum + store.getStaffSalarySummary(st.id).balancePayable,
+    0
+  );
 
   // Monthly breakdown for recharts
   const monthlySales: Record<string, { total: number; count: number }> = {};
@@ -88,37 +99,112 @@ export default function DashboardPage() {
   const lowStockItems = state.ingredients.filter((i) => i.stock_qty <= i.low_stock_level);
 
   // -------------------------------------------------------------------------------------
-  // 0. STAFF VIEW (Only visible option: Next Catering Function & Location)
+  // 0. STAFF VIEW (Next Catering Function, Venue & Personal Salary Balance / Payments)
   // -------------------------------------------------------------------------------------
   if (role === 'staff') {
+    const staffRecord = state.staff.find((s) => s.id === currentUser?.id);
+    const salarySummary = currentUser
+      ? store.getStaffSalarySummary(currentUser.id)
+      : {
+          staffId: '',
+          shiftItems: [],
+          totalShiftHours: 0,
+          shiftEarnings: 0,
+          extraEarnings: 0,
+          totalEarned: 0,
+          totalPaid: 0,
+          balancePayable: 0,
+          advanceExcess: 0,
+          paymentRecords: [],
+          earningRecords: []
+        };
+
     const staffShifts = state.shifts
       .filter((sh) => sh.staff_member_id === currentUser?.id)
       .map((sh) => {
         const event = state.events.find((e) => e.id === sh.event_id);
         return { shift: sh, event };
       })
-      .filter((item) => item.event && item.event.status !== 'cancelled')
+      .filter((item) => item.event && item.event.status !== 'cancelled' && item.event.status !== 'completed')
       .sort((a, b) => (a.event?.event_date || '').localeCompare(b.event?.event_date || ''));
 
     const nextAssignment = staffShifts[0];
     const otherAssignments = staffShifts.slice(1);
 
     return (
-      <div style={{ maxWidth: '780px', margin: '0 auto', paddingBottom: '2rem' }}>
+      <div style={{ maxWidth: '880px', margin: '0 auto', paddingBottom: '2rem' }}>
         <div className="page-header" style={{ marginBottom: '1.25rem' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
               <span className="role-tag-badge" style={{ background: '#7c3aed', color: '#fff', fontSize: '0.75rem' }}>
-                STAFF DUTY SCHEDULE
+                STAFF DUTY &amp; SALARY PORTAL
               </span>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                 Staff Member: <strong>{currentUser?.full_name}</strong> ({currentUser?.phone})
+                {staffRecord?.hourly_rate ? ` • Rate: ₹${staffRecord.hourly_rate}/hr` : ''}
               </span>
             </div>
-            <h1 className="page-title">My Next Function &amp; Venue</h1>
+            <h1 className="page-title">My Duty Schedule &amp; Salary Summary</h1>
             <p className="page-subtitle">
-              View your upcoming catering assignment, venue location, reporting time, and duty role.
+              View your salary received, pending balance receivable, and upcoming catering venue assignments.
             </p>
+          </div>
+        </div>
+
+        {/* STAFF SALARY SUMMARY CARDS */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: '1rem',
+            marginBottom: '1.5rem'
+          }}
+        >
+          <div className="stats-card" style={{ borderLeft: '4px solid #2563eb' }}>
+            <span className="stats-label">Total Salary Earned</span>
+            <span className="stats-value" style={{ color: '#2563eb' }}>
+              ₹{salarySummary.totalEarned.toLocaleString('en-IN')}
+            </span>
+            <span className="stats-sub">
+              {salarySummary.shiftItems.length} duty shifts ({salarySummary.totalShiftHours} hrs)
+              {salarySummary.extraEarnings > 0
+                ? ` + ₹${salarySummary.extraEarnings.toLocaleString('en-IN')} bonus`
+                : ''}
+            </span>
+          </div>
+
+          <div className="stats-card" style={{ borderLeft: '4px solid #059669' }}>
+            <span className="stats-label">Salary Received</span>
+            <span className="stats-value" style={{ color: '#059669' }}>
+              ₹{salarySummary.totalPaid.toLocaleString('en-IN')}
+            </span>
+            <span className="stats-sub">
+              {salarySummary.paymentRecords.length} payment
+              {salarySummary.paymentRecords.length === 1 ? '' : 's'} received so far
+            </span>
+          </div>
+
+          <div
+            className="stats-card"
+            style={{
+              borderLeft: `4px solid ${salarySummary.balancePayable > 0 ? '#dc2626' : '#059669'}`,
+              background: salarySummary.balancePayable > 0 ? '#fffafa' : '#ffffff'
+            }}
+          >
+            <span className="stats-label">Pending Salary Balance</span>
+            <span
+              className="stats-value"
+              style={{ color: salarySummary.balancePayable > 0 ? '#dc2626' : '#059669' }}
+            >
+              ₹{salarySummary.balancePayable.toLocaleString('en-IN')}
+            </span>
+            <span className="stats-sub">
+              {salarySummary.balancePayable > 0
+                ? 'Remaining salary payable to you'
+                : salarySummary.advanceExcess > 0
+                ? `Advance excess: ₹${salarySummary.advanceExcess.toLocaleString('en-IN')}`
+                : 'All earned salary settled'}
+            </span>
           </div>
         </div>
 
@@ -202,7 +288,7 @@ export default function DashboardPage() {
               </div>
 
               {/* Date & Duty Particulars Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
                 <div style={{ background: '#ffffff', padding: '0.85rem', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
                   <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
                     Event Date
@@ -217,8 +303,8 @@ export default function DashboardPage() {
                     Duty Reporting Timing
                   </div>
                   <div style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a', marginTop: '0.2rem' }}>
-                    ⏰ {nextAssignment.shift.starts_at ? new Date(nextAssignment.shift.starts_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (nextAssignment.event?.start_time || 'Report on call')}
-                    {nextAssignment.shift.ends_at && ` - ${new Date(nextAssignment.shift.ends_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                    ⏰ {nextAssignment.shift.starts_at ? nextAssignment.shift.starts_at.slice(11, 16) : (nextAssignment.event?.start_time || 'Report on call')}
+                    {nextAssignment.shift.ends_at && ` - ${nextAssignment.shift.ends_at.slice(11, 16)}`}
                   </div>
                 </div>
 
@@ -250,7 +336,7 @@ export default function DashboardPage() {
 
             {/* Other Upcoming Assignments if any */}
             {otherAssignments.length > 0 && (
-              <div className="card">
+              <div className="card" style={{ marginBottom: '1.5rem' }}>
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '0.75rem', color: '#0f172a' }}>
                   📋 Other Upcoming Assigned Functions ({otherAssignments.length})
                 </h3>
@@ -286,16 +372,125 @@ export default function DashboardPage() {
             )}
           </div>
         ) : (
-          <div className="card" style={{ textAlign: 'center', padding: '3.5rem 1.5rem' }}>
-            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📅</div>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.5rem' }}>
-              No Catering Functions Assigned Yet
+          <div className="card" style={{ textAlign: 'center', padding: '2.5rem 1.5rem', marginBottom: '1.5rem' }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📅</div>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.4rem' }}>
+              No Upcoming Catering Functions Assigned Yet
             </h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', maxWidth: '460px', margin: '0 auto 1.5rem auto' }}>
-              You do not have any upcoming catering functions or shifts currently scheduled. Please check with your banquet manager or captain for shift assignments.
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', maxWidth: '460px', margin: '0 auto' }}>
+              You do not have any upcoming catering functions currently scheduled. Check your salary statement and payment receipts below.
             </p>
           </div>
         )}
+
+        {/* STAFF SALARY RECEIVED & DUTY EARNINGS HISTORY */}
+        <div className="grid-2">
+          <div className="card">
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '0.75rem', color: '#0f172a' }}>
+              💸 Salary Payments Received ({salarySummary.paymentRecords.length})
+            </h3>
+            {salarySummary.paymentRecords.length === 0 ? (
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                No salary payouts recorded yet.
+              </p>
+            ) : (
+              <div className="data-table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Method &amp; Note</th>
+                      <th style={{ textAlign: 'right' }}>Received</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {salarySummary.paymentRecords.map((p) => (
+                      <tr key={p.id}>
+                        <td style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+                          {new Date(p.recorded_at).toLocaleDateString('en-GB', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric'
+                          })}
+                        </td>
+                        <td style={{ fontSize: '0.82rem' }}>
+                          <div style={{ fontWeight: 600 }}>{p.method}</div>
+                          {p.note && <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{p.note}</div>}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#059669' }}>
+                          ₹{p.amount.toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '0.75rem', color: '#0f172a' }}>
+              🧑‍🍳 Duty Shifts &amp; Salary Earned ({salarySummary.shiftItems.length + salarySummary.earningRecords.length})
+            </h3>
+            {salarySummary.shiftItems.length === 0 && salarySummary.earningRecords.length === 0 ? (
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                No duty earnings recorded yet.
+              </p>
+            ) : (
+              <div className="data-table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Function / Duty</th>
+                      <th style={{ textAlign: 'right' }}>Earned</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {salarySummary.earningRecords.map((er) => (
+                      <tr key={er.id}>
+                        <td style={{ fontSize: '0.82rem' }}>
+                          {new Date(er.recorded_at).toLocaleDateString('en-GB', {
+                            day: 'numeric',
+                            month: 'short'
+                          })}
+                        </td>
+                        <td style={{ fontSize: '0.82rem' }}>
+                          <div style={{ fontWeight: 600 }}>{er.method}</div>
+                          {er.note && <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{er.note}</div>}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#2563eb' }}>
+                          ₹{er.amount.toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                    {salarySummary.shiftItems.map((si) => (
+                      <tr key={si.shift.id}>
+                        <td style={{ fontSize: '0.82rem' }}>
+                          {si.event?.event_date
+                            ? new Date(si.event.event_date).toLocaleDateString('en-GB', {
+                                day: 'numeric',
+                                month: 'short'
+                              })
+                            : '—'}
+                        </td>
+                        <td style={{ fontSize: '0.82rem' }}>
+                          <div style={{ fontWeight: 600 }}>{si.event?.title || 'Event Shift'}</div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                            {si.hours} hrs @ ₹{si.hourlyRate}/hr
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                          ₹{si.earnedAmount.toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -644,6 +839,22 @@ export default function DashboardPage() {
               Purchases: ₹{totalStockPurchases.toLocaleString('en-IN')} &bull; Paid: ₹{totalVendorPaid.toLocaleString('en-IN')}
             </span>
           </div>
+
+          <div className="stats-card" style={{ borderLeft: '4px solid #7c3aed' }}>
+            <span className="stats-label">Staff Salary Payable</span>
+            <span
+              className="stats-value"
+              style={{ color: totalStaffSalaryPayable > 0 ? '#dc2626' : 'var(--success)' }}
+            >
+              ₹{totalStaffSalaryPayable.toLocaleString('en-IN')}
+            </span>
+            <span className="stats-sub">
+              Paid: ₹{totalStaffSalaryPaid.toLocaleString('en-IN')} &bull;{' '}
+              <Link href="/staff" style={{ color: 'var(--primary)', textDecoration: 'underline' }}>
+                Manage &rarr;
+              </Link>
+            </span>
+          </div>
         </div>
 
         {/* 1. Monthly Total Sales Amount Graph */}
@@ -907,6 +1118,11 @@ export default function DashboardPage() {
   // -------------------------------------------------------------------------------------
   // 3. OWNER VIEW
   // -------------------------------------------------------------------------------------
+  const unreadOwnerAlerts = store.getUnreadOwnerAlerts();
+  const nonOwnerAuditFeed = (state.auditLogs || [])
+    .filter((l) => l.actor_role !== 'owner')
+    .slice(0, 8);
+
   return (
     <div>
       <div className="page-header">
@@ -924,12 +1140,24 @@ export default function DashboardPage() {
           </div>
           <h1 className="page-title">Executive Overview &amp; Control</h1>
           <p className="page-subtitle">
-            Executive control and overview across events, sales, invoices, menus, staff, and settings.
+            Executive control and overview across events, sales, invoices, menus, staff, and live user/database audit tracking.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <Link href="/events" className="btn btn-primary">
             + New Event Inquiry
+          </Link>
+          <Link
+            href="/activity"
+            className="btn btn-secondary"
+            style={{
+              background: unreadOwnerAlerts.length > 0 ? '#fff1f2' : undefined,
+              borderColor: unreadOwnerAlerts.length > 0 ? '#fda4af' : undefined,
+              color: unreadOwnerAlerts.length > 0 ? '#be123c' : undefined,
+              fontWeight: 700
+            }}
+          >
+            🕵️ Activity &amp; Audit {unreadOwnerAlerts.length > 0 ? `(${unreadOwnerAlerts.length} New)` : ''}
           </Link>
           <Link href="/invoices" className="btn btn-secondary">
             🧾 Invoices
@@ -975,6 +1203,171 @@ export default function DashboardPage() {
             </Link>
           </span>
         </div>
+
+        <div className="stats-card">
+          <span className="stats-label">Staff Salary Payable</span>
+          <span className="stats-value" style={{ color: totalStaffSalaryPayable > 0 ? '#dc2626' : 'var(--success)' }}>
+            ₹{totalStaffSalaryPayable.toLocaleString('en-IN')}
+          </span>
+          <span className="stats-sub">
+            Paid: ₹{totalStaffSalaryPaid.toLocaleString('en-IN')} &bull;{' '}
+            <Link href="/staff" style={{ color: 'var(--primary)', textDecoration: 'underline' }}>
+              Staff &amp; Salary &rarr;
+            </Link>
+          </span>
+        </div>
+      </div>
+
+      {/* Owner-Only Live Non-Owner & Direct Database Activity Monitor */}
+      <div
+        className="card"
+        style={{
+          marginBottom: '1.5rem',
+          borderLeft: '4px solid #e11d48',
+          background: unreadOwnerAlerts.length > 0 ? '#fffafb' : '#ffffff'
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '0.75rem',
+            flexWrap: 'wrap',
+            marginBottom: '1rem'
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <h2 className="card-title" style={{ margin: 0 }}>
+                🛡️ Recent Staff, Manager, Accountant &amp; Database Updates
+              </h2>
+              <span
+                className="badge"
+                style={{ background: '#ffe4e6', color: '#be123c', fontWeight: 800, fontSize: '0.7rem' }}
+              >
+                OWNER ONLY VISIBILITY
+              </span>
+              {unreadOwnerAlerts.length > 0 && (
+                <span
+                  className="badge"
+                  style={{ background: '#e11d48', color: '#ffffff', fontWeight: 800, fontSize: '0.72rem' }}
+                >
+                  {unreadOwnerAlerts.length} Unseen Alert{unreadOwnerAlerts.length === 1 ? '' : 's'}
+                </span>
+              )}
+            </div>
+            <p style={{ fontSize: '0.83rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+              Every change made by any non-owner login ID or directly inside the Supabase Database is reported here in real time.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {unreadOwnerAlerts.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ fontWeight: 600 }}
+                onClick={() => store.markAllAuditLogsRead()}
+              >
+                ✓ Mark All Seen
+              </button>
+            )}
+            <Link href="/activity" className="btn btn-primary btn-sm" style={{ fontWeight: 600 }}>
+              Full Activity &amp; Audit Log &rarr;
+            </Link>
+          </div>
+        </div>
+
+        {nonOwnerAuditFeed.length === 0 ? (
+          <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', color: 'var(--text-muted)', fontSize: '0.86rem' }}>
+            No updates by Managers, Accountants, Staff, or direct Supabase Database edits recorded yet.
+          </div>
+        ) : (
+          <div className="data-table-container">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Role &amp; Login ID</th>
+                  <th>Module</th>
+                  <th>Change Summary</th>
+                  <th style={{ textAlign: 'center' }}>Inspect</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nonOwnerAuditFeed.map((log) => {
+                  const meta = getActorRoleStyle(log.actor_role);
+                  const target = getAuditTargetLink(log);
+                  const isUnread = !log.is_read_by_owner;
+                  return (
+                    <tr key={log.id} style={{ background: isUnread ? meta.bg : 'transparent' }}>
+                      <td style={{ fontSize: '0.78rem', whiteSpace: 'nowrap', fontWeight: isUnread ? 700 : 500 }}>
+                        {isUnread && (
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              width: '7px',
+                              height: '7px',
+                              borderRadius: '50%',
+                              background: '#e11d48',
+                              marginRight: '0.4rem'
+                            }}
+                          />
+                        )}
+                        {formatAuditTimestamp(log.created_at)}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              background: meta.badgeBg,
+                              color: meta.badgeText,
+                              padding: '0.08rem 0.38rem',
+                              borderRadius: '4px',
+                              fontSize: '0.65rem',
+                              fontWeight: 800
+                            }}
+                          >
+                            {meta.label}
+                          </span>
+                          <strong style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>
+                            {log.source === 'database' ? 'supabase_db' : `@${log.actor_username}`}
+                          </strong>
+                        </div>
+                        <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                          {log.actor_name}
+                        </div>
+                      </td>
+                      <td>
+                        <span className="badge" style={{ background: '#f1f5f9', textTransform: 'uppercase', fontSize: '0.68rem', fontWeight: 700 }}>
+                          {log.entity_type}
+                        </span>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{log.summary}</div>
+                        {log.details && (
+                          <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{log.details}</div>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <Link
+                          href={target.href}
+                          onClick={() => {
+                            if (isUnread) store.markAuditLogRead(log.id);
+                          }}
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: '0.75rem' }}
+                        >
+                          Open &rarr;
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Monthly Total Sales Graph for Owner */}
@@ -1099,6 +1492,7 @@ export default function DashboardPage() {
               {upcomingEvents.slice(0, 5).map((evt) => {
                 const client = state.clients.find((c) => c.id === evt.client_id);
                 const { grandTotal } = store.getEventTotal(evt.id);
+                const latestEvtAudit = store.getEventAuditSummary(evt.id).latestAudit;
 
                 return (
                   <tr key={evt.id}>
@@ -1121,6 +1515,7 @@ export default function DashboardPage() {
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                         📍 {evt.venue || 'Venue TBD'}
                       </div>
+                      <OwnerAuditBadge role={role} entry={latestEvtAudit} prefixLabel="Updated by" />
                     </td>
                     <td>
                       <div>{client?.name}</div>

@@ -4,12 +4,14 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { store } from '@/lib/store';
 import { Client } from '@/lib/types';
+import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 
 export default function ClientsPage() {
   const [state, setState] = useState(store.getState());
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [noticeError, setNoticeError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -87,6 +89,29 @@ export default function ClientsPage() {
         </div>
       </div>
 
+      {noticeError && (
+        <div
+          style={{
+            background: '#fee2e2',
+            border: '1px solid #fca5a5',
+            color: '#991b1b',
+            padding: '0.7rem 1rem',
+            borderRadius: '8px',
+            marginBottom: '1rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '0.85rem',
+            fontWeight: 600
+          }}
+        >
+          <span>{noticeError}</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setNoticeError(null)}>
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="card" style={{ marginBottom: '1.25rem', padding: '1rem' }}>
         <input
           type="text"
@@ -126,6 +151,13 @@ export default function ClientsPage() {
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                         ID: {client.id}
                       </div>
+                      {role === 'owner' && (
+                        <OwnerAuditBadge
+                          role={role}
+                          entry={store.getEntityAudit(client.id, ['client'])}
+                          prefixLabel="Updated by"
+                        />
+                      )}
                     </td>
                     <td>{client.company || '—'}</td>
                     <td>
@@ -155,10 +187,11 @@ export default function ClientsPage() {
                             className="btn btn-danger btn-sm"
                             onClick={() => {
                               if (clientEvents.length > 0) {
-                                alert('Cannot delete client who has associated events.');
+                                setNoticeError(`Cannot delete "${client.name}" while they have associated events.`);
                                 return;
                               }
                               if (confirm(`Delete client "${client.name}"?`)) {
+                                setNoticeError(null);
                                 store.deleteClient(client.id);
                               }
                             }}

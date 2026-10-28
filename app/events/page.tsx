@@ -4,12 +4,14 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { store } from '@/lib/store';
 import { EventRecord, EventStatus } from '@/lib/types';
+import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 
 export default function EventsPage() {
   const [state, setState] = useState(store.getState());
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   // New Event Form State
   const [formData, setFormData] = useState({
@@ -48,10 +50,11 @@ export default function EventsPage() {
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.client_id || !formData.title) {
-      alert('Please fill in title and select a client.');
+      setFormError('Please fill in an event title and select a client.');
       return;
     }
-    const created = store.addEvent(formData);
+    setFormError(null);
+    store.addEvent(formData);
     setIsModalOpen(false);
     // Reset form
     setFormData({
@@ -137,13 +140,14 @@ export default function EventsPage() {
               <th>Guests</th>
               <th>Status</th>
               <th style={{ textAlign: 'right' }}>Total Quote</th>
+              {role === 'owner' && <th>Last Updated By (Login ID)</th>}
               <th style={{ textAlign: 'center' }}>Action</th>
             </tr>
           </thead>
           <tbody>
             {filteredEvents.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                <td colSpan={role === 'owner' ? 9 : 8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
                   No catering events matching criteria.
                 </td>
               </tr>
@@ -152,6 +156,7 @@ export default function EventsPage() {
                 const client = state.clients.find((c) => c.id === evt.client_id);
                 const { grandTotal, menuTotal } = store.getEventTotal(evt.id);
                 const displayTotal = isFinance ? grandTotal : menuTotal;
+                const auditSummary = role === 'owner' ? store.getEventAuditSummary(evt.id) : null;
 
                 return (
                   <tr key={evt.id}>
@@ -183,6 +188,39 @@ export default function EventsPage() {
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>
                       ₹{displayTotal.toLocaleString('en-IN')}
                     </td>
+                    {role === 'owner' && (
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.15rem' }}>
+                          {auditSummary?.eventAudit && (
+                            <OwnerAuditBadge
+                              role={role}
+                              entry={auditSummary.eventAudit}
+                              prefixLabel="Event"
+                            />
+                          )}
+                          {auditSummary?.quoteAudit && (
+                            <OwnerAuditBadge
+                              role={role}
+                              entry={auditSummary.quoteAudit}
+                              prefixLabel="Quote"
+                            />
+                          )}
+                          {!auditSummary?.eventAudit && !auditSummary?.quoteAudit && (
+                            auditSummary?.latestAudit ? (
+                              <OwnerAuditBadge
+                                role={role}
+                                entry={auditSummary.latestAudit}
+                                prefixLabel="Updated"
+                              />
+                            ) : (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                Initial record
+                              </span>
+                            )
+                          )}
+                        </div>
+                      </td>
+                    )}
                     <td style={{ textAlign: 'center' }}>
                       <Link href={`/events/${evt.id}`} className="btn btn-secondary btn-sm">
                         View Details &amp; Quote &rarr;
@@ -210,6 +248,22 @@ export default function EventsPage() {
               </button>
             </div>
             <form onSubmit={handleCreate}>
+              {formError && (
+                <div
+                  style={{
+                    background: '#fee2e2',
+                    border: '1px solid #fca5a5',
+                    color: '#991b1b',
+                    padding: '0.6rem 0.85rem',
+                    borderRadius: '6px',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    marginBottom: '0.85rem'
+                  }}
+                >
+                  {formError}
+                </div>
+              )}
               <div className="form-group">
                 <label className="form-label">Client *</label>
                 <select

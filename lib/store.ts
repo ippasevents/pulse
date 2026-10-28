@@ -11,6 +11,8 @@ import {
   EventExtra,
   StaffMember,
   Shift,
+  StaffSalaryRecord,
+  StaffSalaryRecordType,
   Invoice,
   Payment,
   BusinessSettings,
@@ -20,8 +22,34 @@ import {
   StockPurchase,
   StockPurchaseItem,
   StockPurchasePayment,
-  StockPaymentStatus
+  StockPaymentStatus,
+  AuditLogEntry,
+  AuditEntityType,
+  AuditAction,
+  AuditSource
 } from './types';
+
+export interface StaffShiftEarningItem {
+  shift: Shift;
+  event?: EventRecord;
+  hours: number;
+  hourlyRate: number;
+  earnedAmount: number;
+}
+
+export interface StaffSalarySummary {
+  staffId: string;
+  shiftItems: StaffShiftEarningItem[];
+  totalShiftHours: number;
+  shiftEarnings: number;
+  extraEarnings: number;
+  totalEarned: number;
+  totalPaid: number;
+  balancePayable: number;
+  advanceExcess: number;
+  paymentRecords: StaffSalaryRecord[];
+  earningRecords: StaffSalaryRecord[];
+}
 
 export interface StockEstimationItem {
   ingredientId: string;
@@ -63,7 +91,9 @@ const INITIAL_SETTINGS: BusinessSettings = {
   account_number: '9876-5432-1000',
   ifsc_code: 'FDRL0001234',
   upi_id: 'ippas@upi',
-  payment_terms: 'Payment strictly due within 3 days. 50% advance deposit upon booking confirmation.'
+  payment_terms: 'Payment strictly due within 3 days. 50% advance deposit upon booking confirmation.',
+  auto_email_invoices: true,
+  invoice_notification_email: 'ippasevents@gmail.com'
 };
 
 const INITIAL_PROFILES: Profile[] = [
@@ -293,6 +323,29 @@ const INITIAL_SHIFTS: Shift[] = [
   { id: '00000000-0000-4000-8000-000000000804', event_id: '00000000-0000-4000-8000-000000000401', staff_member_id: '00000000-0000-4000-8000-000000000704', role_label: 'Server', starts_at: '2026-11-12T17:30:00Z', ends_at: '2026-11-12T23:00:00Z' }
 ];
 
+const INITIAL_STAFF_SALARY_RECORDS: StaffSalaryRecord[] = [
+  {
+    id: '00000000-0000-4000-8000-000000001401',
+    staff_member_id: '00000000-0000-4000-8000-000000000701',
+    event_id: '00000000-0000-4000-8000-000000000401',
+    record_type: 'payment',
+    amount: 1000,
+    method: 'UPI / GPay',
+    note: 'Advance salary payment',
+    recorded_at: '2026-10-25T12:00:00Z'
+  },
+  {
+    id: '00000000-0000-4000-8000-000000001402',
+    staff_member_id: '00000000-0000-4000-8000-000000000702',
+    event_id: '00000000-0000-4000-8000-000000000401',
+    record_type: 'payment',
+    amount: 2000,
+    method: 'Cash',
+    note: 'Kitchen duty advance',
+    recorded_at: '2026-10-26T15:30:00Z'
+  }
+];
+
 const INITIAL_INVOICES: Invoice[] = [
   { id: '00000000-0000-4000-8000-000000000901', event_id: '00000000-0000-4000-8000-000000000401', invoice_number: 'INV-0001', kind: 'deposit', subtotal: 100000, discount: 0, amount: 100000, due_date: '2026-10-15', status: 'paid', created_at: '2026-10-03T10:00:00Z' },
   { id: '00000000-0000-4000-8000-000000000902', event_id: '00000000-0000-4000-8000-000000000401', invoice_number: 'INV-0002', kind: 'final', subtotal: 197000, discount: 10000, amount: 187000, due_date: '2026-11-14', status: 'sent', created_at: '2026-10-25T11:00:00Z' },
@@ -421,7 +474,59 @@ const INITIAL_STOCK_PURCHASE_PAYMENTS: StockPurchasePayment[] = [
   }
 ];
 
+const INITIAL_AUDIT_LOGS: AuditLogEntry[] = [
+  {
+    id: '00000000-0000-4000-8000-000000009001',
+    entity_type: 'quotation',
+    entity_id: '00000000-0000-4000-8000-000000000505',
+    parent_event_id: '00000000-0000-4000-8000-000000000402',
+    action: 'update',
+    summary: 'Edited quotation items on "Kerala Tech Summit Luncheon"',
+    details: 'Added Malabar Chicken Roast & Kerala Parotta (₹320/guest)',
+    actor_id: '00000000-0000-4000-8000-000000000002',
+    actor_username: 'manager',
+    actor_name: 'Aisha (Manager)',
+    actor_role: 'manager',
+    source: 'app',
+    is_read_by_owner: false,
+    created_at: '2026-10-27T16:40:00Z'
+  },
+  {
+    id: '00000000-0000-4000-8000-000000009002',
+    entity_type: 'event',
+    entity_id: '00000000-0000-4000-8000-000000000401',
+    parent_event_id: '00000000-0000-4000-8000-000000000401',
+    action: 'update',
+    summary: 'Updated event schedule & guest count on "Farhan & Nimra Grand Wedding Banquet"',
+    details: 'Status: confirmed • 350 Guests • Raviz Kadavu Grand Lawn',
+    actor_id: '00000000-0000-4000-8000-000000000002',
+    actor_username: 'manager',
+    actor_name: 'Aisha (Manager)',
+    actor_role: 'manager',
+    source: 'app',
+    is_read_by_owner: false,
+    created_at: '2026-10-27T14:15:00Z'
+  },
+  {
+    id: '00000000-0000-4000-8000-000000009003',
+    entity_type: 'invoice',
+    entity_id: '00000000-0000-4000-8000-000000000902',
+    parent_event_id: '00000000-0000-4000-8000-000000000401',
+    action: 'create',
+    summary: 'Generated Final Invoice INV-0002 (₹1,87,000)',
+    details: 'Discount applied: ₹10,000 • Event: Farhan & Nimra Grand Wedding Banquet',
+    actor_id: '00000000-0000-4000-8000-000000000003',
+    actor_username: 'accountant',
+    actor_name: 'Rahul (Accountant)',
+    actor_role: 'accountant',
+    source: 'app',
+    is_read_by_owner: false,
+    created_at: '2026-10-26T18:20:00Z'
+  }
+];
+
 interface AppState {
+  _version?: number;
   settings: BusinessSettings;
   profiles: Profile[];
   currentRole: UserRole;
@@ -436,10 +541,12 @@ interface AppState {
   eventExtras: EventExtra[];
   staff: StaffMember[];
   shifts: Shift[];
+  staffSalaryRecords: StaffSalaryRecord[];
   invoices: Invoice[];
   payments: Payment[];
   stockPurchases: StockPurchase[];
   stockPurchasePayments: StockPurchasePayment[];
+  auditLogs: AuditLogEntry[];
 }
 
 const STORAGE_KEY = 'ippas_catering_manager_state';
@@ -450,11 +557,383 @@ class DataStore {
   private listeners: Set<() => void> = new Set();
   private syncError: string | null = null;
   private isSyncingState: boolean = false;
+  private realtimeSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastSilentSyncAt: number = 0;
+  private recentLocalMutations: Map<string, number> = new Map();
 
   constructor() {
     this.state = this.loadInitial();
-    if (typeof window !== 'undefined' && isSupabaseConfigured && supabase) {
-      this.syncFromSupabase();
+    if (typeof window !== 'undefined') {
+      // Cross-tab instant localStorage sync
+      window.addEventListener('storage', (e) => {
+        if (e.key === STORAGE_KEY && e.newValue) {
+          try {
+            const parsed = JSON.parse(e.newValue);
+            this.state = {
+              ...this.state,
+              ...parsed,
+              _version: (this.state._version || 0) + 1
+            };
+            this.listeners.forEach((cb) => cb());
+          } catch {
+            // ignore malformed storage payload
+          }
+        }
+      });
+
+      // Auto-refresh when returning to window/tab
+      window.addEventListener('focus', () => {
+        if (isSupabaseConfigured && supabase) {
+          this.scheduleSilentSync(150);
+        } else {
+          this.notify();
+        }
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          if (isSupabaseConfigured && supabase) {
+            this.scheduleSilentSync(150);
+          } else {
+            this.notify();
+          }
+        }
+      });
+
+      if (isSupabaseConfigured && supabase) {
+        this.syncFromSupabase();
+        this.setupRealtimeSubscription();
+      }
+    }
+  }
+
+  private setupRealtimeSubscription() {
+    if (!isSupabaseConfigured || !supabase) return;
+    try {
+      supabase
+        .channel('ippas-live-realtime-sync')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public' },
+          (payload: any) => {
+            this.scheduleSilentSync(250);
+            this.inspectRealtimeDatabasePayload(payload);
+          }
+        )
+        .subscribe();
+    } catch (err) {
+      console.warn('Realtime subscription warning:', err);
+    }
+  }
+
+  private mapTableToEntityType(tableName: string): AuditEntityType {
+    switch (tableName) {
+      case 'events':
+        return 'event';
+      case 'event_items':
+      case 'event_extras':
+        return 'quotation';
+      case 'invoices':
+        return 'invoice';
+      case 'payments':
+        return 'payment';
+      case 'clients':
+        return 'client';
+      case 'menu_items':
+        return 'menu';
+      case 'menu_item_ingredients':
+        return 'recipe';
+      case 'ingredients':
+        return 'stock';
+      case 'stock_purchases':
+      case 'stock_purchase_items':
+      case 'stock_purchase_payments':
+        return 'purchase';
+      case 'staff_members':
+        return 'staff';
+      case 'shifts':
+        return 'shift';
+      case 'staff_salary_records':
+        return 'salary';
+      case 'business_settings':
+        return 'settings';
+      case 'profiles':
+        return 'user';
+      default:
+        return 'database';
+    }
+  }
+
+  // Fallback detector for direct Supabase DB edits even if SQL triggers in migration_07.sql haven't been installed yet
+  private inspectRealtimeDatabasePayload(payload: any) {
+    if (!payload || !payload.table || payload.table === 'activity_logs') return;
+    const tableName = String(payload.table);
+    const eventType = String(payload.eventType || 'UPDATE').toUpperCase();
+    const rowData = (eventType === 'DELETE' ? payload.old : payload.new) || payload.new || payload.old || {};
+    const entityId = String(
+      rowData.id || rowData.menu_item_id || rowData.purchase_id || rowData.event_id || tableName
+    );
+    const parentEventId =
+      tableName === 'events' ? entityId : rowData.event_id ? String(rowData.event_id) : undefined;
+
+    // Give syncFromSupabase 1400ms to pull any matching 'app' or trigger 'database' log first
+    setTimeout(() => {
+      const now = Date.now();
+      const localStamp = this.recentLocalMutations.get(entityId) || (parentEventId ? this.recentLocalMutations.get(parentEventId) : 0) || 0;
+      if (now - localStamp < 15000) return;
+
+      const entityType = this.mapTableToEntityType(tableName);
+      const alreadyLogged = (this.state.auditLogs || []).some((log) => {
+        const logTime = new Date(log.created_at).getTime();
+        if (isNaN(logTime) || Math.abs(now - logTime) > 16000) return false;
+        return (
+          log.entity_id === entityId ||
+          (parentEventId && log.parent_event_id === parentEventId && log.entity_type === entityType)
+        );
+      });
+
+      if (alreadyLogged) return;
+
+      const label =
+        rowData.title ||
+        rowData.name ||
+        rowData.invoice_number ||
+        rowData.vendor_name ||
+        rowData.description ||
+        rowData.full_name ||
+        entityId;
+
+      const action: AuditAction =
+        eventType === 'INSERT' ? 'create' : eventType === 'DELETE' ? 'delete' : 'update';
+
+      const dbAlert: AuditLogEntry = {
+        id: generateUUID(),
+        entity_type: entityType,
+        entity_id: entityId,
+        parent_event_id: parentEventId,
+        action,
+        summary: `Direct Database ${eventType} on ${tableName} (${label})`,
+        details: `Detected live database modification on table "${tableName}"`,
+        actor_username: 'supabase_db',
+        actor_name: 'Direct Database Change',
+        actor_role: 'database',
+        source: 'database',
+        is_read_by_owner: false,
+        created_at: new Date().toISOString()
+      };
+
+      this.state.auditLogs = this.deduplicateAuditLogs([dbAlert, ...(this.state.auditLogs || [])]);
+      this.save();
+
+      if (isSupabaseConfigured && supabase) {
+        supabase
+          .from('activity_logs')
+          .insert({
+            id: dbAlert.id,
+            entity_type: dbAlert.entity_type,
+            entity_id: dbAlert.entity_id,
+            parent_event_id: dbAlert.parent_event_id || null,
+            action: dbAlert.action,
+            summary: dbAlert.summary,
+            details: dbAlert.details || null,
+            actor_username: dbAlert.actor_username,
+            actor_name: dbAlert.actor_name,
+            actor_role: dbAlert.actor_role,
+            source: dbAlert.source,
+            is_read_by_owner: false,
+            created_at: dbAlert.created_at
+          })
+          .then(() => {});
+      }
+    }, 1400);
+  }
+
+  private deduplicateAuditLogs(logs: AuditLogEntry[]): AuditLogEntry[] {
+    const byId = new Map<string, AuditLogEntry>();
+    for (const item of logs) {
+      if (item && item.id && !byId.has(item.id)) {
+        byId.set(item.id, item);
+      }
+    }
+    const sorted = Array.from(byId.values()).sort((a, b) =>
+      (b.created_at || '').localeCompare(a.created_at || '')
+    );
+
+    const appLogs = sorted.filter((l) => l.source === 'app');
+    const filtered = sorted.filter((log) => {
+      if (log.source !== 'database') return true;
+      const logMs = new Date(log.created_at).getTime();
+      const hasMatchingAppLog = appLogs.some((appLog) => {
+        const appMs = new Date(appLog.created_at).getTime();
+        if (isNaN(logMs) || isNaN(appMs) || Math.abs(appMs - logMs) > 16000) return false;
+        return (
+          appLog.entity_id === log.entity_id ||
+          (log.parent_event_id &&
+            appLog.parent_event_id === log.parent_event_id &&
+            appLog.entity_type === log.entity_type)
+        );
+      });
+      return !hasMatchingAppLog;
+    });
+
+    return filtered.slice(0, 500);
+  }
+
+  private logMutation(params: {
+    entity_type: AuditEntityType;
+    entity_id: string;
+    parent_event_id?: string;
+    action: AuditAction;
+    summary: string;
+    details?: string;
+  }): AuditLogEntry {
+    const actor = this.getCurrentUser();
+    const role = this.state.currentRole || 'owner';
+    const actorUsername = actor?.username || role;
+    const actorName = actor?.full_name || role.toUpperCase();
+    const nowIso = new Date().toISOString();
+
+    this.recentLocalMutations.set(params.entity_id, Date.now());
+    if (params.parent_event_id) {
+      this.recentLocalMutations.set(params.parent_event_id, Date.now());
+    }
+
+    const entry: AuditLogEntry = {
+      id: generateUUID(),
+      entity_type: params.entity_type,
+      entity_id: params.entity_id,
+      parent_event_id: params.parent_event_id,
+      action: params.action,
+      summary: params.summary,
+      details: params.details,
+      actor_id: actor?.id,
+      actor_username: actorUsername,
+      actor_name: actorName,
+      actor_role: role,
+      source: 'app',
+      is_read_by_owner: role === 'owner',
+      created_at: nowIso
+    };
+
+    this.state.auditLogs = this.deduplicateAuditLogs([entry, ...(this.state.auditLogs || [])]);
+
+    if (isSupabaseConfigured && supabase) {
+      supabase
+        .from('activity_logs')
+        .insert({
+          id: entry.id,
+          entity_type: entry.entity_type,
+          entity_id: entry.entity_id,
+          parent_event_id: entry.parent_event_id || null,
+          action: entry.action,
+          summary: entry.summary,
+          details: entry.details || null,
+          actor_id: entry.actor_id || null,
+          actor_username: entry.actor_username,
+          actor_name: entry.actor_name,
+          actor_role: entry.actor_role,
+          source: 'app',
+          is_read_by_owner: entry.is_read_by_owner,
+          created_at: entry.created_at
+        })
+        .then(() => {});
+    }
+
+    return entry;
+  }
+
+  public getEntityAudit(
+    entityId: string,
+    entityTypes?: AuditEntityType[]
+  ): AuditLogEntry | undefined {
+    if (!entityId) return undefined;
+    const logs = this.state.auditLogs || [];
+    return logs.find((l) => {
+      if (entityTypes && entityTypes.length > 0 && !entityTypes.includes(l.entity_type)) {
+        return false;
+      }
+      return l.entity_id === entityId;
+    });
+  }
+
+  public getEventAuditSummary(eventId: string): {
+    eventAudit?: AuditLogEntry;
+    quoteAudit?: AuditLogEntry;
+    latestAudit?: AuditLogEntry;
+    history: AuditLogEntry[];
+  } {
+    const logs = this.state.auditLogs || [];
+    const history = logs.filter(
+      (l) => l.entity_id === eventId || l.parent_event_id === eventId
+    );
+    const eventAudit = history.find((l) => l.entity_type === 'event');
+    const quoteAudit = history.find((l) => l.entity_type === 'quotation');
+    const latestAudit = history[0];
+    return { eventAudit, quoteAudit, latestAudit, history };
+  }
+
+  public getUnreadOwnerAlerts(): AuditLogEntry[] {
+    return (this.state.auditLogs || []).filter(
+      (l) => !l.is_read_by_owner && l.actor_role !== 'owner'
+    );
+  }
+
+  public markAuditLogRead(logId: string) {
+    this.state.auditLogs = (this.state.auditLogs || []).map((l) =>
+      l.id === logId ? { ...l, is_read_by_owner: true } : l
+    );
+    this.save();
+
+    if (isSupabaseConfigured && supabase && isValidUUID(logId)) {
+      supabase
+        .from('activity_logs')
+        .update({ is_read_by_owner: true })
+        .eq('id', logId)
+        .then(() => {});
+    }
+  }
+
+  public markAllAuditLogsRead() {
+    const unreadIds = (this.state.auditLogs || [])
+      .filter((l) => !l.is_read_by_owner)
+      .map((l) => l.id);
+
+    if (unreadIds.length === 0) return;
+
+    this.state.auditLogs = (this.state.auditLogs || []).map((l) => ({
+      ...l,
+      is_read_by_owner: true
+    }));
+    this.save();
+
+    if (isSupabaseConfigured && supabase) {
+      supabase
+        .from('activity_logs')
+        .update({ is_read_by_owner: true })
+        .eq('is_read_by_owner', false)
+        .then(() => {});
+    }
+  }
+
+  private scheduleSilentSync(delayMs: number = 250) {
+    if (!isSupabaseConfigured || !supabase) return;
+    if (this.realtimeSyncTimer) {
+      clearTimeout(this.realtimeSyncTimer);
+    }
+    this.realtimeSyncTimer = setTimeout(() => {
+      this.syncFromSupabase(true);
+    }, delayMs);
+  }
+
+  public refreshOnNavigation() {
+    // Emit fresh state reference immediately for instant UI responsiveness across pages
+    this.notify();
+    if (isSupabaseConfigured && supabase) {
+      const now = Date.now();
+      if (now - this.lastSilentSyncAt > 1200) {
+        this.lastSilentSyncAt = now;
+        this.syncFromSupabase(true);
+      }
     }
   }
 
@@ -476,7 +955,29 @@ class DataStore {
     }
   }
 
+  // Always clone state & arrays before notifying so React useState always detects changes immediately on the spot
   private notify() {
+    this.state = {
+      ...this.state,
+      _version: (this.state._version || 0) + 1,
+      settings: { ...this.state.settings },
+      profiles: [...this.state.profiles],
+      clients: [...this.state.clients],
+      ingredients: [...this.state.ingredients],
+      menuItems: [...this.state.menuItems],
+      recipes: [...this.state.recipes],
+      events: [...this.state.events],
+      eventItems: [...this.state.eventItems],
+      eventExtras: [...this.state.eventExtras],
+      staff: [...this.state.staff],
+      shifts: [...this.state.shifts],
+      staffSalaryRecords: [...(this.state.staffSalaryRecords || [])],
+      invoices: [...this.state.invoices],
+      payments: [...this.state.payments],
+      stockPurchases: [...(this.state.stockPurchases || [])],
+      stockPurchasePayments: [...(this.state.stockPurchasePayments || [])],
+      auditLogs: [...(this.state.auditLogs || [])]
+    };
     this.listeners.forEach((cb) => cb());
   }
 
@@ -497,10 +998,12 @@ class DataStore {
     }
   }
 
-  public async syncFromSupabase(): Promise<void> {
+  public async syncFromSupabase(silent: boolean = false): Promise<void> {
     if (!isSupabaseConfigured || !supabase) return;
-    this.isSyncingState = true;
-    this.notify();
+    if (!silent) {
+      this.isSyncingState = true;
+      this.notify();
+    }
 
     try {
       const [
@@ -515,11 +1018,13 @@ class DataStore {
         eventExtrasRes,
         staffRes,
         shiftsRes,
+        salaryRecordsRes,
         invoicesRes,
         paymentsRes,
         purchasesRes,
         purchaseItemsRes,
-        purchasePaymentsRes
+        purchasePaymentsRes,
+        activityLogsRes
       ] = await Promise.all([
         supabase.from('business_settings').select('*').eq('id', 1).maybeSingle(),
         supabase.from('profiles').select('*'),
@@ -532,11 +1037,13 @@ class DataStore {
         supabase.from('event_extras').select('*'),
         supabase.from('staff_members').select('*').order('name', { ascending: true }),
         supabase.from('shifts').select('*'),
+        supabase.from('staff_salary_records').select('*').order('recorded_at', { ascending: false }),
         supabase.from('invoices').select('*').order('created_at', { ascending: false }),
         supabase.from('payments').select('*').order('paid_at', { ascending: false }),
         supabase.from('stock_purchases').select('*').order('created_at', { ascending: false }),
         supabase.from('stock_purchase_items').select('*'),
-        supabase.from('stock_purchase_payments').select('*').order('paid_at', { ascending: false })
+        supabase.from('stock_purchase_payments').select('*').order('paid_at', { ascending: false }),
+        supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(400)
       ]);
 
       // Surface schema/RLS errors clearly so user knows if migration_06.sql hasn't been run
@@ -740,6 +1247,18 @@ class DataStore {
             starts_at: sh.starts_at,
             ends_at: sh.ends_at
           })),
+        staffSalaryRecords: !salaryRecordsRes.error
+          ? (salaryRecordsRes.data || []).map((sr: any) => ({
+              id: sr.id,
+              staff_member_id: sr.staff_member_id,
+              event_id: sr.event_id || undefined,
+              record_type: (sr.record_type === 'earning' ? 'earning' : 'payment') as StaffSalaryRecordType,
+              amount: Number(sr.amount || 0),
+              method: sr.method || 'Cash',
+              note: sr.note || '',
+              recorded_at: sr.recorded_at || new Date().toISOString()
+            }))
+          : this.state.staffSalaryRecords || [],
         invoices: (invoicesRes.data || []).map((inv: any) => {
           const amt = Number(inv.amount || 0);
           const disc = Number(inv.discount || 0);
@@ -767,7 +1286,31 @@ class DataStore {
           note: p.note || ''
         })),
         stockPurchases: loadedPurchases,
-        stockPurchasePayments: loadedPurchasePayments
+        stockPurchasePayments: loadedPurchasePayments,
+        auditLogs: !activityLogsRes.error
+          ? this.deduplicateAuditLogs([
+              ...(activityLogsRes.data || []).map((al: any) => ({
+                id: al.id,
+                entity_type: (al.entity_type || 'database') as AuditEntityType,
+                entity_id: String(al.entity_id || ''),
+                parent_event_id: al.parent_event_id ? String(al.parent_event_id) : undefined,
+                action: (al.action === 'create' || al.action === 'delete' ? al.action : 'update') as AuditAction,
+                summary: al.summary || 'Record updated',
+                details: al.details || undefined,
+                actor_id: al.actor_id || undefined,
+                actor_username: al.actor_username || 'supabase_db',
+                actor_name: al.actor_name || 'Direct Database Change',
+                actor_role: (al.actor_role || 'database') as UserRole | 'database',
+                source: (al.source === 'app' ? 'app' : 'database') as AuditSource,
+                is_read_by_owner: Boolean(al.is_read_by_owner),
+                created_at: al.created_at || new Date().toISOString()
+              })),
+              // Keep very recent local logs (last 10s) in case insert is still in flight
+              ...(this.state.auditLogs || []).filter(
+                (localLog) => Date.now() - new Date(localLog.created_at).getTime() < 10000
+              )
+            ])
+          : this.state.auditLogs || []
       };
 
       // Ensure currentUserId points to a valid record after remote sync
@@ -854,8 +1397,18 @@ class DataStore {
             isAuthenticated,
             menuItems,
             eventItems,
+            staffSalaryRecords: Array.isArray(parsed.staffSalaryRecords)
+              ? parsed.staffSalaryRecords
+              : isSupabaseConfigured
+              ? []
+              : INITIAL_STAFF_SALARY_RECORDS,
             stockPurchases: Array.isArray(parsed.stockPurchases) ? parsed.stockPurchases : INITIAL_STOCK_PURCHASES,
-            stockPurchasePayments: Array.isArray(parsed.stockPurchasePayments) ? parsed.stockPurchasePayments : INITIAL_STOCK_PURCHASE_PAYMENTS
+            stockPurchasePayments: Array.isArray(parsed.stockPurchasePayments) ? parsed.stockPurchasePayments : INITIAL_STOCK_PURCHASE_PAYMENTS,
+            auditLogs: Array.isArray(parsed.auditLogs)
+              ? parsed.auditLogs
+              : isSupabaseConfigured
+              ? []
+              : INITIAL_AUDIT_LOGS
           };
         }
       } catch (e) {
@@ -880,10 +1433,12 @@ class DataStore {
         eventExtras: [],
         staff: [],
         shifts: [],
+        staffSalaryRecords: [],
         invoices: [],
         payments: [],
         stockPurchases: [],
-        stockPurchasePayments: []
+        stockPurchasePayments: [],
+        auditLogs: []
       };
     }
 
@@ -902,10 +1457,12 @@ class DataStore {
       eventExtras: INITIAL_EVENT_EXTRAS,
       staff: INITIAL_STAFF,
       shifts: INITIAL_SHIFTS,
+      staffSalaryRecords: INITIAL_STAFF_SALARY_RECORDS,
       invoices: INITIAL_INVOICES,
       payments: INITIAL_PAYMENTS,
       stockPurchases: INITIAL_STOCK_PURCHASES,
-      stockPurchasePayments: INITIAL_STOCK_PURCHASE_PAYMENTS
+      stockPurchasePayments: INITIAL_STOCK_PURCHASE_PAYMENTS,
+      auditLogs: INITIAL_AUDIT_LOGS
     };
   }
 
@@ -1063,6 +1620,13 @@ class DataStore {
     };
 
     this.state.profiles.push(newProfile);
+    this.logMutation({
+      entity_type: 'user',
+      entity_id: newProfile.id,
+      action: 'create',
+      summary: `Created user login "${newProfile.username}" (${newProfile.role.toUpperCase()})`,
+      details: `Name: ${newProfile.full_name}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase) {
@@ -1108,6 +1672,15 @@ class DataStore {
       this.state.currentRole = updates.role;
     }
 
+    if (updatedRecord) {
+      this.logMutation({
+        entity_type: 'user',
+        entity_id: updatedRecord.id,
+        action: 'update',
+        summary: `Updated user account "${updatedRecord.username}" (${updatedRecord.role.toUpperCase()})`,
+        details: `Full Name: ${updatedRecord.full_name}`
+      });
+    }
     this.save();
 
     if (isSupabaseConfigured && supabase && updatedRecord && isValidUUID(profileId)) {
@@ -1148,6 +1721,12 @@ class DataStore {
       }
     }
     this.state.profiles = this.state.profiles.filter((p) => p.id !== profileId);
+    this.logMutation({
+      entity_type: 'user',
+      entity_id: profileId,
+      action: 'delete',
+      summary: `Deleted user account "${target.username}" (${target.full_name})`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(profileId)) {
@@ -1188,10 +1767,12 @@ class DataStore {
       eventExtras: INITIAL_EVENT_EXTRAS,
       staff: INITIAL_STAFF,
       shifts: INITIAL_SHIFTS,
+      staffSalaryRecords: INITIAL_STAFF_SALARY_RECORDS,
       invoices: INITIAL_INVOICES,
       payments: INITIAL_PAYMENTS,
       stockPurchases: INITIAL_STOCK_PURCHASES,
-      stockPurchasePayments: INITIAL_STOCK_PURCHASE_PAYMENTS
+      stockPurchasePayments: INITIAL_STOCK_PURCHASE_PAYMENTS,
+      auditLogs: INITIAL_AUDIT_LOGS
     };
     this.save();
   }
@@ -1204,6 +1785,13 @@ class DataStore {
       created_at: new Date().toISOString()
     };
     this.state.clients.unshift(newClient);
+    this.logMutation({
+      entity_type: 'client',
+      entity_id: newClient.id,
+      action: 'create',
+      summary: `Added new client "${newClient.name}"`,
+      details: newClient.company ? `Company: ${newClient.company}` : newClient.phone || undefined
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase) {
@@ -1228,7 +1816,19 @@ class DataStore {
   }
 
   public updateClient(id: string, updates: Partial<Client>) {
-    this.state.clients = this.state.clients.map((c) => (c.id === id ? { ...c, ...updates } : c));
+    let targetName = 'Client';
+    this.state.clients = this.state.clients.map((c) => {
+      if (c.id !== id) return c;
+      const merged = { ...c, ...updates };
+      targetName = merged.name;
+      return merged;
+    });
+    this.logMutation({
+      entity_type: 'client',
+      entity_id: id,
+      action: 'update',
+      summary: `Updated client profile "${targetName}"`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
@@ -1251,7 +1851,14 @@ class DataStore {
   }
 
   public deleteClient(id: string) {
+    const existing = this.state.clients.find((c) => c.id === id);
     this.state.clients = this.state.clients.filter((c) => c.id !== id);
+    this.logMutation({
+      entity_type: 'client',
+      entity_id: id,
+      action: 'delete',
+      summary: `Deleted client "${existing?.name || id}"`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
@@ -1274,6 +1881,14 @@ class DataStore {
       created_at: new Date().toISOString()
     };
     this.state.events.unshift(newEvent);
+    this.logMutation({
+      entity_type: 'event',
+      entity_id: newEvent.id,
+      parent_event_id: newEvent.id,
+      action: 'create',
+      summary: `Created new event "${newEvent.title}"`,
+      details: `Date: ${newEvent.event_date} • ${newEvent.guest_count} Guests • Status: ${newEvent.status}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(newEvent.client_id)) {
@@ -1302,7 +1917,22 @@ class DataStore {
   }
 
   public updateEvent(id: string, updates: Partial<EventRecord>) {
-    this.state.events = this.state.events.map((e) => (e.id === id ? { ...e, ...updates } : e));
+    let updatedEvt: EventRecord | undefined;
+    this.state.events = this.state.events.map((e) => {
+      if (e.id !== id) return e;
+      updatedEvt = { ...e, ...updates };
+      return updatedEvt;
+    });
+    this.logMutation({
+      entity_type: 'event',
+      entity_id: id,
+      parent_event_id: id,
+      action: 'update',
+      summary: `Updated event "${updatedEvt?.title || id}"`,
+      details: updatedEvt
+        ? `Date: ${updatedEvt.event_date} • ${updatedEvt.guest_count} Pax • Status: ${updatedEvt.status}`
+        : undefined
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
@@ -1329,6 +1959,7 @@ class DataStore {
   }
 
   public deleteEvent(id: string) {
+    const targetEvt = this.state.events.find((e) => e.id === id);
     const invIds = this.state.invoices.filter((inv) => inv.event_id === id).map((inv) => inv.id);
     this.state.events = this.state.events.filter((e) => e.id !== id);
     this.state.eventItems = this.state.eventItems.filter((ei) => ei.event_id !== id);
@@ -1336,6 +1967,13 @@ class DataStore {
     this.state.shifts = this.state.shifts.filter((sh) => sh.event_id !== id);
     this.state.invoices = this.state.invoices.filter((inv) => inv.event_id !== id);
     this.state.payments = this.state.payments.filter((p) => !invIds.includes(p.invoice_id));
+    this.logMutation({
+      entity_type: 'event',
+      entity_id: id,
+      parent_event_id: id,
+      action: 'delete',
+      summary: `Deleted event "${targetEvt?.title || id}"`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
@@ -1365,10 +2003,13 @@ class DataStore {
     pricingType: PricingType = 'per_guest',
     quantity?: number
   ) {
+    const evt = this.state.events.find((e) => e.id === eventId);
+    const dish = this.state.menuItems.find((m) => m.id === menuItemId);
     const existingIndex = this.state.eventItems.findIndex(
       (ei) => ei.event_id === eventId && ei.menu_item_id === menuItemId
     );
     let targetItem: EventItem;
+    const isUpdate = existingIndex >= 0;
     if (existingIndex >= 0) {
       this.state.eventItems[existingIndex].price_per_unit = pricePerUnit;
       this.state.eventItems[existingIndex].price_per_guest = pricePerUnit;
@@ -1389,6 +2030,15 @@ class DataStore {
       };
       this.state.eventItems.push(targetItem);
     }
+
+    this.logMutation({
+      entity_type: 'quotation',
+      entity_id: targetItem.id,
+      parent_event_id: eventId,
+      action: isUpdate ? 'update' : 'create',
+      summary: `${isUpdate ? 'Updated' : 'Added'} dish "${dish?.name || 'Item'}" in quotation for "${evt?.title || 'Event'}"`,
+      details: `Rate: ₹${pricePerUnit}/${pricingType === 'per_kg' ? 'kg' : 'guest'}${targetItem.quantity ? ` • Qty: ${targetItem.quantity}` : ''}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(eventId) && isValidUUID(menuItemId)) {
@@ -1414,7 +2064,24 @@ class DataStore {
   }
 
   public updateEventItem(id: string, updates: Partial<EventItem>) {
+    const existingItem = this.state.eventItems.find((ei) => ei.id === id);
+    const evt = existingItem ? this.state.events.find((e) => e.id === existingItem.event_id) : undefined;
+    const dish = existingItem ? this.state.menuItems.find((m) => m.id === existingItem.menu_item_id) : undefined;
+
     this.state.eventItems = this.state.eventItems.map((ei) => (ei.id === id ? { ...ei, ...updates } : ei));
+    this.logMutation({
+      entity_type: 'quotation',
+      entity_id: id,
+      parent_event_id: existingItem?.event_id,
+      action: 'update',
+      summary: `Edited quotation item "${dish?.name || 'Dish'}" on "${evt?.title || 'Event'}"`,
+      details:
+        updates.quantity !== undefined
+          ? `Updated quantity to ${updates.quantity}`
+          : updates.price_per_unit !== undefined
+          ? `Updated rate to ₹${updates.price_per_unit}`
+          : undefined
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
@@ -1438,9 +2105,22 @@ class DataStore {
   }
 
   public removeEventItem(eventId: string, menuItemId: string) {
+    const existingItem = this.state.eventItems.find(
+      (ei) => ei.event_id === eventId && ei.menu_item_id === menuItemId
+    );
+    const evt = this.state.events.find((e) => e.id === eventId);
+    const dish = this.state.menuItems.find((m) => m.id === menuItemId);
+
     this.state.eventItems = this.state.eventItems.filter(
       (ei) => !(ei.event_id === eventId && ei.menu_item_id === menuItemId)
     );
+    this.logMutation({
+      entity_type: 'quotation',
+      entity_id: existingItem?.id || menuItemId,
+      parent_event_id: eventId,
+      action: 'delete',
+      summary: `Removed dish "${dish?.name || 'Dish'}" from quotation on "${evt?.title || 'Event'}"`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(eventId) && isValidUUID(menuItemId)) {
@@ -1458,6 +2138,7 @@ class DataStore {
 
   // Event Extras
   public addEventExtra(eventId: string, description: string, amount: number) {
+    const evt = this.state.events.find((e) => e.id === eventId);
     const newExtra: EventExtra = {
       id: generateUUID(),
       event_id: eventId,
@@ -1465,6 +2146,13 @@ class DataStore {
       amount
     };
     this.state.eventExtras.push(newExtra);
+    this.logMutation({
+      entity_type: 'quotation',
+      entity_id: newExtra.id,
+      parent_event_id: eventId,
+      action: 'create',
+      summary: `Added extra charge "${description}" (₹${amount.toLocaleString('en-IN')}) to "${evt?.title || 'Event'}"`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(eventId)) {
@@ -1484,7 +2172,19 @@ class DataStore {
   }
 
   public removeEventExtra(id: string) {
+    const existingExtra = this.state.eventExtras.find((x) => x.id === id);
+    const evt = existingExtra
+      ? this.state.events.find((e) => e.id === existingExtra.event_id)
+      : undefined;
+
     this.state.eventExtras = this.state.eventExtras.filter((x) => x.id !== id);
+    this.logMutation({
+      entity_type: 'quotation',
+      entity_id: id,
+      parent_event_id: existingExtra?.event_id,
+      action: 'delete',
+      summary: `Removed extra charge "${existingExtra?.description || 'Extra'}" from "${evt?.title || 'Event'}"`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
@@ -1511,6 +2211,13 @@ class DataStore {
       price_per_guest: price_per_unit
     };
     this.state.menuItems.unshift(newItem);
+    this.logMutation({
+      entity_type: 'menu',
+      entity_id: newItem.id,
+      action: 'create',
+      summary: `Added menu dish "${newItem.name}"`,
+      details: `${newItem.category} • ₹${newItem.price_per_unit}/${newItem.pricing_type === 'per_kg' ? 'kg' : 'guest'}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase) {
@@ -1553,6 +2260,15 @@ class DataStore {
       };
       return updatedItem;
     });
+    if (updatedItem) {
+      this.logMutation({
+        entity_type: 'menu',
+        entity_id: id,
+        action: 'update',
+        summary: `Updated menu dish "${updatedItem.name}"`,
+        details: `Rate: ₹${updatedItem.price_per_unit} • ${updatedItem.active ? 'Active' : 'Hidden'}`
+      });
+    }
     this.save();
 
     if (isSupabaseConfigured && supabase && updatedItem && isValidUUID(id)) {
@@ -1576,8 +2292,15 @@ class DataStore {
   }
 
   public deleteMenuItem(id: string) {
+    const targetDish = this.state.menuItems.find((m) => m.id === id);
     this.state.menuItems = this.state.menuItems.filter((m) => m.id !== id);
     this.state.recipes = this.state.recipes.filter((r) => r.menu_item_id !== id);
+    this.logMutation({
+      entity_type: 'menu',
+      entity_id: id,
+      action: 'delete',
+      summary: `Deleted menu dish "${targetDish?.name || id}"`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
@@ -1593,6 +2316,7 @@ class DataStore {
   }
 
   public setRecipeIngredients(menuItemId: string, ingredients: { ingredient_id: string; qty_per_guest: number }[]) {
+    const targetDish = this.state.menuItems.find((m) => m.id === menuItemId);
     const validLines = ingredients.filter((ing) => ing.ingredient_id && ing.qty_per_guest > 0);
     this.state.recipes = this.state.recipes.filter((r) => r.menu_item_id !== menuItemId);
     for (const ing of validLines) {
@@ -1602,6 +2326,13 @@ class DataStore {
         qty_per_guest: ing.qty_per_guest
       });
     }
+    this.logMutation({
+      entity_type: 'recipe',
+      entity_id: menuItemId,
+      action: 'update',
+      summary: `Updated recipe ingredients for "${targetDish?.name || 'Dish'}"`,
+      details: `${validLines.length} raw ingredient(s) configured`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(menuItemId)) {
@@ -1638,6 +2369,13 @@ class DataStore {
   public addIngredient(ing: Omit<Ingredient, 'id'>) {
     const newIng: Ingredient = { ...ing, id: generateUUID() };
     this.state.ingredients.push(newIng);
+    this.logMutation({
+      entity_type: 'stock',
+      entity_id: newIng.id,
+      action: 'create',
+      summary: `Added stock item "${newIng.name}" (${newIng.stock_qty} ${newIng.unit})`,
+      details: `Unit Cost: ₹${newIng.cost_per_unit}/${newIng.unit}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase) {
@@ -1667,6 +2405,15 @@ class DataStore {
       updatedIng = { ...i, ...updates };
       return updatedIng;
     });
+    if (updatedIng) {
+      this.logMutation({
+        entity_type: 'stock',
+        entity_id: id,
+        action: 'update',
+        summary: `Updated stock item "${updatedIng.name}"`,
+        details: `Qty: ${updatedIng.stock_qty} ${updatedIng.unit} • Cost: ₹${updatedIng.cost_per_unit}`
+      });
+    }
     this.save();
 
     if (isSupabaseConfigured && supabase && updatedIng && isValidUUID(id)) {
@@ -1689,13 +2436,24 @@ class DataStore {
 
   public adjustStock(id: string, delta: number) {
     let nextQty: number | undefined;
+    let ingName = 'Stock Item';
+    let ingUnit = '';
     this.state.ingredients = this.state.ingredients.map((i) => {
       if (i.id === id) {
         const next = Math.max(0, Number((i.stock_qty + delta).toFixed(3)));
         nextQty = next;
+        ingName = i.name;
+        ingUnit = i.unit;
         return { ...i, stock_qty: next };
       }
       return i;
+    });
+    this.logMutation({
+      entity_type: 'stock',
+      entity_id: id,
+      action: 'update',
+      summary: `Adjusted stock "${ingName}" (${delta >= 0 ? `+${delta}` : delta} ${ingUnit})`,
+      details: nextQty !== undefined ? `New Stock Balance: ${nextQty} ${ingUnit}` : undefined
     });
     this.save();
 
@@ -1798,6 +2556,13 @@ class DataStore {
       });
     }
 
+    this.logMutation({
+      entity_type: 'purchase',
+      entity_id: newPurchase.id,
+      action: 'create',
+      summary: `Recorded stock purchase from "${newPurchase.vendor_name}" (₹${newPurchase.total_amount.toLocaleString('en-IN')})`,
+      details: `Paid: ₹${newPurchase.paid_amount.toLocaleString('en-IN')} • Balance: ₹${newPurchase.balance_amount.toLocaleString('en-IN')}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase) {
@@ -1916,6 +2681,13 @@ class DataStore {
     purchase.payment_status =
       purchase.balance_amount === 0 ? 'paid' : purchase.paid_amount > 0 ? 'partially_paid' : 'unpaid';
 
+    this.logMutation({
+      entity_type: 'purchase',
+      entity_id: purchaseId,
+      action: 'update',
+      summary: `Paid vendor installment ₹${newPayment.amount.toLocaleString('en-IN')} to "${purchase.vendor_name}"`,
+      details: `Method: ${newPayment.method} • Remaining Due: ₹${purchase.balance_amount.toLocaleString('en-IN')}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(purchaseId)) {
@@ -1967,6 +2739,14 @@ class DataStore {
       };
       return updatedPurchase;
     });
+    if (updatedPurchase) {
+      this.logMutation({
+        entity_type: 'purchase',
+        entity_id: id,
+        action: 'update',
+        summary: `Updated stock purchase bill from "${updatedPurchase.vendor_name}"`
+      });
+    }
     this.save();
 
     if (isSupabaseConfigured && supabase && updatedPurchase && isValidUUID(id)) {
@@ -1992,12 +2772,19 @@ class DataStore {
   }
 
   public deleteStockPurchase(purchaseId: string) {
+    const existing = this.state.stockPurchases?.find((p) => p.id === purchaseId);
     if (Array.isArray(this.state.stockPurchases)) {
       this.state.stockPurchases = this.state.stockPurchases.filter((p) => p.id !== purchaseId);
     }
     if (Array.isArray(this.state.stockPurchasePayments)) {
       this.state.stockPurchasePayments = this.state.stockPurchasePayments.filter((p) => p.purchase_id !== purchaseId);
     }
+    this.logMutation({
+      entity_type: 'purchase',
+      entity_id: purchaseId,
+      action: 'delete',
+      summary: `Deleted stock purchase bill from "${existing?.vendor_name || purchaseId}"`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(purchaseId)) {
@@ -2029,6 +2816,12 @@ class DataStore {
       purchase.payment_status =
         purchase.balance_amount === 0 ? 'paid' : purchase.paid_amount > 0 ? 'partially_paid' : 'unpaid';
     }
+    this.logMutation({
+      entity_type: 'purchase',
+      entity_id: purchaseId,
+      action: 'update',
+      summary: `Removed vendor payment ₹${payment.amount.toLocaleString('en-IN')} from "${purchase?.vendor_name || 'Vendor Bill'}"`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(paymentId)) {
@@ -2057,6 +2850,13 @@ class DataStore {
   public addStaff(staff: Omit<StaffMember, 'id'>) {
     const newStaff: StaffMember = { ...staff, id: generateUUID() };
     this.state.staff.push(newStaff);
+    this.logMutation({
+      entity_type: 'staff',
+      entity_id: newStaff.id,
+      action: 'create',
+      summary: `Registered staff member "${newStaff.name}"`,
+      details: `${newStaff.role_title || 'Crew'} • ₹${newStaff.hourly_rate}/hr`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase) {
@@ -2087,6 +2887,15 @@ class DataStore {
       updatedStaff = { ...s, ...updates };
       return updatedStaff;
     });
+    if (updatedStaff) {
+      this.logMutation({
+        entity_type: 'staff',
+        entity_id: id,
+        action: 'update',
+        summary: `Updated staff profile "${updatedStaff.name}"`,
+        details: `${updatedStaff.role_title || 'Crew'} • ₹${updatedStaff.hourly_rate}/hr`
+      });
+    }
     this.save();
 
     if (isSupabaseConfigured && supabase && updatedStaff && isValidUUID(id)) {
@@ -2118,8 +2927,18 @@ class DataStore {
       }
     }
 
+    const staffMember = this.state.staff.find((s) => s.id === shift.staff_member_id);
+    const evt = this.state.events.find((e) => e.id === shift.event_id);
     const newShift: Shift = { ...shift, ends_at: endsAt, id: generateUUID() };
     this.state.shifts.push(newShift);
+    this.logMutation({
+      entity_type: 'shift',
+      entity_id: newShift.id,
+      parent_event_id: newShift.event_id,
+      action: 'create',
+      summary: `Assigned "${staffMember?.name || 'Staff'}" to "${evt?.title || 'Event'}"`,
+      details: `Role: ${newShift.role_label || 'Crew'} • ${newShift.starts_at.slice(11, 16)} - ${newShift.ends_at.slice(11, 16)}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(newShift.event_id) && isValidUUID(newShift.staff_member_id)) {
@@ -2143,7 +2962,22 @@ class DataStore {
   }
 
   public removeShift(id: string) {
+    const existingShift = this.state.shifts.find((sh) => sh.id === id);
+    const staffMember = existingShift
+      ? this.state.staff.find((s) => s.id === existingShift.staff_member_id)
+      : undefined;
+    const evt = existingShift
+      ? this.state.events.find((e) => e.id === existingShift.event_id)
+      : undefined;
+
     this.state.shifts = this.state.shifts.filter((sh) => sh.id !== id);
+    this.logMutation({
+      entity_type: 'shift',
+      entity_id: id,
+      parent_event_id: existingShift?.event_id,
+      action: 'delete',
+      summary: `Removed shift for "${staffMember?.name || 'Staff'}" on "${evt?.title || 'Event'}"`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
@@ -2158,6 +2992,185 @@ class DataStore {
     }
   }
 
+  // Staff Salary & Wage Management
+  public calculateShiftHours(startsAt: string, endsAt: string): number {
+    const startDate = new Date(startsAt);
+    const endDate = new Date(endsAt);
+    if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+      const diffHrs = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
+      if (diffHrs > 0) {
+        return Number(diffHrs.toFixed(2));
+      }
+      if (diffHrs < 0) {
+        return Number((24 + diffHrs).toFixed(2));
+      }
+    }
+    const startH = parseInt((startsAt || '').slice(11, 13) || '17', 10);
+    const startM = parseInt((startsAt || '').slice(14, 16) || '0', 10);
+    const endH = parseInt((endsAt || '').slice(11, 13) || '23', 10);
+    const endM = parseInt((endsAt || '').slice(14, 16) || '0', 10);
+    const startTotal = startH + startM / 60;
+    const endTotal = endH + endM / 60;
+    const hrs = endTotal >= startTotal ? endTotal - startTotal : 24 - startTotal + endTotal;
+    return Math.max(1, Number(hrs.toFixed(2)));
+  }
+
+  public getStaffSalarySummary(staffId: string): StaffSalarySummary {
+    const staffMember = this.state.staff.find((s) => s.id === staffId);
+    const hourlyRate = Number(staffMember?.hourly_rate || 0);
+
+    const shiftItems: StaffShiftEarningItem[] = this.state.shifts
+      .filter((sh) => sh.staff_member_id === staffId)
+      .map((sh) => {
+        const event = this.state.events.find((e) => e.id === sh.event_id);
+        const hours = this.calculateShiftHours(sh.starts_at, sh.ends_at);
+        const earnedAmount = event?.status === 'cancelled' ? 0 : Math.round(hours * hourlyRate);
+        return {
+          shift: sh,
+          event,
+          hours,
+          hourlyRate,
+          earnedAmount
+        };
+      })
+      .filter((item) => !item.event || item.event.status !== 'cancelled')
+      .sort((a, b) => (b.event?.event_date || '').localeCompare(a.event?.event_date || ''));
+
+    const totalShiftHours = Number(
+      shiftItems.reduce((sum, item) => sum + item.hours, 0).toFixed(2)
+    );
+    const shiftEarnings = shiftItems.reduce((sum, item) => sum + item.earnedAmount, 0);
+
+    const allRecords = (this.state.staffSalaryRecords || []).filter(
+      (sr) => sr.staff_member_id === staffId
+    );
+
+    const earningRecords = allRecords
+      .filter((sr) => sr.record_type === 'earning')
+      .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at));
+
+    const paymentRecords = allRecords
+      .filter((sr) => sr.record_type === 'payment')
+      .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at));
+
+    const extraEarnings = earningRecords.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+    const totalEarned = shiftEarnings + extraEarnings;
+    const totalPaid = paymentRecords.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+    const balancePayable = Math.max(0, totalEarned - totalPaid);
+    const advanceExcess = Math.max(0, totalPaid - totalEarned);
+
+    return {
+      staffId,
+      shiftItems,
+      totalShiftHours,
+      shiftEarnings,
+      extraEarnings,
+      totalEarned,
+      totalPaid,
+      balancePayable,
+      advanceExcess,
+      paymentRecords,
+      earningRecords
+    };
+  }
+
+  public addStaffSalaryRecord(record: {
+    staff_member_id: string;
+    event_id?: string;
+    record_type: StaffSalaryRecordType;
+    amount: number;
+    method: string;
+    note?: string;
+    recorded_at?: string;
+  }): StaffSalaryRecord {
+    const newRecord: StaffSalaryRecord = {
+      id: generateUUID(),
+      staff_member_id: record.staff_member_id,
+      event_id: record.event_id || undefined,
+      record_type: record.record_type,
+      amount: Number(record.amount || 0),
+      method: record.method || 'Cash',
+      note: (record.note || '').trim(),
+      recorded_at: record.recorded_at || new Date().toISOString()
+    };
+
+    if (!Array.isArray(this.state.staffSalaryRecords)) {
+      this.state.staffSalaryRecords = [];
+    }
+    const staffMember = this.state.staff.find((s) => s.id === newRecord.staff_member_id);
+    this.state.staffSalaryRecords.unshift(newRecord);
+    this.logMutation({
+      entity_type: 'salary',
+      entity_id: newRecord.id,
+      parent_event_id: newRecord.event_id,
+      action: 'create',
+      summary:
+        newRecord.record_type === 'payment'
+          ? `Recorded salary payment ₹${newRecord.amount.toLocaleString('en-IN')} to "${staffMember?.name || 'Staff'}"`
+          : `Added duty wage/allowance ₹${newRecord.amount.toLocaleString('en-IN')} for "${staffMember?.name || 'Staff'}"`,
+      details: `${newRecord.method}${newRecord.note ? ` • ${newRecord.note}` : ''}`
+    });
+    this.save();
+
+    if (isSupabaseConfigured && supabase && isValidUUID(newRecord.staff_member_id)) {
+      supabase
+        .from('staff_salary_records')
+        .insert({
+          id: newRecord.id,
+          staff_member_id: newRecord.staff_member_id,
+          event_id: isValidUUID(newRecord.event_id) ? newRecord.event_id : null,
+          record_type: newRecord.record_type,
+          amount: newRecord.amount,
+          method: newRecord.method,
+          note: newRecord.note || null,
+          recorded_at: newRecord.recorded_at
+        })
+        .then(({ error }) => {
+          if (error) this.reportDbError('Save Staff Salary Record Failed (Run migration_06.sql)', error);
+          else this.clearDbError();
+        });
+    }
+
+    return newRecord;
+  }
+
+  public deleteStaffSalaryRecord(id: string) {
+    if (!Array.isArray(this.state.staffSalaryRecords)) return;
+    const existing = this.state.staffSalaryRecords.find((sr) => sr.id === id);
+    const staffMember = existing
+      ? this.state.staff.find((s) => s.id === existing.staff_member_id)
+      : undefined;
+    this.state.staffSalaryRecords = this.state.staffSalaryRecords.filter((sr) => sr.id !== id);
+    this.logMutation({
+      entity_type: 'salary',
+      entity_id: id,
+      parent_event_id: existing?.event_id,
+      action: 'delete',
+      summary: `Deleted salary record (₹${(existing?.amount || 0).toLocaleString('en-IN')}) for "${staffMember?.name || 'Staff'}"`
+    });
+    this.save();
+
+    if (isSupabaseConfigured && supabase && isValidUUID(id)) {
+      supabase
+        .from('staff_salary_records')
+        .delete()
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) this.reportDbError('Delete Staff Salary Record Failed', error);
+          else this.clearDbError();
+        });
+    }
+  }
+
+  public getInvoiceAudit(invoiceId: string): AuditLogEntry | undefined {
+    const paymentIds = new Set(
+      this.state.payments.filter((p) => p.invoice_id === invoiceId).map((p) => p.id)
+    );
+    return (this.state.auditLogs || []).find(
+      (l) => l.entity_id === invoiceId || paymentIds.has(l.entity_id)
+    );
+  }
+
   // Invoices & Part-Payments on Same Invoice
   public addInvoice(inv: {
     event_id: string;
@@ -2169,6 +3182,7 @@ class DataStore {
     status?: Invoice['status'];
     notes?: string;
   }) {
+    const evt = this.state.events.find((e) => e.id === inv.event_id);
     const maxExistingSeq = this.state.invoices.reduce((maxN, item) => {
       const m = (item.invoice_number || '').match(/INV-(\d+)/i);
       const n = m ? parseInt(m[1], 10) : 0;
@@ -2194,6 +3208,14 @@ class DataStore {
       created_at: new Date().toISOString()
     };
     this.state.invoices.unshift(newInv);
+    this.logMutation({
+      entity_type: 'invoice',
+      entity_id: newInv.id,
+      parent_event_id: newInv.event_id,
+      action: 'create',
+      summary: `Created ${newInv.kind === 'deposit' ? 'Advance' : 'Final'} Invoice ${newInv.invoice_number} (₹${newInv.amount.toLocaleString('en-IN')})`,
+      details: `Event: ${evt?.title || 'Event'}${newInv.discount > 0 ? ` • Discount: ₹${newInv.discount.toLocaleString('en-IN')}` : ''}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(newInv.event_id)) {
@@ -2231,6 +3253,17 @@ class DataStore {
       updatedInv = { ...inv, ...updates, subtotal, discount, amount };
       return updatedInv;
     });
+    if (updatedInv) {
+      const evt = this.state.events.find((e) => e.id === updatedInv!.event_id);
+      this.logMutation({
+        entity_type: 'invoice',
+        entity_id: id,
+        parent_event_id: updatedInv.event_id,
+        action: 'update',
+        summary: `Edited Invoice ${updatedInv.invoice_number} (₹${updatedInv.amount.toLocaleString('en-IN')})`,
+        details: `Event: ${evt?.title || 'Event'} • Discount: ₹${updatedInv.discount.toLocaleString('en-IN')} • Status: ${updatedInv.status}`
+      });
+    }
     this.save();
 
     if (isSupabaseConfigured && supabase && updatedInv && isValidUUID(id)) {
@@ -2254,8 +3287,16 @@ class DataStore {
   }
 
   public deleteInvoice(id: string) {
+    const existing = this.state.invoices.find((inv) => inv.id === id);
     this.state.invoices = this.state.invoices.filter((inv) => inv.id !== id);
     this.state.payments = this.state.payments.filter((p) => p.invoice_id !== id);
+    this.logMutation({
+      entity_type: 'invoice',
+      entity_id: id,
+      parent_event_id: existing?.event_id,
+      action: 'delete',
+      summary: `Deleted Invoice ${existing?.invoice_number || id}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(id)) {
@@ -2299,6 +3340,14 @@ class DataStore {
         invoice.status = 'partially_paid';
       }
     }
+    this.logMutation({
+      entity_type: 'payment',
+      entity_id: newPayment.id,
+      parent_event_id: invoice?.event_id,
+      action: 'create',
+      summary: `Recorded payment ₹${newPayment.amount.toLocaleString('en-IN')} on ${invoice?.invoice_number || 'Invoice'}`,
+      details: `Method: ${newPayment.method}${newPayment.note ? ` • ${newPayment.note}` : ''}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(newPayment.invoice_id)) {
@@ -2351,6 +3400,13 @@ class DataStore {
         invoice.status = 'sent';
       }
     }
+    this.logMutation({
+      entity_type: 'payment',
+      entity_id: paymentId,
+      parent_event_id: invoice?.event_id,
+      action: 'delete',
+      summary: `Deleted payment ₹${payment.amount.toLocaleString('en-IN')} from ${invoice?.invoice_number || 'Invoice'}`
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase && isValidUUID(paymentId)) {
@@ -2374,31 +3430,53 @@ class DataStore {
   // Settings
   public updateSettings(updates: Partial<BusinessSettings>) {
     this.state.settings = { ...this.state.settings, ...updates };
+    this.logMutation({
+      entity_type: 'settings',
+      entity_id: 'business_settings',
+      action: 'update',
+      summary: 'Updated business profile, bank details, or auto-email settings'
+    });
     this.save();
 
     if (isSupabaseConfigured && supabase) {
       const s = this.state.settings;
+      const baseRow = {
+        id: 1,
+        name: s.name,
+        address: s.address || null,
+        phone: s.phone || null,
+        email: s.email || null,
+        bank_name: s.bank_name || null,
+        account_name: s.account_name || null,
+        account_number: s.account_number || null,
+        ifsc_code: s.ifsc_code || null,
+        upi_id: s.upi_id || null,
+        payment_terms: s.payment_terms || null
+      };
+
       supabase
         .from('business_settings')
         .upsert(
           {
-            id: 1,
-            name: s.name,
-            address: s.address || null,
-            phone: s.phone || null,
-            email: s.email || null,
-            bank_name: s.bank_name || null,
-            account_name: s.account_name || null,
-            account_number: s.account_number || null,
-            ifsc_code: s.ifsc_code || null,
-            upi_id: s.upi_id || null,
-            payment_terms: s.payment_terms || null
+            ...baseRow,
+            auto_email_invoices: s.auto_email_invoices !== false,
+            invoice_notification_email: s.invoice_notification_email || 'ippasevents@gmail.com'
           },
           { onConflict: 'id' }
         )
         .then(({ error }) => {
-          if (error) this.reportDbError('Update Settings Failed', error);
-          else this.clearDbError();
+          if (error) {
+            // Fallback upsert without new columns if migration_06.sql was not re-run yet
+            supabase!
+              .from('business_settings')
+              .upsert(baseRow, { onConflict: 'id' })
+              .then(({ error: fallbackErr }) => {
+                if (fallbackErr) this.reportDbError('Update Settings Failed', fallbackErr);
+                else this.clearDbError();
+              });
+          } else {
+            this.clearDbError();
+          }
         });
     }
   }

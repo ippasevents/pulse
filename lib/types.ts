@@ -2,6 +2,7 @@ export type UserRole = 'owner' | 'manager' | 'accountant' | 'staff';
 export type EventStatus = 'inquiry' | 'quoted' | 'confirmed' | 'completed' | 'cancelled';
 export type InvoiceStatus = 'draft' | 'sent' | 'partially_paid' | 'paid' | 'void';
 export type PricingType = 'per_guest' | 'per_kg';
+export type StaffSalaryRecordType = 'payment' | 'earning';
 
 export interface Profile {
   id: string;
@@ -138,6 +139,17 @@ export interface Shift {
   ends_at: string;
 }
 
+export interface StaffSalaryRecord {
+  id: string;
+  staff_member_id: string;
+  event_id?: string;
+  record_type: StaffSalaryRecordType;
+  amount: number;
+  recorded_at: string;
+  method: string;
+  note?: string;
+}
+
 export interface Invoice {
   id: string;
   event_id: string;
@@ -173,4 +185,44 @@ export interface BusinessSettings {
   ifsc_code?: string;
   upi_id?: string;
   payment_terms?: string;
+  auto_email_invoices?: boolean;
+  invoice_notification_email?: string;
 }
+
+export type AuditEntityType =
+  | 'event'
+  | 'quotation'
+  | 'invoice'
+  | 'payment'
+  | 'client'
+  | 'menu'
+  | 'recipe'
+  | 'stock'
+  | 'purchase'
+  | 'staff'
+  | 'shift'
+  | 'salary'
+  | 'settings'
+  | 'user'
+  | 'database';
+
+export type AuditAction = 'create' | 'update' | 'delete';
+export type AuditSource = 'app' | 'database';
+
+export interface AuditLogEntry {
+  id: string;
+  entity_type: AuditEntityType;
+  entity_id: string;
+  parent_event_id?: string;
+  action: AuditAction;
+  summary: string;
+  details?: string;
+  actor_id?: string;
+  actor_username: string;
+  actor_name: string;
+  actor_role: UserRole | 'database';
+  source: AuditSource;
+  is_read_by_owner: boolean;
+  created_at: string;
+}
+

@@ -7,6 +7,7 @@ import { store } from '@/lib/store';
 import { UserRole } from '@/lib/types';
 import { PWAInstallButton } from './PWAInstallButton';
 import StockNotificationModal from './StockNotificationModal';
+import OwnerActivityAlertModal from './OwnerActivityAlertModal';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -14,6 +15,8 @@ export default function Navbar() {
   const [currentUser, setCurrentUser] = useState(store.getCurrentUser());
   const [lowStockCount, setLowStockCount] = useState(0);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [unreadAuditCount, setUnreadAuditCount] = useState(0);
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
 
   useEffect(() => {
     const update = () => {
@@ -22,6 +25,9 @@ export default function Navbar() {
       setCurrentUser(store.getCurrentUser());
       const lowCount = state.ingredients.filter((i) => i.stock_qty <= i.low_stock_level).length;
       setLowStockCount(lowCount);
+      setUnreadAuditCount(
+        state.currentRole === 'owner' ? store.getUnreadOwnerAlerts().length : 0
+      );
     };
 
     update();
@@ -37,14 +43,15 @@ export default function Navbar() {
 
   // Visible nav items strictly filtered per role
   const allNavItems = [
-    { label: 'Next Function', href: '/dashboard', roles: ['staff'] },
+    { label: 'Duty & Salary', href: '/dashboard', roles: ['staff'] },
     { label: 'Dashboard', href: '/dashboard', roles: ['owner', 'manager', 'accountant'] },
     { label: 'Events & Quotes', href: '/events', roles: ['owner', 'manager', 'accountant'] },
     { label: 'Clients', href: '/clients', roles: ['owner', 'manager', 'accountant'] },
     { label: 'Menu & Recipes', href: '/menu', roles: ['owner', 'manager'] },
     { label: 'Stock & Inventory', href: '/stock', roles: ['owner', 'manager'] },
-    { label: 'Staff Roster', href: '/staff', roles: ['owner', 'manager'] },
+    { label: 'Staff & Salary', href: '/staff', roles: ['owner', 'manager', 'accountant'] },
     { label: 'Invoices & Billing', href: '/invoices', roles: ['owner', 'accountant'] },
+    { label: 'Activity & Audit', href: '/activity', roles: ['owner'] },
     { label: 'Users & Passwords', href: '/users', roles: ['owner'] },
     { label: 'Settings', href: '/settings', roles: ['owner'] }
   ];
@@ -81,12 +88,52 @@ export default function Navbar() {
               {role === 'owner' && '• Full Executive Access'}
               {role === 'manager' && '• Events & Operations Schedule'}
               {role === 'accountant' && '• Financial Billing & Invoicing'}
-              {role === 'staff' && '• Next Assigned Event & Venue Details'}
+              {role === 'staff' && '• Duty Schedule & Salary Balance'}
             </span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            {/* Stock Notification Bell with Badge (only for Owner & Manager) */}
+            {/* Owner-Only User & Database Change Alerts */}
+            {role === 'owner' && (
+              <button
+                type="button"
+                onClick={() => setIsAuditModalOpen(true)}
+                style={{
+                  background: unreadAuditCount > 0 ? '#e11d48' : '#1e293b',
+                  color: '#ffffff',
+                  border: unreadAuditCount > 0 ? '1px solid #fda4af' : '1px solid #475569',
+                  borderRadius: '6px',
+                  padding: '0.25rem 0.65rem',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Owner Only: User Login ID Updates & Database Change Alerts"
+              >
+                <span>🛡️</span>
+                <span>Activity Alerts</span>
+                {unreadAuditCount > 0 && (
+                  <span
+                    style={{
+                      background: '#ffffff',
+                      color: '#be123c',
+                      padding: '0.08rem 0.42rem',
+                      borderRadius: '10px',
+                      fontSize: '0.74rem',
+                      fontWeight: 800
+                    }}
+                  >
+                    {unreadAuditCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* Stock Notification Bell with Badge (only for non-staff) */}
             {!isStaff && (
               <button
                 type="button"
@@ -185,6 +232,28 @@ export default function Navbar() {
 
           {/* Mobile Top Bar */}
           <div className="mobile-only" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            {role === 'owner' && (
+              <button
+                type="button"
+                onClick={() => setIsAuditModalOpen(true)}
+                style={{
+                  background: unreadAuditCount > 0 ? '#ffe4e6' : '#f1f5f9',
+                  color: unreadAuditCount > 0 ? '#be123c' : '#334155',
+                  border: `1px solid ${unreadAuditCount > 0 ? '#fda4af' : 'var(--border)'}`,
+                  borderRadius: '6px',
+                  padding: '0.25rem 0.5rem',
+                  fontSize: '0.75rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                  fontWeight: 800
+                }}
+                title="Owner Activity & Database Alerts"
+              >
+                🛡️ {unreadAuditCount > 0 ? unreadAuditCount : ''}
+              </button>
+            )}
+
             {!isStaff && (
               <button
                 type="button"
@@ -234,6 +303,13 @@ export default function Navbar() {
 
       {!isStaff && (
         <StockNotificationModal isOpen={isNotifOpen} onClose={() => setIsNotifOpen(false)} />
+      )}
+
+      {role === 'owner' && (
+        <OwnerActivityAlertModal
+          isOpen={isAuditModalOpen}
+          onClose={() => setIsAuditModalOpen(false)}
+        />
       )}
     </>
   );

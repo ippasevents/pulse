@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { store, StockEstimationItem } from '@/lib/store';
 import { EventRecord, EventStatus, MenuItem, Invoice, Payment, PricingType } from '@/lib/types';
 import { downloadElementAsPdf } from '@/lib/downloadPdf';
+import { sendInvoiceEmailNotification } from '@/lib/emailInvoice';
+import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
 
 export default function EventDetailPage() {
   const params = useParams();
@@ -43,12 +45,22 @@ export default function EventDetailPage() {
   const [shiftStart, setShiftStart] = useState('16:00');
   const [shiftEnd, setShiftEnd] = useState('23:00');
 
-  // New Invoice form with Discount
+  // New Invoice form with Discount & Auto-Email to Gmail
   const [invKind, setInvKind] = useState<'deposit' | 'final'>('deposit');
   const [invSubtotal, setInvSubtotal] = useState<number>(50000);
   const [invDiscount, setInvDiscount] = useState<number>(0);
   const [invDueDate, setInvDueDate] = useState('');
   const [invNotes, setInvNotes] = useState('');
+  const [autoEmailInvoice, setAutoEmailInvoice] = useState<boolean>(
+    state.settings.auto_email_invoices !== false
+  );
+  const [sendingEmailInvId, setSendingEmailInvId] = useState<string | null>(null);
+  const [statusBanner, setStatusBanner] = useState<{
+    type: 'success' | 'info';
+    message: string;
+    gmailWebUrl?: string;
+    mailtoUrl?: string;
+  } | null>(null);
 
   // Edit Invoice modal state (allows editing discount & subtotal on same invoice)
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
@@ -71,11 +83,16 @@ export default function EventDetailPage() {
   const [kgQuantities, setKgQuantities] = useState<Record<string, number>>({});
 
   useEffect(() => {
+    setState(store.getState());
     const unsub = store.subscribe(() => {
       setState(store.getState());
     });
     return unsub;
   }, []);
+
+  useEffect(() => {
+    setAutoEmailInvoice(state.settings.auto_email_invoices !== false);
+  }, [state.settings.auto_email_invoices]);
 
   const event = state.events.find((e) => e.id === eventId);
   const client = state.clients.find((c) => c.id === event?.client_id);
@@ -113,6 +130,7 @@ export default function EventDetailPage() {
   const canEditOps = role === 'owner' || role === 'manager';
   const isFinance = role === 'owner' || role === 'accountant';
   const canEditQuote = canEditOps || isFinance;
+  const auditSummary = role === 'owner' ? store.getEventAuditSummary(event.id) : null;
 
   const { menuTotal, extrasTotal, grandTotal } = store.getEventTotal(event.id);
   const displayTotal = isFinance ? grandTotal : menuTotal;
@@ -155,7 +173,7 @@ export default function EventDetailPage() {
   const handleUpdateDetails = (e: React.FormEvent) => {
     e.preventDefault();
     store.updateEvent(event.id, editForm);
-    alert('Event details updated successfully.');
+    setStatusBanner({ type: 'success', message: 'Event details updated successfully.' });
   };
 
   // Add Dish (No locking system!)
@@ -220,11 +238,43 @@ export default function EventDetailPage() {
     });
   };
 
-  // Create Invoice with Subtotal and Discount
-  const handleCreateInvoice = (e: React.FormEvent) => {
+  const handleSendInvoiceEmail = async (inv: Invoice, isAutomatic: boolean = false) => {
+    const targetEmail = state.settings.invoice_notification_email || 'ippasevents@gmail.com';
+    setSendingEmailInvId(inv.id);
+    const res = await sendInvoiceEmailNotification(inv, targetEmail);
+    setSendingEmailInvId(null);
+
+    if (res.success) {
+      setStatusBanner({
+        type: 'success',
+        message: isAutomatic
+          ? `Invoice ${inv.invoice_number} created and automatically emailed to ${res.sentTo}.`
+          : `Invoice ${inv.invoice_number} emailed successfully to ${res.sentTo}.`
+      });
+    } else if (!res.configured) {
+      setStatusBanner({
+        type: 'info',
+        message: isAutomatic
+          ? `Invoice ${inv.invoice_number} created! Add SMTP_USER & SMTP_PASS in Vercel Environment Variables for silent background delivery, or send immediately to ${res.sentTo} below:`
+          : `Server SMTP credentials are not configured yet. Click below to send Invoice ${inv.invoice_number} directly to ${res.sentTo}:`,
+        gmailWebUrl: res.gmailWebUrl,
+        mailtoUrl: res.mailtoUrl
+      });
+    } else {
+      setStatusBanner({
+        type: 'info',
+        message: `Invoice ${inv.invoice_number} saved, but automatic email encountered an error (${res.error}). Use quick send to ${res.sentTo}:`,
+        gmailWebUrl: res.gmailWebUrl,
+        mailtoUrl: res.mailtoUrl
+      });
+    }
+  };
+
+  // Create Invoice with Subtotal, Discount, and Optional Auto-Email to Gmail
+  const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     const net = Math.max(0, invSubtotal - invDiscount);
-    store.addInvoice({
+    const createdInv = store.addInvoice({
       event_id: event.id,
       kind: invKind,
       subtotal: invSubtotal,
@@ -236,7 +286,15 @@ export default function EventDetailPage() {
     });
     setInvDiscount(0);
     setInvNotes('');
-    alert('Invoice generated successfully.');
+
+    if (autoEmailInvoice) {
+      await handleSendInvoiceEmail(createdInv, true);
+    } else {
+      setStatusBanner({
+        type: 'success',
+        message: `Invoice ${createdInv.invoice_number} generated successfully.`
+      });
+    }
   };
 
   // Open Edit Invoice Modal (Same Invoice editing)
@@ -291,7 +349,10 @@ export default function EventDetailPage() {
     });
 
     setPartPayInvoice(null);
-    alert('Part payment recorded on the invoice successfully.');
+    setStatusBanner({
+      type: 'success',
+      message: 'Part-payment recorded on the invoice successfully.'
+    });
   };
 
   return (
@@ -302,6 +363,56 @@ export default function EventDetailPage() {
           &larr; Back to Events list
         </Link>
       </div>
+
+      {statusBanner && (
+        <div
+          style={{
+            background: statusBanner.type === 'success' ? '#dcfce7' : '#eff6ff',
+            border: `1px solid ${statusBanner.type === 'success' ? '#86efac' : '#93c5fd'}`,
+            color: statusBanner.type === 'success' ? '#166534' : '#1e3a8a',
+            padding: '0.8rem 1rem',
+            borderRadius: '8px',
+            marginBottom: '1rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '0.75rem',
+            flexWrap: 'wrap',
+            fontSize: '0.88rem'
+          }}
+        >
+          <div style={{ fontWeight: 600 }}>{statusBanner.message}</div>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            {statusBanner.gmailWebUrl && (
+              <a
+                href={statusBanner.gmailWebUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-primary btn-sm"
+                style={{ fontWeight: 600 }}
+              >
+                📧 Send in Gmail
+              </a>
+            )}
+            {statusBanner.mailtoUrl && (
+              <a
+                href={statusBanner.mailtoUrl}
+                className="btn btn-secondary btn-sm"
+                style={{ fontWeight: 600 }}
+              >
+                ✉️ Open Mail App
+              </a>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setStatusBanner(null)}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Page Header */}
       <div className="page-header" style={{ alignItems: 'flex-start' }}>
@@ -335,6 +446,38 @@ export default function EventDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Owner-Only Event & Quotation Login ID Attribution Banner */}
+      {role === 'owner' && (auditSummary?.eventAudit || auditSummary?.quoteAudit) && (
+        <div
+          className="no-print"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))',
+            gap: '0.75rem',
+            marginBottom: '1.15rem'
+          }}
+        >
+          {auditSummary?.eventAudit && (
+            <OwnerAuditBadge
+              role={role}
+              entry={auditSummary.eventAudit}
+              prefixLabel="Event last updated by"
+              variant="banner"
+              showSummary
+            />
+          )}
+          {auditSummary?.quoteAudit && (
+            <OwnerAuditBadge
+              role={role}
+              entry={auditSummary.quoteAudit}
+              prefixLabel="Quotation last edited by"
+              variant="banner"
+              showSummary
+            />
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border)', marginBottom: '1.25rem', overflowX: 'auto' }}>
@@ -404,6 +547,18 @@ export default function EventDetailPage() {
                 </button>
               </div>
 
+              {role === 'owner' && auditSummary?.quoteAudit && (
+                <div style={{ marginBottom: '0.85rem' }}>
+                  <OwnerAuditBadge
+                    role={role}
+                    entry={auditSummary.quoteAudit}
+                    prefixLabel="Last quotation edit"
+                    variant="banner"
+                    showSummary
+                  />
+                </div>
+              )}
+
               {eventItems.length === 0 ? (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
                   No menu items added to this quote yet. Select items from the catalog on the right.
@@ -438,6 +593,13 @@ export default function EventDetailPage() {
                               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                                 {dish?.category}
                               </div>
+                              {role === 'owner' && (
+                                <OwnerAuditBadge
+                                  role={role}
+                                  entry={store.getEntityAudit(item.id, ['quotation'])}
+                                  prefixLabel="Edited by"
+                                />
+                              )}
                             </td>
                             <td>
                               <span
@@ -513,7 +675,16 @@ export default function EventDetailPage() {
                       <tbody>
                         {extras.map((ex) => (
                           <tr key={ex.id}>
-                            <td>{ex.description}</td>
+                            <td>
+                              <div>{ex.description}</div>
+                              {role === 'owner' && (
+                                <OwnerAuditBadge
+                                  role={role}
+                                  entry={store.getEntityAudit(ex.id, ['quotation'])}
+                                  prefixLabel="Added by"
+                                />
+                              )}
+                            </td>
                             <td style={{ textAlign: 'right', fontWeight: 600 }}>
                               ₹{ex.amount.toLocaleString('en-IN')}
                             </td>
@@ -819,6 +990,13 @@ export default function EventDetailPage() {
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                               {staffMember?.phone}
                             </div>
+                            {role === 'owner' && (
+                              <OwnerAuditBadge
+                                role={role}
+                                entry={store.getEntityAudit(sh.id, ['shift'])}
+                                prefixLabel="Assigned by"
+                              />
+                            )}
                           </td>
                           <td>
                             <span className="badge" style={{ background: '#f1f5f9' }}>
@@ -978,6 +1156,13 @@ export default function EventDetailPage() {
                                   Discount: -₹{inv.discount.toLocaleString('en-IN')}
                                 </div>
                               )}
+                              {role === 'owner' && (
+                                <OwnerAuditBadge
+                                  role={role}
+                                  entry={store.getInvoiceAudit(inv.id)}
+                                  prefixLabel="Updated by"
+                                />
+                              )}
                             </td>
                             <td>
                               <span className="badge" style={{ background: '#f1f5f9' }}>
@@ -1010,6 +1195,17 @@ export default function EventDetailPage() {
 
                                 {isFinance && (
                                   <>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      title={`Email Invoice to ${state.settings.invoice_notification_email || 'ippasevents@gmail.com'}`}
+                                      disabled={sendingEmailInvId === inv.id}
+                                      onClick={() => handleSendInvoiceEmail(inv, false)}
+                                      style={{ background: '#eff6ff', borderColor: '#bfdbfe', color: '#1d4ed8', fontWeight: 600 }}
+                                    >
+                                      {sendingEmailInvId === inv.id ? '⏳...' : '📧 Gmail'}
+                                    </button>
+
                                     <button
                                       className="btn btn-secondary btn-sm"
                                       title="Record Part-Payment on this invoice"
@@ -1110,6 +1306,37 @@ export default function EventDetailPage() {
                     />
                   </div>
 
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '0.55rem',
+                      padding: '0.7rem 0.8rem',
+                      background: '#eff6ff',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: '6px',
+                      marginBottom: '1rem'
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      id="autoEmailInvoiceToggle"
+                      checked={autoEmailInvoice}
+                      onChange={(e) => setAutoEmailInvoice(e.target.checked)}
+                      style={{ marginTop: '0.2rem' }}
+                    />
+                    <label
+                      htmlFor="autoEmailInvoiceToggle"
+                      style={{ fontSize: '0.82rem', color: '#1e3a8a', cursor: 'pointer', lineHeight: 1.4 }}
+                    >
+                      <strong>Automatically email invoice copy to Gmail</strong>
+                      <div style={{ fontSize: '0.75rem', color: '#2563eb' }}>
+                        Sends invoice details to{' '}
+                        <strong>{state.settings.invoice_notification_email || 'ippasevents@gmail.com'}</strong>
+                      </div>
+                    </label>
+                  </div>
+
                   <button type="submit" className="btn btn-primary" style={{ width: '100%', fontWeight: 600 }}>
                     Create Invoice
                   </button>
@@ -1157,7 +1384,16 @@ export default function EventDetailPage() {
                               <span style={{ fontWeight: 700 }}>{inv?.invoice_number}</span>
                             </td>
                             <td style={{ textTransform: 'capitalize' }}>{pmt.method}</td>
-                            <td style={{ fontSize: '0.85rem' }}>{pmt.note || '—'}</td>
+                            <td style={{ fontSize: '0.85rem' }}>
+                              <div>{pmt.note || '—'}</div>
+                              {role === 'owner' && (
+                                <OwnerAuditBadge
+                                  role={role}
+                                  entry={store.getEntityAudit(pmt.id, ['payment'])}
+                                  prefixLabel="Logged by"
+                                />
+                              )}
+                            </td>
                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
                               ₹{pmt.amount.toLocaleString('en-IN')}
                             </td>
@@ -1190,128 +1426,205 @@ export default function EventDetailPage() {
       {/* TAB 5: EDIT DETAILS */}
       {/* ----------------------------------------------------------------------------------- */}
       {activeTab === 'details' && (
-        <div className="card" style={{ maxWidth: '750px' }}>
-          <h2 className="card-title">Edit Event Specifications</h2>
-          <form onSubmit={handleUpdateDetails}>
-            <div className="form-group">
-              <label className="form-label">Event Title</label>
-              <input
-                type="text"
-                className="form-control"
-                value={editForm.title}
-                onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                required
-                disabled={!canEditOps}
-              />
-            </div>
-
-            <div className="grid-2">
+        <div style={{ display: 'grid', gridTemplateColumns: role === 'owner' ? 'repeat(auto-fit, minmax(360px, 1fr))' : 'minmax(0, 750px)', gap: '1.25rem', alignItems: 'start' }}>
+          <div className="card">
+            <h2 className="card-title">Edit Event Specifications</h2>
+            <form onSubmit={handleUpdateDetails}>
               <div className="form-group">
-                <label className="form-label">Event Date</label>
+                <label className="form-label">Event Title</label>
                 <input
-                  type="date"
+                  type="text"
                   className="form-control"
-                  value={editForm.event_date}
-                  onChange={(e) => setEditForm({ ...editForm, event_date: e.target.value })}
+                  value={editForm.title}
+                  onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
                   required
                   disabled={!canEditOps}
                 />
               </div>
+
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Event Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={editForm.event_date}
+                    onChange={(e) => setEditForm({ ...editForm, event_date: e.target.value })}
+                    required
+                    disabled={!canEditOps}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Guest Count (Pax)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="form-control"
+                    value={editForm.guest_count}
+                    onChange={(e) => setEditForm({ ...editForm, guest_count: parseInt(e.target.value) || 1 })}
+                    required
+                    disabled={!canEditOps}
+                  />
+                </div>
+              </div>
+
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Start Time</label>
+                  <input
+                    type="time"
+                    className="form-control"
+                    value={editForm.start_time}
+                    onChange={(e) => setEditForm({ ...editForm, start_time: e.target.value })}
+                    disabled={!canEditOps}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">End Time</label>
+                  <input
+                    type="time"
+                    className="form-control"
+                    value={editForm.end_time}
+                    onChange={(e) => setEditForm({ ...editForm, end_time: e.target.value })}
+                    disabled={!canEditOps}
+                  />
+                </div>
+              </div>
+
               <div className="form-group">
-                <label className="form-label">Guest Count (Pax)</label>
+                <label className="form-label">Venue Location</label>
                 <input
-                  type="number"
-                  min="1"
+                  type="text"
                   className="form-control"
-                  value={editForm.guest_count}
-                  onChange={(e) => setEditForm({ ...editForm, guest_count: parseInt(e.target.value) || 1 })}
-                  required
+                  value={editForm.venue}
+                  onChange={(e) => setEditForm({ ...editForm, venue: e.target.value })}
                   disabled={!canEditOps}
                 />
               </div>
-            </div>
 
-            <div className="grid-2">
               <div className="form-group">
-                <label className="form-label">Start Time</label>
-                <input
-                  type="time"
+                <label className="form-label">Pipeline Status</label>
+                <select
                   className="form-control"
-                  value={editForm.start_time}
-                  onChange={(e) => setEditForm({ ...editForm, start_time: e.target.value })}
+                  value={editForm.status}
+                  onChange={(e) => setEditForm({ ...editForm, status: e.target.value as EventStatus })}
                   disabled={!canEditOps}
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">End Time</label>
-                <input
-                  type="time"
-                  className="form-control"
-                  value={editForm.end_time}
-                  onChange={(e) => setEditForm({ ...editForm, end_time: e.target.value })}
-                  disabled={!canEditOps}
-                />
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Venue Location</label>
-              <input
-                type="text"
-                className="form-control"
-                value={editForm.venue}
-                onChange={(e) => setEditForm({ ...editForm, venue: e.target.value })}
-                disabled={!canEditOps}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Pipeline Status</label>
-              <select
-                className="form-control"
-                value={editForm.status}
-                onChange={(e) => setEditForm({ ...editForm, status: e.target.value as EventStatus })}
-                disabled={!canEditOps}
-              >
-                <option value="inquiry">Inquiry</option>
-                <option value="quoted">Quoted</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="completed">Completed</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Operational Notes</label>
-              <textarea
-                rows={3}
-                className="form-control"
-                value={editForm.notes}
-                onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
-                disabled={!canEditOps}
-              />
-            </div>
-
-            {canEditOps && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem' }}>
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  onClick={() => {
-                    if (confirm('Are you sure you want to delete this event? This will remove all associated shifts and quote lines.')) {
-                      store.deleteEvent(event.id);
-                      router.push('/events');
-                    }
-                  }}
                 >
-                  Delete Event
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Save Changes
-                </button>
+                  <option value="inquiry">Inquiry</option>
+                  <option value="quoted">Quoted</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
               </div>
-            )}
-          </form>
+
+              <div className="form-group">
+                <label className="form-label">Operational Notes</label>
+                <textarea
+                  rows={3}
+                  className="form-control"
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  disabled={!canEditOps}
+                />
+              </div>
+
+              {canEditOps && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={() => {
+                      if (confirm('Are you sure you want to delete this event? This will remove all associated shifts and quote lines.')) {
+                        store.deleteEvent(event.id);
+                        router.push('/events');
+                      }
+                    }}
+                  >
+                    Delete Event
+                  </button>
+                  <button type="submit" className="btn btn-primary">
+                    Save Changes
+                  </button>
+                </div>
+              )}
+            </form>
+          </div>
+
+          {role === 'owner' && (
+            <div className="card" style={{ borderLeft: '4px solid #e11d48' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                <div>
+                  <h2 className="card-title" style={{ margin: 0 }}>
+                    🛡️ Event &amp; Quotation Audit Trail
+                  </h2>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                    Visible exclusively to Owner — exact Login IDs for every event, quote, shift, or invoice change.
+                  </p>
+                </div>
+                <span className="badge" style={{ background: '#ffe4e6', color: '#be123c', fontWeight: 800, fontSize: '0.68rem' }}>
+                  OWNER ONLY
+                </span>
+              </div>
+
+              {!auditSummary?.history || auditSummary.history.length === 0 ? (
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  No updates recorded for this event yet.
+                </p>
+              ) : (
+                <div style={{ maxHeight: '520px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                  {auditSummary.history.map((log) => {
+                    const meta = getActorRoleStyle(log.actor_role);
+                    return (
+                      <div
+                        key={log.id}
+                        style={{
+                          background: meta.bg,
+                          border: `1px solid ${meta.border}`,
+                          borderRadius: '8px',
+                          padding: '0.65rem 0.8rem'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.25rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                            <span
+                              style={{
+                                background: meta.badgeBg,
+                                color: meta.badgeText,
+                                padding: '0.08rem 0.38rem',
+                                borderRadius: '4px',
+                                fontSize: '0.64rem',
+                                fontWeight: 800
+                              }}
+                            >
+                              {meta.label}
+                            </span>
+                            <strong style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: '#0f172a' }}>
+                              {log.source === 'database' ? 'supabase_db' : `@${log.actor_username}`}
+                            </strong>
+                            <span style={{ fontSize: '0.75rem', color: '#475569' }}>
+                              ({log.actor_name})
+                            </span>
+                          </div>
+                          <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>
+                            {formatAuditTimestamp(log.created_at)}
+                          </span>
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: '0.84rem', color: '#0f172a' }}>
+                          {log.summary}
+                        </div>
+                        {log.details && (
+                          <div style={{ fontSize: '0.75rem', color: '#475569', marginTop: '0.12rem' }}>
+                            {log.details}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -1,12 +1,23 @@
 -- Catering event management: Postgres schema (Supabase-ready)
 -- Run in the Supabase SQL editor.
 
-create type user_role as enum ('owner', 'chef', 'staff');
-create type event_status as enum ('inquiry', 'quoted', 'confirmed', 'completed', 'cancelled');
-create type invoice_status as enum ('draft', 'sent', 'partially_paid', 'paid', 'void');
+do $$ begin
+  create type user_role as enum ('owner', 'chef', 'staff');
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create type event_status as enum ('inquiry', 'quoted', 'confirmed', 'completed', 'cancelled');
+exception when duplicate_object then null;
+end $$;
+
+do $$ begin
+  create type invoice_status as enum ('draft', 'sent', 'partially_paid', 'paid', 'void');
+exception when duplicate_object then null;
+end $$;
 
 -- Users (linked to Supabase auth)
-create table profiles (
+create table if not exists profiles (
   id uuid primary key references auth.users on delete cascade,
   full_name text not null,
   phone text,
@@ -15,7 +26,7 @@ create table profiles (
 );
 
 -- Clients
-create table clients (
+create table if not exists clients (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   email text,
@@ -26,7 +37,7 @@ create table clients (
 );
 
 -- Events (the core record)
-create table events (
+create table if not exists events (
   id uuid primary key default gen_random_uuid(),
   client_id uuid not null references clients on delete restrict,
   title text not null,
@@ -41,14 +52,14 @@ create table events (
 );
 
 -- Menu: ingredients, dishes, and dish recipes
-create table ingredients (
+create table if not exists ingredients (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
   unit text not null,                 -- e.g. kg, l, each
   cost_per_unit numeric(10,2) not null default 0
 );
 
-create table menu_items (
+create table if not exists menu_items (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   description text,
@@ -58,7 +69,7 @@ create table menu_items (
 );
 
 -- Quantity of each ingredient needed per guest for a dish
-create table menu_item_ingredients (
+create table if not exists menu_item_ingredients (
   menu_item_id uuid references menu_items on delete cascade,
   ingredient_id uuid references ingredients on delete restrict,
   qty_per_guest numeric(10,4) not null,
@@ -66,7 +77,7 @@ create table menu_item_ingredients (
 );
 
 -- Dishes chosen for an event (this is the quote)
-create table event_items (
+create table if not exists event_items (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references events on delete cascade,
   menu_item_id uuid not null references menu_items on delete restrict,
@@ -75,7 +86,7 @@ create table event_items (
 );
 
 -- Extra quote lines (rentals, delivery, service fees, discounts)
-create table event_extras (
+create table if not exists event_extras (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references events on delete cascade,
   description text not null,
@@ -83,7 +94,7 @@ create table event_extras (
 );
 
 -- Staff scheduling
-create table shifts (
+create table if not exists shifts (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references events on delete cascade,
   staff_id uuid not null references profiles on delete restrict,
@@ -94,7 +105,7 @@ create table shifts (
 );
 
 -- Invoicing and payments
-create table invoices (
+create table if not exists invoices (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references events on delete restrict,
   invoice_number text not null unique,
@@ -105,7 +116,7 @@ create table invoices (
   created_at timestamptz default now()
 );
 
-create table payments (
+create table if not exists payments (
   id uuid primary key default gen_random_uuid(),
   invoice_id uuid not null references invoices on delete cascade,
   amount numeric(10,2) not null,
@@ -114,7 +125,7 @@ create table payments (
 );
 
 -- Handy views
-create view event_totals as
+create or replace view event_totals as
 select
   e.id as event_id,
   coalesce(sum(ei.price_per_guest) * e.guest_count, 0)
@@ -124,7 +135,7 @@ left join event_items ei on ei.event_id = e.id
 group by e.id, e.guest_count;
 
 -- Shopping/prep list: total ingredients needed per event
-create view event_ingredient_needs as
+create or replace view event_ingredient_needs as
 select
   ei.event_id,
   i.id as ingredient_id,
@@ -152,40 +163,59 @@ alter table shifts enable row level security;
 alter table invoices enable row level security;
 alter table payments enable row level security;
 
-create function is_owner() returns boolean
+create or replace function is_owner() returns boolean
 language sql stable as $$
   select exists (select 1 from profiles where id = auth.uid() and role = 'owner');
 $$;
 
 -- Everyone signed in can read operational data
+drop policy if exists read_all on clients;
 create policy read_all on clients for select to authenticated using (true);
+drop policy if exists read_all on events;
 create policy read_all on events for select to authenticated using (true);
+drop policy if exists read_all on ingredients;
 create policy read_all on ingredients for select to authenticated using (true);
+drop policy if exists read_all on menu_items;
 create policy read_all on menu_items for select to authenticated using (true);
+drop policy if exists read_all on menu_item_ingredients;
 create policy read_all on menu_item_ingredients for select to authenticated using (true);
+drop policy if exists read_all on event_items;
 create policy read_all on event_items for select to authenticated using (true);
+drop policy if exists read_all on shifts;
 create policy read_all on shifts for select to authenticated using (true);
+drop policy if exists read_all on profiles;
 create policy read_all on profiles for select to authenticated using (true);
 
 -- Money tables: owner only
+drop policy if exists owner_all on invoices;
 create policy owner_all on invoices for all to authenticated using (is_owner()) with check (is_owner());
+drop policy if exists owner_all on payments;
 create policy owner_all on payments for all to authenticated using (is_owner()) with check (is_owner());
+drop policy if exists owner_all on event_extras;
 create policy owner_all on event_extras for all to authenticated using (is_owner()) with check (is_owner());
 
 -- Owner can edit everything else
+drop policy if exists owner_write on clients;
 create policy owner_write on clients for all to authenticated using (is_owner()) with check (is_owner());
+drop policy if exists owner_write on events;
 create policy owner_write on events for all to authenticated using (is_owner()) with check (is_owner());
+drop policy if exists owner_write on event_items;
 create policy owner_write on event_items for all to authenticated using (is_owner()) with check (is_owner());
+drop policy if exists owner_write on shifts;
 create policy owner_write on shifts for all to authenticated using (is_owner()) with check (is_owner());
+drop policy if exists owner_write on profiles;
 create policy owner_write on profiles for all to authenticated using (is_owner()) with check (is_owner());
 
 -- Chef can manage menu and recipes
+drop policy if exists chef_write on ingredients;
 create policy chef_write on ingredients for all to authenticated
   using (is_owner() or exists (select 1 from profiles where id = auth.uid() and role = 'chef'))
   with check (is_owner() or exists (select 1 from profiles where id = auth.uid() and role = 'chef'));
+drop policy if exists chef_write on menu_items;
 create policy chef_write on menu_items for all to authenticated
   using (is_owner() or exists (select 1 from profiles where id = auth.uid() and role = 'chef'))
   with check (is_owner() or exists (select 1 from profiles where id = auth.uid() and role = 'chef'));
+drop policy if exists chef_write on menu_item_ingredients;
 create policy chef_write on menu_item_ingredients for all to authenticated
   using (is_owner() or exists (select 1 from profiles where id = auth.uid() and role = 'chef'))
   with check (is_owner() or exists (select 1 from profiles where id = auth.uid() and role = 'chef'));
@@ -202,7 +232,9 @@ alter table ingredients add column if not exists stock_qty numeric(12,3) not nul
 alter table ingredients add column if not exists low_stock_level numeric(12,3) not null default 0;
 
 alter table business_settings enable row level security;
+drop policy if exists read_all on business_settings;
 create policy read_all on business_settings for select to authenticated using (true);
+drop policy if exists owner_write on business_settings;
 create policy owner_write on business_settings for all to authenticated using (is_owner()) with check (is_owner());
 
 -- ===== Added in update 3 (staff + invoices) =====
@@ -224,7 +256,9 @@ alter table invoices alter column invoice_number
   set default ('INV-' || lpad(nextval('invoice_seq')::text, 4, '0'));
 
 alter table staff_members enable row level security;
+drop policy if exists read_all on staff_members;
 create policy read_all on staff_members for select to authenticated using (true);
+drop policy if exists owner_write on staff_members;
 create policy owner_write on staff_members for all to authenticated using (is_owner()) with check (is_owner());
 
 -- ===== Added in update 4 (roles) =====
