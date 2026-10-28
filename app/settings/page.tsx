@@ -334,7 +334,7 @@ export default function SettingsPage() {
                 <ol style={{ paddingLeft: '1.25rem', marginTop: '0.35rem', fontSize: '0.75rem' }}>
                   <li>Run <code>schema.sql</code> followed by <code>migration_06.sql</code> and <code>migration_07.sql</code> in your Supabase SQL Editor (enables <code>activity_logs</code> &amp; direct DB change triggers)</li>
                   <li>Set <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in Vercel Environment Variables</li>
-                  <li>Set <code>SMTP_USER</code> (sender Gmail) and <code>SMTP_PASS</code> (16-digit Gmail App Password) in Vercel Environment Variables for silent background invoice emails to <code>ippasevents@gmail.com</code></li>
+                  <li>Set <code>SMTP_HOST=smtp.gmail.com</code>, <code>SMTP_PORT=465</code>, <code>SMTP_USER=ippassales@gmail.com</code>, <code>SMTP_PASS</code>, and <code>INVOICE_NOTIFICATION_EMAIL=ippasevents@gmail.com</code> in Vercel Environment Variables for automatic background invoice delivery</li>
                 </ol>
               </div>
             </div>

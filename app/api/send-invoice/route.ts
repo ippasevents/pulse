@@ -73,9 +73,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const smtpUser = process.env.SMTP_USER;
+    const smtpUser = (process.env.SMTP_USER || 'ippassales@gmail.com').trim();
     const smtpPass = process.env.SMTP_PASS;
-    const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+    const smtpHost = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
     const smtpPort = Number(process.env.SMTP_PORT || 465);
 
     if (!smtpUser || !smtpPass) {
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
         configured: false,
         sentTo: recipient,
         error:
-          'SMTP_USER and SMTP_PASS environment variables are not configured on the server yet. Set them in Vercel Environment Variables to send automatically in the background.'
+          'SMTP_USER (ippassales@gmail.com) and SMTP_PASS environment variables are not configured on the server yet. Add them in your deployment Environment Variables to send automatically in the background.'
       });
     }
 
@@ -229,19 +229,34 @@ export async function POST(req: NextRequest) {
       </div>
     `;
 
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass
-      }
-    });
+    const isGmail = smtpHost.toLowerCase().includes('gmail.com');
+    const transporter = nodemailer.createTransport(
+      isGmail
+        ? {
+            service: 'gmail',
+            host: 'smtp.gmail.com',
+            port: smtpPort,
+            secure: smtpPort === 465,
+            auth: {
+              user: smtpUser,
+              pass: smtpPass
+            }
+          }
+        : {
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpPort === 465,
+            auth: {
+              user: smtpUser,
+              pass: smtpPass
+            }
+          }
+    );
 
     await transporter.sendMail({
       from: `"${brandName}" <${smtpUser}>`,
       to: recipient,
+      replyTo: smtpUser,
       subject,
       html
     });
@@ -249,15 +264,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       configured: true,
+      sentFrom: smtpUser,
       sentTo: recipient
     });
   } catch (err: any) {
     console.error('[Send Invoice Email Error]', err);
+    const rawMsg = String(err?.message || '');
+    const isGmailAppPasswordError =
+      err?.code === 'EAUTH' ||
+      rawMsg.includes('535') ||
+      rawMsg.toLowerCase().includes('application-specific password') ||
+      rawMsg.toLowerCase().includes('username and password not accepted');
+
+    const friendlyError = isGmailAppPasswordError
+      ? 'Gmail blocked standard password login for ippassales@gmail.com. Google requires a 16-digit Gmail App Password (Google Account -> Security -> 2-Step Verification -> App passwords) in SMTP_PASS.'
+      : rawMsg || 'Failed to send invoice email.';
+
     return NextResponse.json(
       {
         success: false,
         configured: true,
-        error: err?.message || 'Failed to send invoice email.'
+        error: friendlyError
       },
       { status: 500 }
     );
