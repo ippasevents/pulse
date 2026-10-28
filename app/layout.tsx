@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
-import Navbar from '@/components/Navbar';
-import MobileBottomNav from '@/components/MobileBottomNav';
+import AuthGate from '@/components/AuthGate';
 
 export const viewport: Viewport = {
   themeColor: '#e11d48',
@@ -45,13 +44,7 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet" />
       </head>
       <body>
-        <div className="app-container">
-          <Navbar />
-          <main className="main-content">
-            {children}
-          </main>
-          <MobileBottomNav />
-        </div>
+        <AuthGate>{children}</AuthGate>
       </body>
     </html>
   );

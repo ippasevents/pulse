@@ -3,8 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { store } from '@/lib/store';
-import { EventRecord, EventStatus, MenuItem, Invoice } from '@/lib/types';
+import { store, StockEstimationItem } from '@/lib/store';
+import { EventRecord, EventStatus, MenuItem, Invoice, Payment, PricingType } from '@/lib/types';
 import { downloadElementAsPdf } from '@/lib/downloadPdf';
 
 export default function EventDetailPage() {
@@ -16,13 +16,10 @@ export default function EventDetailPage() {
   const [activeTab, setActiveTab] = useState<'quote' | 'stock' | 'shifts' | 'invoices' | 'details'>('quote');
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
-  // Unlock option for Quotation (defaults to locked to protect confirmed/quoted data)
-  const [isQuoteLocked, setIsQuoteLocked] = useState(true);
-
-  // Print Modals
+  // Print Modals - Standard A4 Portrait Only
   const [isPrintQuoteOpen, setIsPrintQuoteOpen] = useState(false);
+  const [isPrintStockOpen, setIsPrintStockOpen] = useState(false);
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
-  const [printOrientation, setPrintOrientation] = useState<'landscape' | 'portrait'>('landscape');
 
   // Edit details form state
   const [editForm, setEditForm] = useState({
@@ -46,24 +43,32 @@ export default function EventDetailPage() {
   const [shiftStart, setShiftStart] = useState('16:00');
   const [shiftEnd, setShiftEnd] = useState('23:00');
 
-  // New Invoice form
+  // New Invoice form with Discount
   const [invKind, setInvKind] = useState<'deposit' | 'final'>('deposit');
-  const [invAmount, setInvAmount] = useState<number>(50000);
+  const [invSubtotal, setInvSubtotal] = useState<number>(50000);
+  const [invDiscount, setInvDiscount] = useState<number>(0);
   const [invDueDate, setInvDueDate] = useState('');
+  const [invNotes, setInvNotes] = useState('');
 
-  // Unlock / Edit Invoice modal state
+  // Edit Invoice modal state (allows editing discount & subtotal on same invoice)
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [editInvForm, setEditInvForm] = useState({
-    amount: 0,
+    subtotal: 0,
+    discount: 0,
     kind: 'deposit' as 'deposit' | 'final',
     due_date: '',
-    status: 'draft' as Invoice['status']
+    status: 'draft' as Invoice['status'],
+    notes: ''
   });
 
-  // Record Payment form
-  const [payInvId, setPayInvId] = useState('');
-  const [payAmount, setPayAmount] = useState<number>(0);
-  const [payMethod, setPayMethod] = useState('bank transfer');
+  // Record Part-Payment modal state (against the same invoice)
+  const [partPayInvoice, setPartPayInvoice] = useState<Invoice | null>(null);
+  const [partPayAmount, setPartPayAmount] = useState<number>(0);
+  const [partPayMethod, setPartPayMethod] = useState('bank transfer');
+  const [partPayNote, setPartPayNote] = useState('');
+
+  // Per-kg item quantity staging when adding dishes
+  const [kgQuantities, setKgQuantities] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const unsub = store.subscribe(() => {
@@ -87,9 +92,8 @@ export default function EventDetailPage() {
         status: event.status,
         notes: event.notes || ''
       });
-      if (event.status === 'inquiry') {
-        setIsQuoteLocked(false);
-      }
+      const totals = store.getEventTotal(event.id);
+      setInvSubtotal(totals.grandTotal > 0 ? totals.grandTotal : 50000);
     }
   }, [event]);
 
@@ -125,21 +129,15 @@ export default function EventDetailPage() {
   // Invoices for this event
   const invoices = state.invoices.filter((i) => i.event_id === event.id);
 
-  // Ingredient needs calculation
-  const ingredientNeedsMap: Record<string, { needed: number; ingredient: any }> = {};
-  eventItems.forEach((item) => {
-    const recipesForDish = state.recipes.filter((r) => r.menu_item_id === item.menu_item_id);
-    recipesForDish.forEach((r) => {
-      const ing = state.ingredients.find((i) => i.id === r.ingredient_id);
-      if (ing) {
-        if (!ingredientNeedsMap[ing.id]) {
-          ingredientNeedsMap[ing.id] = { needed: 0, ingredient: ing };
-        }
-        ingredientNeedsMap[ing.id].needed += r.qty_per_guest * event.guest_count;
-      }
-    });
-  });
-  const ingredientNeeds = Object.values(ingredientNeedsMap);
+  // Total Invoiced & Payments across this event
+  const totalInvoicedForEvent = invoices.reduce((s, inv) => s + inv.amount, 0);
+  const totalPaidForEvent = state.payments
+    .filter((p) => invoices.some((i) => i.id === p.invoice_id))
+    .reduce((s, p) => s + p.amount, 0);
+  const remainingEventBalance = Math.max(0, grandTotal - totalPaidForEvent);
+
+  // Automatic Stock Estimation for this event
+  const stockEst = store.getEventStockEstimation(event.id);
 
   // Estimated staff cost
   let estimatedStaffCost = 0;
@@ -159,28 +157,25 @@ export default function EventDetailPage() {
     alert('Event details updated successfully.');
   };
 
+  // Add Dish (No locking system!)
   const handleAddDish = (dish: MenuItem) => {
-    if (isQuoteLocked) {
-      alert('Quotation is currently locked. Click "Unlock Quote" to make edits.');
-      return;
-    }
-    store.setEventItem(event.id, dish.id, dish.price_per_guest);
+    const pType = dish.pricing_type || 'per_guest';
+    const rate = dish.price_per_unit || dish.price_per_guest || 0;
+    const customKg = kgQuantities[dish.id];
+    const qty = pType === 'per_kg' ? (customKg !== undefined ? customKg : 10) : undefined;
+    store.setEventItem(event.id, dish.id, rate, pType, qty);
   };
 
   const handleRemoveDish = (dishId: string) => {
-    if (isQuoteLocked) {
-      alert('Quotation is currently locked. Click "Unlock Quote" to remove items.');
-      return;
-    }
     store.removeEventItem(event.id, dishId);
+  };
+
+  const handleUpdateItemQuantity = (eventItemId: string, newQty: number) => {
+    store.updateEventItem(eventItemId, { quantity: Math.max(0.1, newQty) });
   };
 
   const handleAddExtra = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isQuoteLocked) {
-      alert('Quotation is currently locked. Click "Unlock Quote" to add charges.');
-      return;
-    }
     if (!extraDesc || extraAmount <= 0) return;
     store.addEventExtra(event.id, extraDesc, extraAmount);
     setExtraDesc('');
@@ -224,49 +219,84 @@ export default function EventDetailPage() {
     });
   };
 
+  // Create Invoice with Subtotal and Discount
   const handleCreateInvoice = (e: React.FormEvent) => {
     e.preventDefault();
+    const net = Math.max(0, invSubtotal - invDiscount);
     store.addInvoice({
       event_id: event.id,
       kind: invKind,
-      amount: invAmount,
+      subtotal: invSubtotal,
+      discount: invDiscount,
+      amount: net,
       due_date: invDueDate || event.event_date,
-      status: 'draft'
+      status: 'draft',
+      notes: invNotes
     });
+    setInvDiscount(0);
+    setInvNotes('');
+    alert('Invoice generated successfully.');
   };
 
+  // Open Edit Invoice Modal (Same Invoice editing)
   const handleOpenEditInvoice = (inv: Invoice) => {
     setEditingInvoice(inv);
     setEditInvForm({
-      amount: inv.amount,
+      subtotal: inv.subtotal !== undefined ? inv.subtotal : inv.amount,
+      discount: inv.discount || 0,
       kind: inv.kind,
       due_date: inv.due_date || '',
-      status: inv.status
+      status: inv.status,
+      notes: inv.notes || ''
     });
   };
 
   const handleSaveInvoiceEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingInvoice) return;
-    store.updateInvoice(editingInvoice.id, editInvForm);
+    store.updateInvoice(editingInvoice.id, {
+      subtotal: editInvForm.subtotal,
+      discount: editInvForm.discount,
+      kind: editInvForm.kind,
+      due_date: editInvForm.due_date,
+      status: editInvForm.status,
+      notes: editInvForm.notes
+    });
     setEditingInvoice(null);
   };
 
-  const handleRecordPayment = (e: React.FormEvent) => {
+  // Open Part Payment Modal (Record on the SAME invoice)
+  const handleOpenPartPayment = (inv: Invoice) => {
+    const paymentsForInv = state.payments
+      .filter((p) => p.invoice_id === inv.id)
+      .reduce((s, p) => s + p.amount, 0);
+    const balance = Math.max(0, inv.amount - paymentsForInv);
+
+    setPartPayInvoice(inv);
+    setPartPayAmount(balance);
+    setPartPayMethod('bank transfer');
+    setPartPayNote(`Part payment against ${inv.invoice_number}`);
+  };
+
+  const handleSavePartPayment = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!payInvId || payAmount <= 0) return;
+    if (!partPayInvoice || partPayAmount <= 0) return;
+
     store.addPayment({
-      invoice_id: payInvId,
-      amount: payAmount,
-      method: payMethod
+      invoice_id: partPayInvoice.id,
+      amount: partPayAmount,
+      method: partPayMethod,
+      note: partPayNote
     });
-    setPayAmount(0);
+
+    setPartPayInvoice(null);
+    alert('Part payment recorded on the invoice successfully.');
   };
 
   return (
     <div>
-      {/* Back button */}
-      <div style={{ marginBottom: '0.75rem' }}>
+      {/* Navigation Breadcrumb */}
+      <div style={{ marginBottom: '1rem' }}>
         <Link href="/events" style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
           &larr; Back to Events list
         </Link>
@@ -284,7 +314,7 @@ export default function EventDetailPage() {
           </p>
         </div>
 
-        {/* Header Actions: Print Quotation PDF & Unlock Quote */}
+        {/* Header Actions: A4 PDF Quotation & Total */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <button
@@ -292,22 +322,8 @@ export default function EventDetailPage() {
               className="btn btn-primary btn-sm"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600 }}
             >
-              📄 Print / Save Quote as PDF
+              📄 Print / Download A4 Quotation PDF
             </button>
-
-            {canEditOps && (
-              <button
-                onClick={() => setIsQuoteLocked(!isQuoteLocked)}
-                className={`btn btn-sm ${isQuoteLocked ? 'btn-secondary' : 'btn-secondary'}`}
-                style={{
-                  border: isQuoteLocked ? '1px solid #cbd5e1' : '1px solid var(--success)',
-                  color: isQuoteLocked ? 'var(--text-main)' : 'var(--success)',
-                  fontWeight: 600
-                }}
-              >
-                {isQuoteLocked ? '🔓 Unlock Quote' : '🔒 Lock Quote'}
-              </button>
-            )}
           </div>
 
           <div style={{ textAlign: 'right', marginTop: '0.25rem' }}>
@@ -333,7 +349,7 @@ export default function EventDetailPage() {
           style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
           onClick={() => setActiveTab('stock')}
         >
-          📦 Stock vs. Needed ({ingredientNeeds.length})
+          📦 Stock Estimation A4 ({stockEst.items.length})
         </button>
         <button
           className={`btn ${activeTab === 'shifts' ? 'btn-primary' : 'btn-secondary'}`}
@@ -347,7 +363,7 @@ export default function EventDetailPage() {
           style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
           onClick={() => setActiveTab('invoices')}
         >
-          🧾 Invoices &amp; Payments ({invoices.length})
+          🧾 Invoices &amp; Part-Payments ({invoices.length})
         </button>
         <button
           className={`btn ${activeTab === 'details' ? 'btn-primary' : 'btn-secondary'}`}
@@ -358,105 +374,103 @@ export default function EventDetailPage() {
         </button>
       </div>
 
-      {/* TAB 1: MENU & QUOTE */}
+      {/* ----------------------------------------------------------------------------------- */}
+      {/* TAB 1: MENU & QUOTE (No lock system, supports Per Guest & Per Kg) */}
+      {/* ----------------------------------------------------------------------------------- */}
       {activeTab === 'quote' && (
         <div>
-          {/* Unlock Option Notification Banner */}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: '0.75rem',
-              padding: '0.75rem 1rem',
-              borderRadius: '8px',
-              marginBottom: '1.25rem',
-              background: isQuoteLocked ? '#f8fafc' : '#f0fdf4',
-              border: isQuoteLocked ? '1px solid #e2e8f0' : '1px solid #86efac',
-              color: isQuoteLocked ? '#334155' : '#166534'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-              <span style={{ fontSize: '1.1rem' }}>{isQuoteLocked ? '🔒' : '🔓'}</span>
-              <span>
-                {isQuoteLocked ? (
-                  <>
-                    <strong>Quotation is Locked:</strong> Rates and menu dish selections are protected from unintended alterations.
-                  </>
-                ) : (
-                  <>
-                    <strong>Quotation is Unlocked for Editing:</strong> You can add or remove dishes, adjust catalog items, and edit extra lines.
-                  </>
-                )}
-              </span>
-            </div>
-
-            {canEditOps && (
-              <button
-                type="button"
-                className={`btn btn-sm ${isQuoteLocked ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setIsQuoteLocked(!isQuoteLocked)}
-              >
-                {isQuoteLocked ? '🔓 Unlock Quote for Editing' : '🔒 Lock Quote'}
-              </button>
-            )}
-          </div>
-
           <div className="grid-2">
-            {/* Chosen dishes quote */}
+            {/* Selected dishes quote */}
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                 <h2 className="card-title" style={{ margin: 0 }}>
-                  Event Menu Quote ({event.guest_count} Guests)
+                  Event Menu ({event.guest_count} Guests)
                 </h2>
                 <button
                   onClick={() => setIsPrintQuoteOpen(true)}
                   className="btn btn-secondary btn-sm"
-                  title="Preview Quotation PDF with Logo"
+                  title="Preview Quotation A4 PDF with Logo"
                 >
-                  📄 PDF Preview
+                  📄 A4 PDF Preview
                 </button>
               </div>
 
               {eventItems.length === 0 ? (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                  No dishes added to this event yet.{' '}
-                  {isQuoteLocked ? 'Unlock the quote above to select dishes.' : 'Select dishes from the culinary catalog on the right.'}
+                  No menu items added to this quote yet. Select items from the catalog on the right.
                 </p>
               ) : (
-                <div className="data-table-container" style={{ marginBottom: '1.25rem' }}>
+                <div className="data-table-container">
                   <table className="data-table">
                     <thead>
                       <tr>
-                        <th>Dish</th>
-                        <th style={{ textAlign: 'right' }}>Per Guest</th>
-                        <th style={{ textAlign: 'right' }}>Line Total</th>
+                        <th>Dish / Item</th>
+                        <th>Type</th>
+                        <th style={{ textAlign: 'center' }}>Qty</th>
+                        <th style={{ textAlign: 'right' }}>Rate</th>
+                        <th style={{ textAlign: 'right' }}>Subtotal</th>
                         {canEditOps && <th style={{ textAlign: 'center' }}>Remove</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {eventItems.map((item) => {
                         const dish = state.menuItems.find((m) => m.id === item.menu_item_id);
-                        const lineTotal = item.price_per_guest * event.guest_count;
+                        const isKg = item.pricing_type === 'per_kg';
+                        const rate = item.price_per_unit || item.price_per_guest || 0;
+                        const qty = isKg
+                          ? (item.quantity !== undefined ? item.quantity : 1)
+                          : (item.quantity !== undefined ? item.quantity : event.guest_count);
+                        const lineTotal = rate * qty;
+
                         return (
                           <tr key={item.id}>
                             <td>
-                              <div style={{ fontWeight: 600 }}>{dish ? dish.name : 'Unknown Dish'}</div>
+                              <div style={{ fontWeight: 600 }}>{dish?.name || 'Custom Item'}</div>
                               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                                 {dish?.category}
                               </div>
                             </td>
-                            <td style={{ textAlign: 'right' }}>₹{item.price_per_guest}</td>
-                            <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{lineTotal.toLocaleString('en-IN')}</td>
+                            <td>
+                              <span
+                                className="badge"
+                                style={{
+                                  background: isKg ? '#f0fdf4' : '#eff6ff',
+                                  color: isKg ? '#166534' : '#1e40af',
+                                  fontSize: '0.7rem'
+                                }}
+                              >
+                                {isKg ? '⚖️ Per Kg' : '👥 Per Guest'}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {isKg ? (
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>
+                                  <input
+                                    type="number"
+                                    min="0.5"
+                                    step="0.5"
+                                    className="form-control"
+                                    style={{ width: '68px', padding: '0.2rem 0.35rem', textAlign: 'center', fontSize: '0.85rem' }}
+                                    value={item.quantity !== undefined ? item.quantity : 10}
+                                    onChange={(e) => handleUpdateItemQuantity(item.id, parseFloat(e.target.value) || 1)}
+                                  />
+                                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>kg</span>
+                                </div>
+                              ) : (
+                                <span style={{ fontWeight: 600 }}>{qty} pax</span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              ₹{rate.toLocaleString('en-IN')}{isKg ? '/kg' : '/pax'}
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--primary)' }}>
+                              ₹{lineTotal.toLocaleString('en-IN')}
+                            </td>
                             {canEditOps && (
                               <td style={{ textAlign: 'center' }}>
                                 <button
                                   className="btn btn-danger btn-sm"
                                   onClick={() => handleRemoveDish(item.menu_item_id)}
-                                  disabled={isQuoteLocked}
-                                  title={isQuoteLocked ? 'Quotation is locked. Unlock above to edit.' : 'Remove dish'}
-                                  style={{ opacity: isQuoteLocked ? 0.4 : 1, cursor: isQuoteLocked ? 'not-allowed' : 'pointer' }}
                                 >
                                   ✕
                                 </button>
@@ -470,130 +484,93 @@ export default function EventDetailPage() {
                 </div>
               )}
 
-              {/* Extras Section */}
-              <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem', marginTop: '1rem' }}>
-                <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                  Additional Quote Items (Equipment, Logistics, Fees)
+              {/* Extras & Logistics Lines */}
+              <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+                <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+                  Logistics, Crockery &amp; Extra Charges
                 </h3>
-                {!isFinance ? (
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                    Additional quote charges and fees are restricted to Owner / Accountant roles.
-                  </p>
+                {extras.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No extras or logistics fees added.</p>
                 ) : (
-                  <div>
-                    {extras.map((ex) => (
-                      <div
-                        key={ex.id}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '0.5rem 0',
-                          borderBottom: '1px dashed var(--border)',
-                          fontSize: '0.875rem'
-                        }}
-                      >
-                        <span>{ex.description}</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                          <span style={{ fontWeight: 600 }}>₹{ex.amount.toLocaleString('en-IN')}</span>
-                          {canEditOps && !isQuoteLocked && (
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => store.removeEventExtra(ex.id)}
-                              style={{ padding: '0.1rem 0.4rem', fontSize: '0.7rem' }}
-                            >
-                              ✕
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-
-                    {canEditOps && !isQuoteLocked && (
-                      <form onSubmit={handleAddExtra} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-                        <input
-                          type="text"
-                          placeholder="Description (e.g. Copper chaffing dishes, delivery)"
-                          className="form-control"
-                          value={extraDesc}
-                          onChange={(e) => setExtraDesc(e.target.value)}
-                          required
-                        />
-                        <input
-                          type="number"
-                          placeholder="Amount (₹)"
-                          className="form-control"
-                          style={{ width: '130px' }}
-                          value={extraAmount || ''}
-                          onChange={(e) => setExtraAmount(parseFloat(e.target.value) || 0)}
-                          required
-                        />
-                        <button type="submit" className="btn btn-secondary btn-sm">
-                          + Add
-                        </button>
-                      </form>
-                    )}
-
-                    {isQuoteLocked && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                        🔒 Quote is locked. Unlock above to add or remove extra lines.
-                      </div>
-                    )}
+                  <div className="data-table-container">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Description</th>
+                          <th style={{ textAlign: 'right' }}>Amount</th>
+                          {canEditOps && <th style={{ textAlign: 'center' }}>Remove</th>}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {extras.map((ex) => (
+                          <tr key={ex.id}>
+                            <td>{ex.description}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                              ₹{ex.amount.toLocaleString('en-IN')}
+                            </td>
+                            {canEditOps && (
+                              <td style={{ textAlign: 'center' }}>
+                                <button
+                                  className="btn btn-danger btn-sm"
+                                  onClick={() => store.removeEventExtra(ex.id)}
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
-              </div>
 
-              {/* Quote Summary Box */}
-              <div
-                style={{
-                  marginTop: '1.5rem',
-                  background: '#f8fafc',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  padding: '1rem'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', marginBottom: '0.35rem' }}>
-                  <span>Food &amp; Beverage ({event.guest_count} pax):</span>
-                  <span>₹{menuTotal.toLocaleString('en-IN')}</span>
-                </div>
-                {isFinance && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', marginBottom: '0.35rem' }}>
-                    <span>Logistics &amp; Extras:</span>
-                    <span>₹{extrasTotal.toLocaleString('en-IN')}</span>
-                  </div>
+                {/* Add Extra Charge Form */}
+                {canEditOps && (
+                  <form onSubmit={handleAddExtra} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. Copper Chafing Dishes, Transport, Linen"
+                      style={{ flex: 2, minWidth: '180px' }}
+                      value={extraDesc}
+                      onChange={(e) => setExtraDesc(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      className="form-control"
+                      placeholder="Amount ₹"
+                      style={{ flex: 1, minWidth: '100px' }}
+                      value={extraAmount || ''}
+                      onChange={(e) => setExtraAmount(parseFloat(e.target.value) || 0)}
+                    />
+                    <button type="submit" className="btn btn-secondary btn-sm" style={{ fontWeight: 600 }}>
+                      + Add Extra
+                    </button>
+                  </form>
                 )}
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    fontSize: '1.1rem',
-                    fontWeight: 700,
-                    borderTop: '1px solid var(--border)',
-                    paddingTop: '0.5rem',
-                    marginTop: '0.5rem',
-                    color: 'var(--primary)'
-                  }}
-                >
-                  <span>Grand Total:</span>
-                  <span>₹{displayTotal.toLocaleString('en-IN')}</span>
-                </div>
               </div>
             </div>
 
-            {/* Dish Catalog to Add */}
+            {/* Menu catalog to pick from */}
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                <h2 className="card-title" style={{ margin: 0 }}>Culinary Catalog</h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  {isQuoteLocked ? '🔒 Unlock quote to add' : 'Click to add'}
-                </span>
+                <h2 className="card-title" style={{ margin: 0 }}>
+                  Dish Catalog (Per Guest &amp; Per Kg)
+                </h2>
+                <Link href="/menu" className="btn btn-secondary btn-sm">
+                  + New Dish
+                </Link>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '550px', overflowY: 'auto' }}>
+
+              <div style={{ maxHeight: '550px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {state.menuItems
                   .filter((m) => m.active)
                   .map((dish) => {
                     const isSelected = selectedMenuItemIds.has(dish.id);
+                    const isKg = dish.pricing_type === 'per_kg';
+                    const rate = dish.price_per_unit || dish.price_per_guest || 0;
+
                     return (
                       <div
                         key={dish.id}
@@ -604,21 +581,52 @@ export default function EventDetailPage() {
                           borderRadius: '8px',
                           display: 'flex',
                           justifyContent: 'space-between',
-                          alignItems: 'center'
+                          alignItems: 'center',
+                          gap: '0.5rem'
                         }}
                       >
-                        <div style={{ flex: 1, paddingRight: '0.5rem' }}>
+                        <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{dish.name}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {dish.category} &bull; ₹{dish.price_per_guest}/guest
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.15rem' }}>
+                            <span>{dish.category}</span>
+                            <span>&bull;</span>
+                            <span style={{ fontWeight: 700, color: isKg ? '#059669' : 'var(--primary)' }}>
+                              ₹{rate} {isKg ? '/ kg' : '/ guest'}
+                            </span>
+                            <span
+                              className="badge"
+                              style={{
+                                background: isKg ? '#f0fdf4' : '#eff6ff',
+                                color: isKg ? '#166534' : '#1e40af',
+                                fontSize: '0.65rem'
+                              }}
+                            >
+                              {isKg ? '⚖️ Per Kg' : '👥 Per Guest'}
+                            </span>
                           </div>
-                          {dish.description && (
-                            <div style={{ fontSize: '0.75rem', color: '#475569', marginTop: '0.2rem' }}>
-                              {dish.description}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          {isKg && !isSelected && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                              <input
+                                type="number"
+                                min="1"
+                                className="form-control"
+                                style={{ width: '55px', padding: '0.2rem', textAlign: 'center', fontSize: '0.75rem' }}
+                                value={kgQuantities[dish.id] !== undefined ? kgQuantities[dish.id] : 10}
+                                onChange={(e) =>
+                                  setKgQuantities({
+                                    ...kgQuantities,
+                                    [dish.id]: parseFloat(e.target.value) || 1
+                                  })
+                                }
+                                placeholder="kg"
+                              />
+                              <span style={{ fontSize: '0.7rem', color: '#64748b' }}>kg</span>
                             </div>
                           )}
-                        </div>
-                        <div>
+
                           {isSelected ? (
                             <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--primary)' }}>
                               ✓ Added
@@ -628,10 +636,8 @@ export default function EventDetailPage() {
                               <button
                                 className="btn btn-secondary btn-sm"
                                 onClick={() => handleAddDish(dish)}
-                                disabled={isQuoteLocked}
-                                style={{ opacity: isQuoteLocked ? 0.5 : 1 }}
                               >
-                                {isQuoteLocked ? '🔒 Locked' : '+ Add'}
+                                + Add
                               </button>
                             )
                           )}
@@ -645,85 +651,128 @@ export default function EventDetailPage() {
         </div>
       )}
 
-      {/* TAB 2: STOCK VS. NEEDED */}
+      {/* ----------------------------------------------------------------------------------- */}
+      {/* TAB 2: AUTOMATIC STOCK ESTIMATION & A4 PRINTABLE REQUISITION */}
+      {/* ----------------------------------------------------------------------------------- */}
       {activeTab === 'stock' && (
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <div>
-              <h2 className="card-title" style={{ margin: 0 }}>Ingredient Requirements vs. Inventory Stock</h2>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                Aggregates exact quantities needed for {event.guest_count} guests based on dish recipes.
-              </p>
+        <div>
+          {/* Automatic Estimation Summary Banner */}
+          <div className="grid-3" style={{ marginBottom: '1.25rem' }}>
+            <div className="stats-card" style={{ borderLeft: '4px solid #2563eb' }}>
+              <span className="stats-label">Raw Materials Needed</span>
+              <span className="stats-value" style={{ color: '#2563eb' }}>
+                {stockEst.items.length} Items
+              </span>
+              <span className="stats-sub">Across all selected event recipes</span>
             </div>
-            <Link href="/stock" className="btn btn-secondary btn-sm">
-              Manage Warehouse Stock &rarr;
-            </Link>
+
+            <div className="stats-card" style={{ borderLeft: '4px solid #ef4444' }}>
+              <span className="stats-label">Shortage / To Purchase</span>
+              <span className="stats-value" style={{ color: stockEst.totalShortageCount > 0 ? '#dc2626' : 'var(--success)' }}>
+                {stockEst.totalShortageCount} Items
+              </span>
+              <span className="stats-sub">Warehouse quantity insufficient</span>
+            </div>
+
+            <div className="stats-card" style={{ borderLeft: '4px solid #059669' }}>
+              <span className="stats-label">Estimated Purchase Cost</span>
+              <span className="stats-value" style={{ color: '#059669' }}>
+                ₹{stockEst.totalEstimatedCost.toLocaleString('en-IN')}
+              </span>
+              <span className="stats-sub">For required shortage procurement</span>
+            </div>
           </div>
 
-          {ingredientNeeds.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-              No recipe ingredient data available for the dishes selected. Add recipes in the <strong>Menu &amp; Recipes</strong> tab.
-            </p>
-          ) : (
-            <div className="data-table-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Ingredient</th>
-                    <th>Unit</th>
-                    <th style={{ textAlign: 'right' }}>Needed for {event.guest_count} Guests</th>
-                    <th style={{ textAlign: 'right' }}>Current Warehouse Stock</th>
-                    <th style={{ textAlign: 'center' }}>Stock Status</th>
-                    <th style={{ textAlign: 'right' }}>Est. Cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ingredientNeeds.map(({ needed, ingredient }) => {
-                    const isDeficit = ingredient.stock_qty < needed;
-                    const deficitQty = Math.max(0, needed - ingredient.stock_qty);
-                    const cost = needed * ingredient.cost_per_unit;
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <h2 className="card-title" style={{ margin: 0 }}>
+                  Automatic Stock Estimation
+                </h2>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                  Scaled requirement for {event.guest_count} guests &amp; kg orders compared with current warehouse inventory
+                </p>
+              </div>
 
-                    return (
-                      <tr key={ingredient.id} style={{ background: isDeficit ? '#fff5f5' : 'transparent' }}>
-                        <td style={{ fontWeight: 600 }}>{ingredient.name}</td>
-                        <td>{ingredient.unit}</td>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600 }}
+                  onClick={() => setIsPrintStockOpen(true)}
+                >
+                  🖨️ Print / Download A4 Stock Estimation Sheet
+                </button>
+                <Link href="/stock" className="btn btn-secondary btn-sm">
+                  Warehouse Stock &rarr;
+                </Link>
+              </div>
+            </div>
+
+            {stockEst.items.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+                No recipe ingredients linked to the selected dishes. Please configure recipes in the <strong>Menu &amp; Recipes</strong> module.
+              </p>
+            ) : (
+              <div className="data-table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Ingredient</th>
+                      <th>Unit</th>
+                      <th style={{ textAlign: 'right' }}>Total Needed</th>
+                      <th style={{ textAlign: 'right' }}>In-Stock Qty</th>
+                      <th style={{ textAlign: 'right' }}>Shortage / To Buy</th>
+                      <th style={{ textAlign: 'center' }}>Status</th>
+                      <th style={{ textAlign: 'right' }}>Est. Purchase Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockEst.items.map((item) => (
+                      <tr key={item.ingredientId} style={{ background: item.isShortage ? '#fff5f5' : 'transparent' }}>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{item.ingredientName}</div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            Used in: {item.contributingDishes.join(', ')}
+                          </div>
+                        </td>
+                        <td>{item.unit}</td>
                         <td style={{ textAlign: 'right', fontWeight: 600 }}>
-                          {needed.toFixed(2)} {ingredient.unit}
+                          {item.qtyNeeded} {item.unit}
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          {ingredient.stock_qty.toFixed(2)} {ingredient.unit}
+                          {item.currentStock} {item.unit}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: item.isShortage ? '#dc2626' : 'var(--text-muted)' }}>
+                          {item.shortageQty > 0 ? `${item.shortageQty} ${item.unit}` : '0'}
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          {isDeficit ? (
-                            <span
-                              className="badge"
-                              style={{ background: '#fee2e2', color: '#b91c1c' }}
-                            >
-                              ⚠️ Deficit: Short by {deficitQty.toFixed(1)} {ingredient.unit}
+                          {item.isShortage ? (
+                            <span className="badge" style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700 }}>
+                              ⚠️ Shortage
                             </span>
                           ) : (
-                            <span
-                              className="badge"
-                              style={{ background: '#dcfce7', color: '#15803d' }}
-                            >
-                              ✓ Sufficient Stock
+                            <span className="badge" style={{ background: '#dcfce7', color: '#15803d' }}>
+                              ✓ Sufficient
                             </span>
                           )}
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 600 }}>
-                          ₹{Math.round(cost).toLocaleString('en-IN')}
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                          ₹{item.estimatedCost.toLocaleString('en-IN')}
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
+      {/* ----------------------------------------------------------------------------------- */}
       {/* TAB 3: SHIFTS & STAFF */}
+      {/* ----------------------------------------------------------------------------------- */}
       {activeTab === 'shifts' && (
         <div className="grid-2">
           {/* Shifts table */}
@@ -849,25 +898,47 @@ export default function EventDetailPage() {
                     + Schedule Shift
                   </button>
                 </div>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                  System will automatically alert you if this staff member has overlapping events on {event.event_date}.
-                </p>
               </form>
             </div>
           )}
         </div>
       )}
 
-      {/* TAB 4: INVOICES & PAYMENTS */}
+      {/* ----------------------------------------------------------------------------------- */}
+      {/* TAB 4: INVOICES & PART-PAYMENTS ON SAME INVOICE (With Discounts) */}
+      {/* ----------------------------------------------------------------------------------- */}
       {activeTab === 'invoices' && (
         <div>
+          {/* Summary Financial Bar */}
+          <div className="grid-3" style={{ marginBottom: '1.25rem' }}>
+            <div className="stats-card">
+              <span className="stats-label">Quote Value</span>
+              <span className="stats-value">₹{grandTotal.toLocaleString('en-IN')}</span>
+              <span className="stats-sub">Total event contract value</span>
+            </div>
+            <div className="stats-card">
+              <span className="stats-label">Payments Collected</span>
+              <span className="stats-value" style={{ color: 'var(--success)' }}>
+                ₹{totalPaidForEvent.toLocaleString('en-IN')}
+              </span>
+              <span className="stats-sub">Across all part-payments</span>
+            </div>
+            <div className="stats-card">
+              <span className="stats-label">Remaining Balance</span>
+              <span className="stats-value" style={{ color: remainingEventBalance > 0 ? '#dc2626' : 'var(--text-main)' }}>
+                ₹{remainingEventBalance.toLocaleString('en-IN')}
+              </span>
+              <span className="stats-sub">Pending client payment</span>
+            </div>
+          </div>
+
           <div className="grid-2" style={{ marginBottom: '1.5rem' }}>
-            {/* Invoices list */}
+            {/* Invoices list with Part-Payments on Same Invoice */}
             <div className="card">
               <h2 className="card-title">Event Invoices</h2>
               {invoices.length === 0 ? (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                  No invoices generated for this event yet.
+                  No invoices generated for this event yet. Create one using the form on the right.
                 </p>
               ) : (
                 <div className="data-table-container">
@@ -876,21 +947,29 @@ export default function EventDetailPage() {
                       <tr>
                         <th>Invoice #</th>
                         <th>Type</th>
-                        <th style={{ textAlign: 'right' }}>Amount</th>
+                        <th style={{ textAlign: 'right' }}>Net Amount</th>
+                        <th style={{ textAlign: 'right' }}>Paid Amount</th>
                         <th>Status</th>
-                        <th>Actions</th>
+                        <th style={{ textAlign: 'center' }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {invoices.map((inv) => {
-                        const waText = encodeURIComponent(
-                          `Hello ${client?.name}, here is the invoice ${inv.invoice_number} from ${state.settings.name} for ${event.title}. Amount: ₹${inv.amount.toLocaleString('en-IN')}. Due date: ${inv.due_date || 'immediate'}. Thank you!`
-                        );
-                        const waUrl = `https://wa.me/${client?.phone?.replace(/[^0-9]/g, '') || ''}?text=${waText}`;
+                        const paymentsForThis = state.payments
+                          .filter((p) => p.invoice_id === inv.id)
+                          .reduce((s, p) => s + p.amount, 0);
+                        const balance = Math.max(0, inv.amount - paymentsForThis);
 
                         return (
                           <tr key={inv.id}>
-                            <td style={{ fontWeight: 600 }}>{inv.invoice_number}</td>
+                            <td>
+                              <div style={{ fontWeight: 700 }}>{inv.invoice_number}</div>
+                              {inv.discount > 0 && (
+                                <div style={{ fontSize: '0.72rem', color: '#15803d' }}>
+                                  Discount: -₹{inv.discount.toLocaleString('en-IN')}
+                                </div>
+                              )}
+                            </td>
                             <td>
                               <span className="badge" style={{ background: '#f1f5f9' }}>
                                 {inv.kind}
@@ -899,38 +978,47 @@ export default function EventDetailPage() {
                             <td style={{ textAlign: 'right', fontWeight: 700 }}>
                               ₹{inv.amount.toLocaleString('en-IN')}
                             </td>
+                            <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--success)' }}>
+                              ₹{paymentsForThis.toLocaleString('en-IN')}
+                              {balance > 0 && (
+                                <div style={{ fontSize: '0.7rem', color: '#dc2626' }}>
+                                  Due: ₹{balance.toLocaleString('en-IN')}
+                                </div>
+                              )}
+                            </td>
                             <td>
                               <span className={`badge badge-${inv.status}`}>{inv.status}</span>
                             </td>
-                            <td>
-                              <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                            <td style={{ textAlign: 'center' }}>
+                              <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
                                 <button
-                                  className="btn btn-secondary btn-sm"
-                                  title="Print on A4 with Logo"
+                                  className="btn btn-primary btn-sm"
+                                  title="Print or Download Standard A4 PDF"
                                   onClick={() => setSelectedInvoiceForPrint(inv)}
                                 >
-                                  🖨️ PDF
+                                  🖨️ A4 PDF
                                 </button>
 
                                 {isFinance && (
-                                  <button
-                                    className="btn btn-secondary btn-sm"
-                                    title="Unlock / Edit Invoice"
-                                    onClick={() => handleOpenEditInvoice(inv)}
-                                  >
-                                    🔓 Unlock
-                                  </button>
-                                )}
+                                  <>
+                                    <button
+                                      className="btn btn-secondary btn-sm"
+                                      title="Record Part-Payment on this invoice"
+                                      onClick={() => handleOpenPartPayment(inv)}
+                                      style={{ fontWeight: 600 }}
+                                    >
+                                      + Part Pay
+                                    </button>
 
-                                <a
-                                  href={waUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="btn btn-secondary btn-sm"
-                                  title="Send WhatsApp invoice"
-                                >
-                                  💬 WA
-                                </a>
+                                    <button
+                                      className="btn btn-secondary btn-sm"
+                                      title="Edit Invoice Subtotal / Discount"
+                                      onClick={() => handleOpenEditInvoice(inv)}
+                                    >
+                                      Edit
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -942,10 +1030,10 @@ export default function EventDetailPage() {
               )}
             </div>
 
-            {/* Create Invoice form */}
+            {/* Generate Invoice with Discount Form */}
             {isFinance ? (
               <div className="card">
-                <h2 className="card-title">Generate New Invoice</h2>
+                <h2 className="card-title">Generate Invoice with Discount</h2>
                 <form onSubmit={handleCreateInvoice}>
                   <div className="form-group">
                     <label className="form-label">Invoice Kind</label>
@@ -954,20 +1042,42 @@ export default function EventDetailPage() {
                       value={invKind}
                       onChange={(e) => setInvKind(e.target.value as any)}
                     >
-                      <option value="deposit">Deposit / Advance</option>
+                      <option value="deposit">Deposit / Advance Booking</option>
                       <option value="final">Final Balance Settlement</option>
                     </select>
                   </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Amount (INR ₹) *</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={invAmount}
-                      onChange={(e) => setInvAmount(parseFloat(e.target.value) || 0)}
-                      required
-                    />
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label className="form-label">Subtotal (₹) *</label>
+                      <input
+                        type="number"
+                        min="0"
+                        className="form-control"
+                        value={invSubtotal}
+                        onChange={(e) => setInvSubtotal(parseFloat(e.target.value) || 0)}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Discount (₹)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        className="form-control"
+                        placeholder="0"
+                        value={invDiscount || ''}
+                        onChange={(e) => setInvDiscount(parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#f8fafc', padding: '0.65rem 0.85rem', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Net Payable Amount:</span>
+                    <strong style={{ fontSize: '1.15rem', color: 'var(--primary)' }}>
+                      ₹{Math.max(0, invSubtotal - invDiscount).toLocaleString('en-IN')}
+                    </strong>
                   </div>
 
                   <div className="form-group">
@@ -980,121 +1090,96 @@ export default function EventDetailPage() {
                     />
                   </div>
 
-                  <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
-                    Generate Invoice
+                  <div className="form-group">
+                    <label className="form-label">Invoice Notes</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. 50% advance received, balance before function"
+                      value={invNotes}
+                      onChange={(e) => setInvNotes(e.target.value)}
+                    />
+                  </div>
+
+                  <button type="submit" className="btn btn-primary" style={{ width: '100%', fontWeight: 600 }}>
+                    Create Invoice
                   </button>
                 </form>
               </div>
             ) : (
               <div className="card" style={{ background: '#f8fafc' }}>
-                <h2 className="card-title">Invoicing Permissions</h2>
+                <h2 className="card-title">Invoicing Access</h2>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                  As <em>{role}</em>, you have read-only visibility into invoices. Creating new invoices and logging payments requires Owner or Accountant role.
+                  Invoices, discounts, and payments are managed exclusively by the Owner and Accountant.
                 </p>
               </div>
             )}
           </div>
 
-          {/* Payments Section */}
-          {isFinance && (
-            <div className="grid-2">
-              <div className="card">
-                <h2 className="card-title">Recorded Payments for Event</h2>
-                {state.payments.filter((p) => invoices.some((i) => i.id === p.invoice_id)).length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                    No payments recorded yet.
-                  </p>
-                ) : (
-                  <div className="data-table-container">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Date</th>
-                          <th>Invoice</th>
-                          <th>Method</th>
-                          <th style={{ textAlign: 'right' }}>Amount Paid</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {state.payments
-                          .filter((p) => invoices.some((i) => i.id === p.invoice_id))
-                          .map((pmt) => {
-                            const inv = invoices.find((i) => i.id === pmt.invoice_id);
-                            return (
-                              <tr key={pmt.id}>
-                                <td>{pmt.paid_at.slice(0, 10)}</td>
-                                <td>{inv?.invoice_number}</td>
-                                <td style={{ textTransform: 'capitalize' }}>{pmt.method}</td>
-                                <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
-                                  ₹{pmt.amount.toLocaleString('en-IN')}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+          {/* Part-Payments Breakdown on this Event */}
+          <div className="card">
+            <h2 className="card-title">Part-Payment Installment Receipts</h2>
+            {state.payments.filter((p) => invoices.some((i) => i.id === p.invoice_id)).length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+                No payments logged yet for this event. Use "+ Part Pay" on an invoice above.
+              </p>
+            ) : (
+              <div className="data-table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Payment Date</th>
+                      <th>Applied Invoice</th>
+                      <th>Method</th>
+                      <th>Notes / Reference</th>
+                      <th style={{ textAlign: 'right' }}>Amount Paid</th>
+                      {isFinance && <th style={{ textAlign: 'center' }}>Remove</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.payments
+                      .filter((p) => invoices.some((i) => i.id === p.invoice_id))
+                      .map((pmt) => {
+                        const inv = invoices.find((i) => i.id === pmt.invoice_id);
+                        return (
+                          <tr key={pmt.id}>
+                            <td>{pmt.paid_at.slice(0, 10)}</td>
+                            <td>
+                              <span style={{ fontWeight: 700 }}>{inv?.invoice_number}</span>
+                            </td>
+                            <td style={{ textTransform: 'capitalize' }}>{pmt.method}</td>
+                            <td style={{ fontSize: '0.85rem' }}>{pmt.note || '—'}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
+                              ₹{pmt.amount.toLocaleString('en-IN')}
+                            </td>
+                            {isFinance && (
+                              <td style={{ textAlign: 'center' }}>
+                                <button
+                                  className="btn btn-danger btn-sm"
+                                  onClick={() => {
+                                    if (confirm('Delete this payment receipt? The invoice balance will be restored.')) {
+                                      store.deletePayment(pmt.id);
+                                    }
+                                  }}
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
               </div>
-
-              {invoices.length > 0 && (
-                <div className="card">
-                  <h2 className="card-title">Record Payment Receipt</h2>
-                  <form onSubmit={handleRecordPayment}>
-                    <div className="form-group">
-                      <label className="form-label">Against Invoice *</label>
-                      <select
-                        className="form-control"
-                        value={payInvId}
-                        onChange={(e) => setPayInvId(e.target.value)}
-                        required
-                      >
-                        <option value="">Select invoice...</option>
-                        {invoices.map((i) => (
-                          <option key={i.id} value={i.id}>
-                            {i.invoice_number} ({i.kind} - ₹{i.amount.toLocaleString('en-IN')})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Amount (₹) *</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={payAmount || ''}
-                        onChange={(e) => setPayAmount(parseFloat(e.target.value) || 0)}
-                        required
-                      />
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Payment Method</label>
-                      <select
-                        className="form-control"
-                        value={payMethod}
-                        onChange={(e) => setPayMethod(e.target.value)}
-                      >
-                        <option value="bank transfer">Bank Transfer (NEFT/RTGS/IMPS)</option>
-                        <option value="upi">UPI / GPay / PhonePe</option>
-                        <option value="card">Credit / Debit Card</option>
-                        <option value="cash">Cash</option>
-                      </select>
-                    </div>
-
-                    <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
-                      Save Payment
-                    </button>
-                  </form>
-                </div>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
+      {/* ----------------------------------------------------------------------------------- */}
       {/* TAB 5: EDIT DETAILS */}
+      {/* ----------------------------------------------------------------------------------- */}
       {activeTab === 'details' && (
         <div className="card" style={{ maxWidth: '750px' }}>
           <h2 className="card-title">Edit Event Specifications</h2>
@@ -1221,70 +1306,23 @@ export default function EventDetailPage() {
         </div>
       )}
 
-      {/* A4 PRINTABLE QUOTATION MODAL (WITH WIDE A4 & LOGO INCLUDED) */}
+      {/* ----------------------------------------------------------------------------------- */}
+      {/* MODAL 1: A4 PRINTABLE QUOTATION (STANDARD A4 PORTRAIT ONLY) */}
+      {/* ----------------------------------------------------------------------------------- */}
       {isPrintQuoteOpen && (
         <div className="modal-overlay" onClick={() => setIsPrintQuoteOpen(false)}>
           <div
             className="modal-content print-page"
-            style={{
-              maxWidth: printOrientation === 'landscape' ? '1120px' : '780px',
-              width: '96%',
-              background: '#ffffff',
-              transition: 'max-width 0.2s ease'
-            }}
+            style={{ maxWidth: '780px', width: '96%', background: '#ffffff' }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Toolbar */}
             <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 700, fontSize: '1rem' }}>📄 Official Quotation (A4 PDF)</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ fontWeight: 700, fontSize: '1rem' }}>📄 Official Quotation (Standard A4 PDF)</span>
                 <span className="badge" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 600 }}>
-                  Logo Included
+                  A4 Fit
                 </span>
-
-                {/* Wide A4 / Portrait Switcher */}
-                <div style={{ display: 'inline-flex', alignItems: 'center', background: '#f1f5f9', padding: '3px', borderRadius: '8px', marginLeft: '0.25rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrintOrientation('landscape');
-                      document.body.classList.remove('print-portrait-mode');
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      background: printOrientation === 'landscape' ? '#0f172a' : 'transparent',
-                      color: printOrientation === 'landscape' ? '#ffffff' : '#64748b',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    📐 Wide A4 (ലാൻഡ്‌സ്‌കേപ്പ്)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrintOrientation('portrait');
-                      document.body.classList.add('print-portrait-mode');
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      background: printOrientation === 'portrait' ? '#0f172a' : 'transparent',
-                      color: printOrientation === 'portrait' ? '#ffffff' : '#64748b',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    📄 Portrait
-                  </button>
-                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
@@ -1296,26 +1334,21 @@ export default function EventDetailPage() {
                     await downloadElementAsPdf(
                       'quotation-printable-area',
                       `Quotation-${event.title.replace(/[^a-zA-Z0-9]/g, '_')}`,
-                      { orientation: printOrientation }
+                      { orientation: 'portrait' }
                     );
                     setIsDownloadingPdf(false);
                   }}
                   style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                 >
-                  {isDownloadingPdf ? '⏳ Generating Wide PDF...' : '📥 Download Wide PDF'}
+                  {isDownloadingPdf ? '⏳ Generating PDF...' : '📥 Download A4 PDF'}
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => {
-                    if (printOrientation === 'portrait') {
-                      document.body.classList.add('print-portrait-mode');
-                    } else {
-                      document.body.classList.remove('print-portrait-mode');
-                    }
                     window.print();
                   }}
                 >
-                  🖨️ Print
+                  🖨️ Print A4
                 </button>
                 <button className="btn btn-secondary btn-sm" onClick={() => setIsPrintQuoteOpen(false)}>
                   Close
@@ -1323,385 +1356,196 @@ export default function EventDetailPage() {
               </div>
             </div>
 
-            {/* Scrollable Container for mobile preview */}
-            <div className="wide-scroll-container">
-              {(() => {
-                const isWide = printOrientation === 'landscape';
-
-                return (
-                  <div
-                    id="quotation-printable-area"
-                    className="wide-a4-sheet"
-                    style={{
-                      padding: isWide ? '2.5rem 3rem' : '2.25rem 2rem',
-                      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-                      color: '#111827',
-                      background: '#ffffff',
-                      maxWidth: isWide ? '1060px' : '750px',
-                      minWidth: isWide ? '920px' : 'auto',
-                      margin: '0 auto',
-                      boxSizing: 'border-box'
-                    }}
-                  >
-                    {/* Header with Official Logo and Serif Title */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.25rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1.25rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-                        <img
-                          src="/logo.png"
-                          alt="IPPAS Food Service & Events"
-                          style={{ height: '70px', width: 'auto', objectFit: 'contain', display: 'block' }}
-                        />
-                        <div>
-                          <div style={{ fontWeight: 800, fontSize: '1.15rem', letterSpacing: '0.5px', color: '#111827' }}>
-                            IPPAS FOOD SERVICE &amp; EVENTS
-                          </div>
-                          <div style={{ fontSize: '0.8rem', color: '#64748b', letterSpacing: '0.2px' }}>
-                            Premium Outdoor Catering &bull; Event Management &bull; Kerala
-                          </div>
-                        </div>
+            {/* Standard A4 Sheet Container */}
+            <div style={{ overflowX: 'auto' }}>
+              <div
+                id="quotation-printable-area"
+                style={{
+                  width: '210mm',
+                  minHeight: '280mm',
+                  padding: '16mm 18mm',
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+                  color: '#111827',
+                  background: '#ffffff',
+                  margin: '0 auto',
+                  boxSizing: 'border-box'
+                }}
+              >
+                {/* Header with Logo */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '12px', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <img
+                      src="/logo.png"
+                      alt="IPPAS Food Service & Events"
+                      style={{ height: '56px', width: 'auto', objectFit: 'contain' }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#0f172a' }}>
+                        {state.settings.name}
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <h1
-                          style={{
-                            fontFamily: "'Playfair Display', Georgia, serif",
-                            fontSize: isWide ? '3.4rem' : '3rem',
-                            fontWeight: 400,
-                            color: '#111827',
-                            lineHeight: 1,
-                            margin: 0,
-                            letterSpacing: '-0.5px'
-                          }}
-                        >
-                          Quotation
-                        </h1>
-                        <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.35rem', fontWeight: 500 }}>
-                          Commercial Catering Proposal
-                        </div>
+                      <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                        {state.settings.address}
                       </div>
-                    </div>
-
-                    {/* Metadata Section */}
-                    {isWide ? (
-                      /* 3-Column Wide Metadata Layout */
-                      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1fr', gap: '2rem', marginBottom: '2.25rem', background: '#f8fafc', padding: '1.25rem 1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.4rem' }}>
-                            Prepared For (Client):
-                          </div>
-                          <div style={{ fontSize: '0.95rem', color: '#0f172a', lineHeight: 1.45 }}>
-                            <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#111827' }}>
-                              {client?.name || 'Valued Client'}
-                            </div>
-                            {client?.phone && <div style={{ color: '#334155' }}>📞 {client.phone}</div>}
-                            {client?.email && <div style={{ color: '#334155' }}>✉️ {client.email}</div>}
-                            {client?.company && <div style={{ color: '#475569' }}>🏢 {client.company}</div>}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.4rem' }}>
-                            Event Particulars:
-                          </div>
-                          <div style={{ fontSize: '0.9rem', color: '#0f172a', lineHeight: 1.45 }}>
-                            <div style={{ fontWeight: 600, color: '#111827' }}>{event.title}</div>
-                            <div style={{ color: '#334155' }}>
-                              📅 Date: <strong>{new Date(event.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
-                            </div>
-                            {event.venue && <div style={{ color: '#334155' }}>📍 Venue: {event.venue}</div>}
-                            <div style={{ color: '#334155' }}>
-                              👥 Pax Count: <strong>{event.guest_count} Guests</strong>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.4rem' }}>
-                            Quotation Details:
-                          </div>
-                          <div style={{ fontSize: '0.9rem', color: '#0f172a', lineHeight: 1.5 }}>
-                            <div style={{ fontWeight: 700, fontSize: '1rem', color: '#111827' }}>
-                              QTN-{event.id.replace(/[^0-9]/g, '').slice(-4) || '1001'}
-                            </div>
-                            <div>
-                              Date: {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                            </div>
-                            <div style={{ color: '#475569' }}>
-                              Validity: 14 Days from issuance
-                            </div>
-                            <div style={{ marginTop: '0.35rem' }}>
-                              <span
-                                style={{
-                                  display: 'inline-block',
-                                  padding: '0.2rem 0.55rem',
-                                  borderRadius: '4px',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 700,
-                                  textTransform: 'uppercase',
-                                  background: event.status === 'confirmed' ? '#dcfce7' : '#fef3c7',
-                                  color: event.status === 'confirmed' ? '#15803d' : '#b45309'
-                                }}
-                              >
-                                {event.status === 'confirmed' ? 'Confirmed' : 'Estimate / Proposal'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      /* Standard 2-Column Metadata Layout */
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2.25rem' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#111827', marginBottom: '0.35rem' }}>
-                            Billed to:
-                          </div>
-                          <div style={{ fontSize: '0.9rem', color: '#1f2937', lineHeight: 1.45 }}>
-                            <div style={{ fontWeight: 600 }}>{client?.name || 'Valued Client'}</div>
-                            {client?.phone && <div>{client.phone}</div>}
-                            {client?.email && <div>{client.email}</div>}
-                            <div>{event.venue || client?.company || '123 Anywhere St., Any City'}</div>
-                          </div>
-                        </div>
-
-                        <div style={{ textAlign: 'right', fontSize: '0.9rem', color: '#1f2937', lineHeight: 1.5 }}>
-                          <div style={{ fontWeight: 600, color: '#111827' }}>
-                            Quotation No. QTN-{event.id.replace(/[^0-9]/g, '').slice(-4) || '1001'}
-                          </div>
-                          <div>
-                            {new Date().toLocaleDateString('en-GB', {
-                              day: 'numeric',
-                              month: 'long',
-                              year: 'numeric'
-                            })}
-                          </div>
-                          <div style={{ fontSize: '0.85rem', color: '#4b5563', marginTop: '0.2rem' }}>
-                            Event Date: <strong>{new Date(event.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
-                          </div>
-                          <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>
-                            Guests: {event.guest_count} Pax &bull; {event.title}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Wide Table with Full-Width Columns */}
-                    <div style={{ marginBottom: '1.75rem' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.92rem' }}>
-                        <thead>
-                          <tr style={{ borderBottom: '2.5px solid #111827', background: isWide ? '#f8fafc' : 'transparent' }}>
-                            <th style={{ textAlign: 'left', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827' }}>Item &amp; Description</th>
-                            <th style={{ textAlign: 'center', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827', width: isWide ? '15%' : '20%' }}>Quantity / Pax</th>
-                            <th style={{ textAlign: 'right', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827', width: isWide ? '18%' : '20%' }}>Rate per Pax</th>
-                            <th style={{ textAlign: 'right', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827', width: isWide ? '20%' : '22%' }}>Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {eventItems.map((item) => {
-                            const dish = state.menuItems.find((m) => m.id === item.menu_item_id);
-                            const lineTotal = item.price_per_guest * event.guest_count;
-                            return (
-                              <tr key={item.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                <td style={{ padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                  <div style={{ fontWeight: 600, color: '#0f172a' }}>{dish?.name || 'Menu Dish'}</div>
-                                  {dish?.category && (
-                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{dish.category}</div>
-                                  )}
-                                </td>
-                                <td style={{ textAlign: 'center', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                  {event.guest_count} Pax
-                                </td>
-                                <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                  ₹{item.price_per_guest.toLocaleString('en-IN')}
-                                </td>
-                                <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937', fontWeight: 600 }}>
-                                  ₹{lineTotal.toLocaleString('en-IN')}
-                                </td>
-                              </tr>
-                            );
-                          })}
-
-                          {extras.map((ex) => (
-                            <tr key={ex.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                              <td style={{ padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                <div style={{ fontWeight: 600 }}>{ex.description}</div>
-                                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Logistics / Equipment / Service</div>
-                              </td>
-                              <td style={{ textAlign: 'center', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                1 Lot
-                              </td>
-                              <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                ₹{ex.amount.toLocaleString('en-IN')}
-                              </td>
-                              <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937', fontWeight: 600 }}>
-                                ₹{ex.amount.toLocaleString('en-IN')}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Subtotal & Total Row */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
-                      <div style={{ width: isWide ? '340px' : '290px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0.5rem', fontSize: '0.95rem', fontWeight: 600, color: '#111827' }}>
-                          <span>Food &amp; Catering Subtotal</span>
-                          <span>₹{menuTotal.toLocaleString('en-IN')}</span>
-                        </div>
-
-                        {extras.length > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0.5rem', fontSize: '0.9rem', color: '#4b5563' }}>
-                            <span>Logistics &amp; Extras</span>
-                            <span>₹{extrasTotal.toLocaleString('en-IN')}</span>
-                          </div>
-                        )}
-
-                        {/* Solid Black Highlight Total Bar */}
-                        <div
-                          style={{
-                            background: '#111827',
-                            color: '#ffffff',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '0.85rem 1.25rem',
-                            marginTop: '0.65rem',
-                            width: '100%',
-                            boxSizing: 'border-box',
-                            borderRadius: '4px'
-                          }}
-                        >
-                          <span style={{ fontSize: '1.2rem', fontWeight: 700, letterSpacing: '0.5px' }}>
-                            Total Estimate
-                          </span>
-                          <span style={{ fontSize: '1.35rem', fontWeight: 800 }}>
-                            ₹{displayTotal.toLocaleString('en-IN')}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Footer Section: Script Thank You! & Payment Info on Left, Authorized Company Details on Right */}
-                    <div style={{ display: 'grid', gridTemplateColumns: isWide ? '1.4fr 1fr' : '1.2fr 1fr', gap: '2.5rem', marginTop: '2.5rem', alignItems: 'flex-end', borderTop: '1px solid #e2e8f0', paddingTop: '1.75rem' }}>
-                      <div>
-                        <div
-                          style={{
-                            fontFamily: "'Caveat', 'Alex Brush', 'Brush Script MT', cursive",
-                            fontSize: '3.2rem',
-                            lineHeight: 1,
-                            color: '#111827',
-                            marginBottom: '1rem',
-                            transform: 'rotate(-3deg)',
-                            display: 'inline-block'
-                          }}
-                        >
-                          Thank You!
-                        </div>
-
-                        <div style={{ fontSize: '0.85rem', color: '#1f2937', lineHeight: 1.55 }}>
-                          <div style={{ fontWeight: 700, color: '#111827', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.3px', fontSize: '0.8rem' }}>
-                            Payment Terms &amp; Bank Details
-                          </div>
-                          <div>Bank: <strong>Federal Bank / State Bank of India</strong></div>
-                          <div>Account Name: <strong>IPPAS Food Service &amp; Events</strong></div>
-                          <div>Account No: <strong>9876-5432-1000</strong> &bull; IFSC: <strong>FDRL0001234</strong></div>
-                          <div>Terms: <strong>50% advance deposit upon quotation confirmation</strong></div>
-                        </div>
-                      </div>
-
-                      <div style={{ textAlign: 'right' }}>
-                        <div
-                          style={{
-                            fontFamily: "'Playfair Display', Georgia, serif",
-                            fontSize: '1.35rem',
-                            fontWeight: 700,
-                            color: '#111827',
-                            marginBottom: '0.25rem'
-                          }}
-                        >
-                          {state.settings.name}
-                        </div>
-                        <div style={{ fontSize: '0.85rem', color: '#4b5563', lineHeight: 1.45 }}>
-                          {state.settings.address}
-                          <br />
-                          Phone: {state.settings.phone} &bull; {state.settings.email}
-                        </div>
-                        <div style={{ marginTop: '1.5rem', paddingTop: '0.5rem', borderTop: '1px dashed #cbd5e1', display: 'inline-block', minWidth: '180px', textAlign: 'center', fontSize: '0.75rem', color: '#64748b' }}>
-                          Authorized Signatory
-                        </div>
+                      <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                        Phone: {state.settings.phone} &bull; {state.settings.email}
                       </div>
                     </div>
                   </div>
-                );
-              })()}
+
+                  <div style={{ textAlign: 'right' }}>
+                    <h1 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: '2.4rem', margin: 0, fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
+                      Quotation
+                    </h1>
+                    <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>
+                      Commercial Catering Proposal
+                    </div>
+                  </div>
+                </div>
+
+                {/* Metadata Box */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '0.85rem' }}>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: '#64748b', marginBottom: '2px' }}>
+                      Client Details:
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: '1rem', color: '#0f172a' }}>{client?.name}</div>
+                    {client?.company && <div>Company: {client.company}</div>}
+                    {client?.phone && <div>Phone: {client.phone}</div>}
+                    <div>Event: <strong>{event.title}</strong></div>
+                  </div>
+
+                  <div style={{ textAlign: 'right' }}>
+                    <div>Quote #: <strong>QTN-{event.id.replace(/[^0-9]/g, '').slice(-4) || '1001'}</strong></div>
+                    <div>Quote Date: <strong>{new Date().toLocaleDateString('en-GB')}</strong></div>
+                    <div>Event Date: <strong>{event.event_date}</strong></div>
+                    <div>Venue: <strong>{event.venue || 'TBD'}</strong></div>
+                    <div>Guest Count: <strong>{event.guest_count} Pax</strong></div>
+                  </div>
+                </div>
+
+                {/* Items Table */}
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem', marginBottom: '14px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #0f172a', background: '#f1f5f9' }}>
+                      <th style={{ textAlign: 'left', padding: '8px 10px', color: '#0f172a' }}>Dish / Service Particulars</th>
+                      <th style={{ textAlign: 'center', padding: '8px 10px', color: '#0f172a' }}>Type</th>
+                      <th style={{ textAlign: 'center', padding: '8px 10px', color: '#0f172a' }}>Quantity</th>
+                      <th style={{ textAlign: 'right', padding: '8px 10px', color: '#0f172a' }}>Rate</th>
+                      <th style={{ textAlign: 'right', padding: '8px 10px', color: '#0f172a' }}>Total (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {eventItems.map((item) => {
+                      const dish = state.menuItems.find((m) => m.id === item.menu_item_id);
+                      const isKg = item.pricing_type === 'per_kg';
+                      const rate = item.price_per_unit || item.price_per_guest || 0;
+                      const qty = isKg
+                        ? (item.quantity !== undefined ? item.quantity : 1)
+                        : (item.quantity !== undefined ? item.quantity : event.guest_count);
+                      const lineTotal = rate * qty;
+
+                      return (
+                        <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '8px 10px' }}>
+                            <div style={{ fontWeight: 600 }}>{dish?.name || 'Menu Dish'}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{dish?.category}</div>
+                          </td>
+                          <td style={{ textAlign: 'center', padding: '8px 10px', fontSize: '0.75rem' }}>
+                            {isKg ? 'Per Kg' : 'Per Guest'}
+                          </td>
+                          <td style={{ textAlign: 'center', padding: '8px 10px', fontWeight: 600 }}>
+                            {qty} {isKg ? 'kg' : 'pax'}
+                          </td>
+                          <td style={{ textAlign: 'right', padding: '8px 10px' }}>
+                            ₹{rate.toLocaleString('en-IN')}{isKg ? '/kg' : '/pax'}
+                          </td>
+                          <td style={{ textAlign: 'right', padding: '8px 10px', fontWeight: 700 }}>
+                            ₹{lineTotal.toLocaleString('en-IN')}
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {extras.map((ex) => (
+                      <tr key={ex.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td style={{ padding: '8px 10px' }} colSpan={2}>
+                          <div style={{ fontWeight: 600 }}>{ex.description}</div>
+                          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Logistics, Cutlery &amp; Service</div>
+                        </td>
+                        <td style={{ textAlign: 'center', padding: '8px 10px' }}>1 Lot</td>
+                        <td style={{ textAlign: 'right', padding: '8px 10px' }}>₹{ex.amount.toLocaleString('en-IN')}</td>
+                        <td style={{ textAlign: 'right', padding: '8px 10px', fontWeight: 700 }}>
+                          ₹{ex.amount.toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {/* Subtotal & Grand Total */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+                  <div style={{ width: '280px', fontSize: '0.85rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
+                      <span>Food &amp; Beverage Total:</span>
+                      <strong>₹{menuTotal.toLocaleString('en-IN')}</strong>
+                    </div>
+                    {extras.length > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
+                        <span>Logistics &amp; Extras:</span>
+                        <strong>₹{extrasTotal.toLocaleString('en-IN')}</strong>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid #0f172a', paddingTop: '6px', marginTop: '6px', fontSize: '1.1rem', fontWeight: 800 }}>
+                      <span>Total Estimate:</span>
+                      <span style={{ color: 'var(--primary)' }}>₹{displayTotal.toLocaleString('en-IN')}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payment & Bank Details */}
+                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '12px', display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '1rem', fontSize: '0.8rem' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, textTransform: 'uppercase', color: '#0f172a', marginBottom: '4px' }}>
+                      Official Bank Details &amp; Payment Terms
+                    </div>
+                    <div>Bank: <strong>{state.settings.bank_name || 'Federal Bank'}</strong></div>
+                    <div>Account Name: <strong>{state.settings.account_name || state.settings.name}</strong></div>
+                    <div>A/C No: <strong>{state.settings.account_number || '9876-5432-1000'}</strong> &bull; IFSC: <strong>{state.settings.ifsc_code || 'FDRL0001234'}</strong></div>
+                    <div>UPI ID: <strong>{state.settings.upi_id || 'ippas@upi'}</strong></div>
+                    <div style={{ marginTop: '4px', color: '#dc2626', fontWeight: 600 }}>
+                      {state.settings.payment_terms || 'Payment strictly due within 3 days. 50% advance deposit upon confirmation.'}
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'flex-end' }}>
+                    <div style={{ borderTop: '1px dashed #94a3b8', width: '160px', textAlign: 'center', paddingTop: '4px', fontSize: '0.75rem', color: '#64748b' }}>
+                      Authorized Signatory
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* A4 PRINTABLE INVOICE MODAL (WITH WIDE A4 & LOGO INCLUDED) */}
-      {selectedInvoiceForPrint && (
-        <div className="modal-overlay" onClick={() => setSelectedInvoiceForPrint(null)}>
+      {/* ----------------------------------------------------------------------------------- */}
+      {/* MODAL 2: A4 PRINTABLE STOCK ESTIMATION SHEET (AUTOMATIC ESTIMATION PRINT) */}
+      {/* ----------------------------------------------------------------------------------- */}
+      {isPrintStockOpen && (
+        <div className="modal-overlay" onClick={() => setIsPrintStockOpen(false)}>
           <div
             className="modal-content print-page"
-            style={{
-              maxWidth: printOrientation === 'landscape' ? '1120px' : '780px',
-              width: '96%',
-              background: '#ffffff',
-              transition: 'max-width 0.2s ease'
-            }}
+            style={{ maxWidth: '780px', width: '96%', background: '#ffffff' }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Toolbar */}
             <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 700, fontSize: '1rem' }}>🧾 Official Invoice (A4 PDF)</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ fontWeight: 700, fontSize: '1rem' }}>📦 Event Stock Estimation (A4 Requisition Sheet)</span>
                 <span className="badge" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 600 }}>
-                  Logo Included
+                  A4 Print Ready
                 </span>
-
-                {/* Wide A4 / Portrait Switcher */}
-                <div style={{ display: 'inline-flex', alignItems: 'center', background: '#f1f5f9', padding: '3px', borderRadius: '8px', marginLeft: '0.25rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrintOrientation('landscape');
-                      document.body.classList.remove('print-portrait-mode');
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      background: printOrientation === 'landscape' ? '#0f172a' : 'transparent',
-                      color: printOrientation === 'landscape' ? '#ffffff' : '#64748b',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    📐 Wide A4 (ലാൻഡ്‌സ്‌കേപ്പ്)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrintOrientation('portrait');
-                      document.body.classList.add('print-portrait-mode');
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      background: printOrientation === 'portrait' ? '#0f172a' : 'transparent',
-                      color: printOrientation === 'portrait' ? '#ffffff' : '#64748b',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    📄 Portrait
-                  </button>
-                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
@@ -1710,27 +1554,210 @@ export default function EventDetailPage() {
                   disabled={isDownloadingPdf}
                   onClick={async () => {
                     setIsDownloadingPdf(true);
-                    await downloadElementAsPdf('event-invoice-printable-area', `${selectedInvoiceForPrint.invoice_number}`, {
-                      orientation: printOrientation
-                    });
+                    await downloadElementAsPdf(
+                      'stock-estimation-printable-area',
+                      `Stock-Estimation-${event.title.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                      { orientation: 'portrait' }
+                    );
                     setIsDownloadingPdf(false);
                   }}
                   style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                 >
-                  {isDownloadingPdf ? '⏳ Generating Wide PDF...' : '📥 Download Wide PDF'}
+                  {isDownloadingPdf ? '⏳ Generating PDF...' : '📥 Download A4 PDF'}
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => {
-                    if (printOrientation === 'portrait') {
-                      document.body.classList.add('print-portrait-mode');
-                    } else {
-                      document.body.classList.remove('print-portrait-mode');
-                    }
                     window.print();
                   }}
                 >
-                  🖨️ Print
+                  🖨️ Print A4
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setIsPrintStockOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            {/* Standard A4 Sheet Container */}
+            <div style={{ overflowX: 'auto' }}>
+              <div
+                id="stock-estimation-printable-area"
+                style={{
+                  width: '210mm',
+                  minHeight: '280mm',
+                  padding: '16mm 18mm',
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+                  color: '#111827',
+                  background: '#ffffff',
+                  margin: '0 auto',
+                  boxSizing: 'border-box'
+                }}
+              >
+                {/* Header with Logo */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '12px', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <img
+                      src="/logo.png"
+                      alt="IPPAS Food Service & Events"
+                      style={{ height: '56px', width: 'auto', objectFit: 'contain' }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#0f172a' }}>
+                        {state.settings.name}
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                        Central Kitchen &amp; Warehouse Inventory Requisition
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: 'right' }}>
+                    <h1 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: '2rem', margin: 0, fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
+                      Stock Requisition
+                    </h1>
+                    <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>
+                      Stock Estimation Sheet (A4)
+                    </div>
+                  </div>
+                </div>
+
+                {/* Event Particulars Banner */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '0.85rem' }}>
+                  <div>
+                    <div>Event Title: <strong>{event.title}</strong></div>
+                    <div>Client: <strong>{client?.name}</strong> {client?.phone && `(${client.phone})`}</div>
+                    <div>Venue: <strong>{event.venue || 'TBD'}</strong></div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div>Event Date: <strong>{event.event_date}</strong></div>
+                    <div>Guest Count: <strong>{event.guest_count} Pax</strong></div>
+                    <div>Dishes Selected: <strong>{eventItems.length} Items</strong></div>
+                  </div>
+                </div>
+
+                {/* Stock Table */}
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem', marginBottom: '16px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #0f172a', background: '#f1f5f9' }}>
+                      <th style={{ textAlign: 'left', padding: '7px 8px', color: '#0f172a' }}>Raw Ingredient</th>
+                      <th style={{ textAlign: 'center', padding: '7px 8px', color: '#0f172a' }}>Unit</th>
+                      <th style={{ textAlign: 'right', padding: '7px 8px', color: '#0f172a' }}>Total Needed</th>
+                      <th style={{ textAlign: 'right', padding: '7px 8px', color: '#0f172a' }}>Current Stock</th>
+                      <th style={{ textAlign: 'right', padding: '7px 8px', color: '#0f172a' }}>Shortage / To Buy</th>
+                      <th style={{ textAlign: 'right', padding: '7px 8px', color: '#0f172a' }}>Unit Rate</th>
+                      <th style={{ textAlign: 'right', padding: '7px 8px', color: '#0f172a' }}>Est. Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockEst.items.map((item) => (
+                      <tr key={item.ingredientId} style={{ borderBottom: '1px solid #e2e8f0', background: item.isShortage ? '#fff5f5' : 'transparent' }}>
+                        <td style={{ padding: '7px 8px' }}>
+                          <div style={{ fontWeight: 600 }}>{item.ingredientName}</div>
+                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                            {item.contributingDishes.join(', ')}
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'center', padding: '7px 8px' }}>{item.unit}</td>
+                        <td style={{ textAlign: 'right', padding: '7px 8px', fontWeight: 600 }}>
+                          {item.qtyNeeded}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '7px 8px' }}>
+                          {item.currentStock}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '7px 8px', fontWeight: 700, color: item.isShortage ? '#dc2626' : '#64748b' }}>
+                          {item.shortageQty > 0 ? `${item.shortageQty} ${item.unit}` : '0'}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '7px 8px' }}>₹{item.costPerUnit}</td>
+                        <td style={{ textAlign: 'right', padding: '7px 8px', fontWeight: 700 }}>
+                          ₹{item.estimatedCost.toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {/* Estimation Cost Totals */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px 14px', marginBottom: '24px' }}>
+                  <div style={{ fontSize: '0.85rem' }}>
+                    <div>Total Shortage Items: <strong>{stockEst.totalShortageCount} of {stockEst.items.length}</strong></div>
+                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Kitchen requisition required prior to event prep</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Total Estimated Procurement Cost</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#059669' }}>
+                      ₹{stockEst.totalEstimatedCost.toLocaleString('en-IN')}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Signatures Block */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '2rem', marginTop: '30px', paddingTop: '16px', borderTop: '1px solid #e2e8f0', textAlign: 'center', fontSize: '0.8rem', color: '#475569' }}>
+                  <div>
+                    <div style={{ borderTop: '1px dashed #94a3b8', paddingTop: '6px' }}>
+                      Prepared By (Head Chef)
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ borderTop: '1px dashed #94a3b8', paddingTop: '6px' }}>
+                      Verified By (Storekeeper)
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ borderTop: '1px dashed #94a3b8', paddingTop: '6px' }}>
+                      Approved By (Owner / Manager)
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------------------------- */}
+      {/* MODAL 3: A4 PRINTABLE INVOICE (STANDARD A4 PORTRAIT WITH PART-PAYMENTS & DISCOUNTS) */}
+      {/* ----------------------------------------------------------------------------------- */}
+      {selectedInvoiceForPrint && (
+        <div className="modal-overlay" onClick={() => setSelectedInvoiceForPrint(null)}>
+          <div
+            className="modal-content print-page"
+            style={{ maxWidth: '780px', width: '96%', background: '#ffffff' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Toolbar */}
+            <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ fontWeight: 700, fontSize: '1rem' }}>🧾 Official Tax Invoice (Standard A4 PDF)</span>
+                <span className="badge" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 600 }}>
+                  A4 Fit
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={isDownloadingPdf}
+                  onClick={async () => {
+                    setIsDownloadingPdf(true);
+                    await downloadElementAsPdf(
+                      'event-invoice-printable-area',
+                      `${selectedInvoiceForPrint.invoice_number}`,
+                      { orientation: 'portrait' }
+                    );
+                    setIsDownloadingPdf(false);
+                  }}
+                  style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                >
+                  {isDownloadingPdf ? '⏳ Generating PDF...' : '📥 Download A4 PDF'}
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    window.print();
+                  }}
+                >
+                  🖨️ Print A4
                 </button>
                 <button className="btn btn-secondary btn-sm" onClick={() => setSelectedInvoiceForPrint(null)}>
                   Close
@@ -1738,309 +1765,183 @@ export default function EventDetailPage() {
               </div>
             </div>
 
-            {/* Scrollable Container for mobile preview */}
-            <div className="wide-scroll-container">
+            {/* Standard A4 Sheet Container */}
+            <div style={{ overflowX: 'auto' }}>
               {(() => {
                 const inv = selectedInvoiceForPrint;
-                const paymentsForInv = state.payments
-                  .filter((p) => p.invoice_id === inv.id)
-                  .reduce((s, p) => s + p.amount, 0);
-                const isWide = printOrientation === 'landscape';
+                const paymentsForThis = state.payments.filter((p) => p.invoice_id === inv.id);
+                const totalPaidThis = paymentsForThis.reduce((s, p) => s + p.amount, 0);
+                const balanceDue = Math.max(0, inv.amount - totalPaidThis);
 
                 return (
                   <div
                     id="event-invoice-printable-area"
-                    className="wide-a4-sheet"
                     style={{
-                      padding: isWide ? '2.5rem 3rem' : '2.25rem 2rem',
+                      width: '210mm',
+                      minHeight: '280mm',
+                      padding: '16mm 18mm',
                       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
                       color: '#111827',
                       background: '#ffffff',
-                      maxWidth: isWide ? '1060px' : '750px',
-                      minWidth: isWide ? '920px' : 'auto',
                       margin: '0 auto',
                       boxSizing: 'border-box'
                     }}
                   >
-                    {/* Top Header: Logo on left, "Invoice" on right */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.25rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1.25rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                    {/* Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '12px', marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
                         <img
                           src="/logo.png"
                           alt="IPPAS Food Service & Events"
-                          style={{ height: '70px', width: 'auto', objectFit: 'contain', display: 'block' }}
+                          style={{ height: '56px', width: 'auto', objectFit: 'contain' }}
                         />
                         <div>
-                          <div style={{ fontWeight: 800, fontSize: '1.15rem', letterSpacing: '0.5px', color: '#111827' }}>
-                            IPPAS FOOD SERVICE &amp; EVENTS
+                          <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#0f172a' }}>
+                            {state.settings.name}
                           </div>
-                          <div style={{ fontSize: '0.8rem', color: '#64748b', letterSpacing: '0.2px' }}>
-                            Premium Outdoor Catering &bull; Event Management &bull; Kerala
+                          <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                            {state.settings.address}
+                          </div>
+                          <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                            Phone: {state.settings.phone} &bull; {state.settings.email}
                           </div>
                         </div>
                       </div>
+
                       <div style={{ textAlign: 'right' }}>
-                        <h1
-                          style={{
-                            fontFamily: "'Playfair Display', Georgia, serif",
-                            fontSize: isWide ? '3.4rem' : '3rem',
-                            fontWeight: 400,
-                            color: '#111827',
-                            lineHeight: 1,
-                            margin: 0,
-                            letterSpacing: '-0.5px'
-                          }}
-                        >
+                        <h1 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: '2.4rem', margin: 0, fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
                           Invoice
                         </h1>
-                        <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.35rem', fontWeight: 500 }}>
-                          Official Tax Invoice / Bill
+                        <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>
+                          Official Bill / Receipt
                         </div>
                       </div>
                     </div>
 
-                    {/* Metadata Section */}
-                    {isWide ? (
-                      /* 3-Column Wide Metadata Layout */
-                      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1fr', gap: '2rem', marginBottom: '2.25rem', background: '#f8fafc', padding: '1.25rem 1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.4rem' }}>
-                            Billed To:
-                          </div>
-                          <div style={{ fontSize: '0.95rem', color: '#0f172a', lineHeight: 1.45 }}>
-                            <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#111827' }}>
-                              {client?.name || 'Valued Client'}
+                    {/* Metadata */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '0.85rem' }}>
+                      <div>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: '#64748b', marginBottom: '2px' }}>
+                          Billed To:
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: '1rem', color: '#0f172a' }}>{client?.name}</div>
+                        {client?.company && <div>Company: {client.company}</div>}
+                        {client?.phone && <div>Phone: {client.phone}</div>}
+                        <div>Event: <strong>{event.title}</strong></div>
+                      </div>
+
+                      <div style={{ textAlign: 'right' }}>
+                        <div>Invoice No: <strong>{inv.invoice_number}</strong></div>
+                        <div>Date Issued: <strong>{new Date(inv.created_at).toLocaleDateString('en-GB')}</strong></div>
+                        <div>Due Date: <strong>{inv.due_date || 'Upon Receipt'}</strong></div>
+                        <div>Type: <strong>{inv.kind === 'final' ? 'Final Settlement' : 'Advance Deposit'}</strong></div>
+                      </div>
+                    </div>
+
+                    {/* Bill Particulars */}
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', marginBottom: '16px' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '2px solid #0f172a', background: '#f1f5f9' }}>
+                          <th style={{ textAlign: 'left', padding: '8px 10px', color: '#0f172a' }}>Description</th>
+                          <th style={{ textAlign: 'center', padding: '8px 10px', color: '#0f172a' }}>Guests / Pax</th>
+                          <th style={{ textAlign: 'right', padding: '8px 10px', color: '#0f172a' }}>Amount (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '10px 10px' }}>
+                            <div style={{ fontWeight: 700 }}>
+                              {inv.kind === 'final' ? 'Final Catering Contract Settlement' : 'Advance Booking Deposit'}
                             </div>
-                            {client?.phone && <div style={{ color: '#334155' }}>📞 {client.phone}</div>}
-                            {client?.email && <div style={{ color: '#334155' }}>✉️ {client.email}</div>}
-                            {client?.company && <div style={{ color: '#475569' }}>🏢 {client.company}</div>}
-                          </div>
+                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                              Event: {event.title} on {event.event_date} at {event.venue || 'Client Venue'}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'center', padding: '10px 10px' }}>{event.guest_count} pax</td>
+                          <td style={{ textAlign: 'right', padding: '10px 10px', fontWeight: 600 }}>
+                            ₹{(inv.subtotal || inv.amount).toLocaleString('en-IN')}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* Subtotal, Discount & Net Payable */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+                      <div style={{ width: '300px', fontSize: '0.85rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
+                          <span>Subtotal:</span>
+                          <strong>₹{(inv.subtotal || inv.amount).toLocaleString('en-IN')}</strong>
                         </div>
 
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.4rem' }}>
-                            Event Particulars:
+                        {inv.discount > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#15803d' }}>
+                            <span>Special Discount:</span>
+                            <strong>- ₹{inv.discount.toLocaleString('en-IN')}</strong>
                           </div>
-                          <div style={{ fontSize: '0.9rem', color: '#0f172a', lineHeight: 1.45 }}>
-                            <div style={{ fontWeight: 600, color: '#111827' }}>{event.title}</div>
-                            <div style={{ color: '#334155' }}>
-                              📅 Date: <strong>{new Date(event.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
-                            </div>
-                            {event.venue && <div style={{ color: '#334155' }}>📍 Venue: {event.venue}</div>}
-                            <div style={{ color: '#334155' }}>
-                              👥 Guests: <strong>{event.guest_count} Pax</strong>
-                            </div>
-                          </div>
-                        </div>
+                        )}
 
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.4rem' }}>
-                            Invoice Details:
-                          </div>
-                          <div style={{ fontSize: '0.9rem', color: '#0f172a', lineHeight: 1.5 }}>
-                            <div style={{ fontWeight: 700, fontSize: '1rem', color: '#111827' }}>
-                              #{inv.invoice_number.replace(/^INV-/, '') || '12345'}
-                            </div>
-                            <div>
-                              Issued: {new Date(inv.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                            </div>
-                            <div style={{ color: '#475569' }}>
-                              Due: {inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'On Receipt'}
-                            </div>
-                            <div style={{ marginTop: '0.35rem' }}>
-                              <span
-                                style={{
-                                  display: 'inline-block',
-                                  padding: '0.2rem 0.55rem',
-                                  borderRadius: '4px',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 700,
-                                  textTransform: 'uppercase',
-                                  background: inv.status === 'paid' ? '#dcfce7' : '#fee2e2',
-                                  color: inv.status === 'paid' ? '#15803d' : '#b91c1c'
-                                }}
-                              >
-                                Status: {inv.status}
-                              </span>
-                            </div>
-                          </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid #0f172a', paddingTop: '6px', marginTop: '6px', fontSize: '1.05rem', fontWeight: 800 }}>
+                          <span>Net Invoiced Amount:</span>
+                          <strong>₹{inv.amount.toLocaleString('en-IN')}</strong>
                         </div>
                       </div>
-                    ) : (
-                      /* Standard 2-Column Metadata Layout */
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2.25rem' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#111827', marginBottom: '0.35rem' }}>
-                            Billed to:
-                          </div>
-                          <div style={{ fontSize: '0.9rem', color: '#1f2937', lineHeight: 1.45 }}>
-                            <div style={{ fontWeight: 600 }}>{client?.name || 'Valued Client'}</div>
-                            {client?.phone && <div>{client.phone}</div>}
-                            {client?.email && <div>{client.email}</div>}
-                            <div>{event.venue || client?.company || '123 Anywhere St., Any City'}</div>
-                          </div>
-                        </div>
+                    </div>
 
-                        <div style={{ textAlign: 'right', fontSize: '0.9rem', color: '#1f2937', lineHeight: 1.5 }}>
-                          <div style={{ fontWeight: 600, color: '#111827' }}>
-                            Invoice No. {inv.invoice_number.replace(/^INV-/, '') || '12345'}
-                          </div>
-                          <div>
-                            {new Date(inv.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
-                          </div>
-                          <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '0.2rem' }}>
-                            Due: {inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'On Receipt'}
-                          </div>
+                    {/* Part-Payments Table on Same Invoice */}
+                    {paymentsForThis.length > 0 && (
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 12px', marginBottom: '16px' }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', color: '#0f172a', marginBottom: '6px' }}>
+                          Payment Installments Received:
+                        </div>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid #cbd5e1', color: '#64748b' }}>
+                              <th style={{ textAlign: 'left', padding: '4px' }}>Date</th>
+                              <th style={{ textAlign: 'left', padding: '4px' }}>Method</th>
+                              <th style={{ textAlign: 'left', padding: '4px' }}>Note / Reference</th>
+                              <th style={{ textAlign: 'right', padding: '4px' }}>Amount Paid</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {paymentsForThis.map((pmt) => (
+                              <tr key={pmt.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '4px' }}>{pmt.paid_at.slice(0, 10)}</td>
+                                <td style={{ padding: '4px', textTransform: 'capitalize' }}>{pmt.method}</td>
+                                <td style={{ padding: '4px', color: '#64748b' }}>{pmt.note || '—'}</td>
+                                <td style={{ padding: '4px', textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
+                                  ₹{pmt.amount.toLocaleString('en-IN')}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #cbd5e1', paddingTop: '6px', marginTop: '6px', fontSize: '0.9rem', fontWeight: 700 }}>
+                          <span>Total Paid So Far: ₹{totalPaidThis.toLocaleString('en-IN')}</span>
+                          <span style={{ color: balanceDue > 0 ? '#dc2626' : 'var(--success)' }}>
+                            Balance Due: ₹{balanceDue.toLocaleString('en-IN')}
+                          </span>
                         </div>
                       </div>
                     )}
 
-                    {/* Wide Table with Full-Width Columns */}
-                    <div style={{ marginBottom: '1.75rem' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.92rem' }}>
-                        <thead>
-                          <tr style={{ borderBottom: '2.5px solid #111827', background: isWide ? '#f8fafc' : 'transparent' }}>
-                            <th style={{ textAlign: 'left', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827' }}>Item &amp; Description</th>
-                            <th style={{ textAlign: 'center', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827', width: isWide ? '15%' : '20%' }}>Quantity / Pax</th>
-                            <th style={{ textAlign: 'right', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827', width: isWide ? '18%' : '20%' }}>Unit Price</th>
-                            <th style={{ textAlign: 'right', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827', width: isWide ? '20%' : '22%' }}>Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {eventItems.length > 0 ? (
-                            eventItems.map((ei) => {
-                              const mItem = state.menuItems.find((m) => m.id === ei.menu_item_id);
-                              const qty = event.guest_count;
-                              const lineTotal = ei.price_per_guest * qty;
-                              return (
-                                <tr key={ei.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                  <td style={{ padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                    <div style={{ fontWeight: 600, color: '#0f172a' }}>{mItem?.name || 'Catering Dish'}</div>
-                                    {mItem?.category && (
-                                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{mItem.category}</div>
-                                    )}
-                                  </td>
-                                  <td style={{ textAlign: 'center', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                    {qty} Pax
-                                  </td>
-                                  <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                    ₹{ei.price_per_guest.toLocaleString('en-IN')}
-                                  </td>
-                                  <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937', fontWeight: 600 }}>
-                                    ₹{lineTotal.toLocaleString('en-IN')}
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          ) : (
-                            <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                              <td style={{ padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                <div style={{ fontWeight: 600 }}>{event.title}</div>
-                                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                                  {inv.kind === 'deposit' ? 'Advance Deposit Payment' : 'Final Event Settlement'}
-                                </div>
-                              </td>
-                              <td style={{ textAlign: 'center', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                1 Lot
-                              </td>
-                              <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                ₹{inv.amount.toLocaleString('en-IN')}
-                              </td>
-                              <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937', fontWeight: 600 }}>
-                                ₹{inv.amount.toLocaleString('en-IN')}
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Subtotal & Total Row */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
-                      <div style={{ width: isWide ? '340px' : '290px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0.5rem', fontSize: '0.95rem', fontWeight: 600, color: '#111827' }}>
-                          <span>Subtotal</span>
-                          <span>₹{grandTotal > 0 ? grandTotal.toLocaleString('en-IN') : inv.amount.toLocaleString('en-IN')}</span>
-                        </div>
-
-                        {paymentsForInv > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0.5rem', fontSize: '0.9rem', color: '#059669', fontWeight: 600 }}>
-                            <span>Paid</span>
-                            <span>- ₹{paymentsForInv.toLocaleString('en-IN')}</span>
-                          </div>
-                        )}
-
-                        {/* Solid Black Highlight Total Bar */}
-                        <div
-                          style={{
-                            background: '#111827',
-                            color: '#ffffff',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '0.85rem 1.25rem',
-                            marginTop: '0.65rem',
-                            width: '100%',
-                            boxSizing: 'border-box',
-                            borderRadius: '4px'
-                          }}
-                        >
-                          <span style={{ fontSize: '1.2rem', fontWeight: 700, letterSpacing: '0.5px' }}>
-                            Total
-                          </span>
-                          <span style={{ fontSize: '1.35rem', fontWeight: 800 }}>
-                            ₹{inv.amount.toLocaleString('en-IN')}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Footer Section: Script Thank You! & Payment Info on Left, Authorized Company Details on Right */}
-                    <div style={{ display: 'grid', gridTemplateColumns: isWide ? '1.4fr 1fr' : '1.2fr 1fr', gap: '2.5rem', marginTop: '2.5rem', alignItems: 'flex-end', borderTop: '1px solid #e2e8f0', paddingTop: '1.75rem' }}>
+                    {/* Bank Details & Terms */}
+                    <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '12px', display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '1rem', fontSize: '0.8rem' }}>
                       <div>
-                        <div
-                          style={{
-                            fontFamily: "'Caveat', 'Alex Brush', 'Brush Script MT', cursive",
-                            fontSize: '3.2rem',
-                            lineHeight: 1,
-                            color: '#111827',
-                            marginBottom: '1rem',
-                            transform: 'rotate(-3deg)',
-                            display: 'inline-block'
-                          }}
-                        >
-                          Thank You!
+                        <div style={{ fontWeight: 700, textTransform: 'uppercase', color: '#0f172a', marginBottom: '4px' }}>
+                          Official Bank Details &amp; Payment Instructions
                         </div>
-
-                        <div style={{ fontSize: '0.85rem', color: '#1f2937', lineHeight: 1.55 }}>
-                          <div style={{ fontWeight: 700, color: '#111827', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.3px', fontSize: '0.8rem' }}>
-                            Payment &amp; Banking Information
-                          </div>
-                          <div>Bank: <strong>Federal Bank / State Bank of India</strong></div>
-                          <div>Account Name: <strong>IPPAS Food Service &amp; Events</strong></div>
-                          <div>Account No: <strong>9876-5432-1000</strong> &bull; IFSC: <strong>FDRL0001234</strong></div>
-                          <div>Pay by: <strong>{inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Immediate'}</strong></div>
+                        <div>Bank: <strong>{state.settings.bank_name || 'Federal Bank'}</strong></div>
+                        <div>Account Name: <strong>{state.settings.account_name || state.settings.name}</strong></div>
+                        <div>A/C No: <strong>{state.settings.account_number || '9876-5432-1000'}</strong> &bull; IFSC: <strong>{state.settings.ifsc_code || 'FDRL0001234'}</strong></div>
+                        <div>UPI ID: <strong>{state.settings.upi_id || 'ippas@upi'}</strong></div>
+                        <div style={{ marginTop: '4px', color: '#dc2626', fontWeight: 600 }}>
+                          {state.settings.payment_terms || 'Payment strictly due within 3 days.'}
                         </div>
                       </div>
 
-                      <div style={{ textAlign: 'right' }}>
-                        <div
-                          style={{
-                            fontFamily: "'Playfair Display', Georgia, serif",
-                            fontSize: '1.35rem',
-                            fontWeight: 700,
-                            color: '#111827',
-                            marginBottom: '0.25rem'
-                          }}
-                        >
-                          {state.settings.name}
-                        </div>
-                        <div style={{ fontSize: '0.85rem', color: '#4b5563', lineHeight: 1.45 }}>
-                          {state.settings.address}
-                          <br />
-                          Phone: {state.settings.phone} &bull; {state.settings.email}
-                        </div>
-                        <div style={{ marginTop: '1.5rem', paddingTop: '0.5rem', borderTop: '1px dashed #cbd5e1', display: 'inline-block', minWidth: '180px', textAlign: 'center', fontSize: '0.75rem', color: '#64748b' }}>
+                      <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'flex-end' }}>
+                        <div style={{ borderTop: '1px dashed #94a3b8', width: '160px', textAlign: 'center', paddingTop: '4px', fontSize: '0.75rem', color: '#64748b' }}>
                           Authorized Signatory
                         </div>
                       </div>
@@ -2053,39 +1954,50 @@ export default function EventDetailPage() {
         </div>
       )}
 
-
-      {/* UNLOCK / EDIT INVOICE MODAL */}
+      {/* ----------------------------------------------------------------------------------- */}
+      {/* MODAL 4: EDIT INVOICE MODAL (SUBTOTAL / DISCOUNT ON SAME INVOICE) */}
+      {/* ----------------------------------------------------------------------------------- */}
       {editingInvoice && (
         <div className="modal-overlay" onClick={() => setEditingInvoice(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '450px' }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
             <div className="modal-header">
-              <h3 style={{ fontSize: '1.15rem', fontWeight: 700 }}>
-                🔓 Unlock &amp; Edit {editingInvoice.invoice_number}
-              </h3>
-              <button className="btn btn-secondary btn-sm" onClick={() => setEditingInvoice(null)}>✕</button>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+                Edit Invoice {editingInvoice.invoice_number}
+              </h2>
+              <button className="btn btn-secondary btn-sm" onClick={() => setEditingInvoice(null)}>
+                ✕
+              </button>
             </div>
+
             <form onSubmit={handleSaveInvoiceEdit}>
               <div className="form-group">
-                <label className="form-label">Invoice Kind</label>
-                <select
+                <label className="form-label">Subtotal (₹) *</label>
+                <input
+                  type="number"
+                  min="0"
                   className="form-control"
-                  value={editInvForm.kind}
-                  onChange={(e) => setEditInvForm({ ...editInvForm, kind: e.target.value as any })}
-                >
-                  <option value="deposit">Deposit / Advance</option>
-                  <option value="final">Final Settlement</option>
-                </select>
+                  value={editInvForm.subtotal}
+                  onChange={(e) => setEditInvForm({ ...editInvForm, subtotal: parseFloat(e.target.value) || 0 })}
+                  required
+                />
               </div>
 
               <div className="form-group">
-                <label className="form-label">Amount (INR ₹) *</label>
+                <label className="form-label">Discount (₹)</label>
                 <input
                   type="number"
+                  min="0"
                   className="form-control"
-                  value={editInvForm.amount}
-                  onChange={(e) => setEditInvForm({ ...editInvForm, amount: parseFloat(e.target.value) || 0 })}
-                  required
+                  value={editInvForm.discount}
+                  onChange={(e) => setEditInvForm({ ...editInvForm, discount: parseFloat(e.target.value) || 0 })}
                 />
+              </div>
+
+              <div style={{ background: '#f8fafc', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '0.85rem' }}>Net Amount:</span>
+                <strong style={{ color: 'var(--primary)' }}>
+                  ₹{Math.max(0, editInvForm.subtotal - editInvForm.discount).toLocaleString('en-IN')}
+                </strong>
               </div>
 
               <div className="form-group">
@@ -2106,34 +2018,93 @@ export default function EventDetailPage() {
                   onChange={(e) => setEditInvForm({ ...editInvForm, status: e.target.value as any })}
                 >
                   <option value="draft">Draft</option>
-                  <option value="sent">Sent</option>
+                  <option value="sent">Sent to Client</option>
                   <option value="partially_paid">Partially Paid</option>
-                  <option value="paid">Paid</option>
+                  <option value="paid">Paid in Full</option>
                   <option value="void">Void</option>
                 </select>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', marginTop: '1.25rem' }}>
-                <button
-                  type="button"
-                  className="btn btn-danger btn-sm"
-                  onClick={() => {
-                    if (confirm(`Delete ${editingInvoice.invoice_number}?`)) {
-                      store.deleteInvoice(editingInvoice.id);
-                      setEditingInvoice(null);
-                    }
-                  }}
-                >
-                  Delete
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setEditingInvoice(null)}>
+                  Cancel
                 </button>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditingInvoice(null)}>
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn btn-primary btn-sm">
-                    Save Updates
-                  </button>
-                </div>
+                <button type="submit" className="btn btn-primary" style={{ fontWeight: 600 }}>
+                  Save Invoice Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------------------------- */}
+      {/* MODAL 5: RECORD PART-PAYMENT MODAL (ON SAME INVOICE) */}
+      {/* ----------------------------------------------------------------------------------- */}
+      {partPayInvoice && (
+        <div className="modal-overlay" onClick={() => setPartPayInvoice(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <div>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+                  Record Part-Payment
+                </h2>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                  Against Invoice <strong>{partPayInvoice.invoice_number}</strong> (Net: ₹{partPayInvoice.amount.toLocaleString('en-IN')})
+                </p>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => setPartPayInvoice(null)}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePartPayment}>
+              <div className="form-group">
+                <label className="form-label">Payment Amount (₹) *</label>
+                <input
+                  type="number"
+                  min="1"
+                  className="form-control"
+                  value={partPayAmount || ''}
+                  onChange={(e) => setPartPayAmount(parseFloat(e.target.value) || 0)}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Payment Mode</label>
+                <select
+                  className="form-control"
+                  value={partPayMethod}
+                  onChange={(e) => setPartPayMethod(e.target.value)}
+                >
+                  <option value="bank transfer">Bank Transfer (NEFT/RTGS/IMPS)</option>
+                  <option value="upi">UPI / GPay / PhonePe</option>
+                  <option value="cash">Cash</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="card">Card</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Payment Note / Installment Details</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. 1st Advance Installment, 2nd Part Payment"
+                  value={partPayNote}
+                  onChange={(e) => setPartPayNote(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setPartPayInvoice(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ fontWeight: 600 }}>
+                  Save Payment Receipt
+                </button>
               </div>
             </form>
           </div>

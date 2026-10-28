@@ -3,20 +3,18 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { store } from '@/lib/store';
-import { Invoice } from '@/lib/types';
+import { Invoice, Payment } from '@/lib/types';
 import { downloadElementAsPdf } from '@/lib/downloadPdf';
 import EditBankDetailsModal from '@/components/EditBankDetailsModal';
-import { getMaxDueDate, getDefaultDueDate, clampDueDate, getTodayString } from '@/lib/dateUtils';
+import { getMaxDueDate, getDefaultDueDate, clampDueDate } from '@/lib/dateUtils';
 
 export default function InvoicesPage() {
   const [state, setState] = useState(store.getState());
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
-  // Default to portrait mode for standard A4 printing and downloading
-  const [printOrientation, setPrintOrientation] = useState<'landscape' | 'portrait'>('portrait');
   const [isBankModalOpen, setIsBankModalOpen] = useState(false);
 
-  // Unlock / Edit Invoice modal state
+  // Edit Invoice modal state (no unlock requirement)
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [editInvForm, setEditInvForm] = useState({
     subtotal: 0,
@@ -24,7 +22,16 @@ export default function InvoicesPage() {
     amount: 0,
     kind: 'deposit' as 'deposit' | 'final',
     due_date: '',
-    status: 'draft' as Invoice['status']
+    status: 'draft' as Invoice['status'],
+    notes: ''
+  });
+
+  // Part Payment modal state (same invoice)
+  const [partPayInvoice, setPartPayInvoice] = useState<Invoice | null>(null);
+  const [partPayForm, setPartPayForm] = useState({
+    amount: 0,
+    method: 'UPI / GPay',
+    note: ''
   });
 
   useEffect(() => {
@@ -36,15 +43,24 @@ export default function InvoicesPage() {
 
   const role = state.currentRole;
   const isFinance = role === 'owner' || role === 'accountant';
-  const canViewInvoices = role === 'owner' || role === 'manager' || role === 'accountant';
+  const canViewInvoices = isFinance;
 
   if (!canViewInvoices) {
     return (
-      <div style={{ padding: '2rem', textAlign: 'center' }}>
-        <h2>Restricted Area</h2>
-        <p style={{ marginTop: '0.5rem', color: 'var(--text-muted)' }}>
-          Your current role (<em>{role}</em>) does not have authorization to view financial invoices.
+      <div style={{ padding: '3rem 1.5rem', textAlign: 'center', maxWidth: '600px', margin: '2rem auto' }} className="card">
+        <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🔒</div>
+        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.5rem' }}>Restricted Area (Accountant &amp; Owner Access)</h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.25rem', lineHeight: 1.5 }}>
+          Your current active role is <strong>{role.toUpperCase()}</strong>. Invoices, receipts, and receivables are managed exclusively by the <strong>Accountant</strong> and <strong>Owner</strong>.
         </p>
+        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+          <Link href="/dashboard" className="btn btn-primary">
+            &larr; Go to Manager Dashboard
+          </Link>
+          <Link href="/events" className="btn btn-secondary">
+            View Upcoming Events
+          </Link>
+        </div>
       </div>
     );
   }
@@ -67,23 +83,56 @@ export default function InvoicesPage() {
       amount,
       kind: inv.kind,
       due_date: initialDue,
-      status: inv.status
+      status: inv.status,
+      notes: inv.notes || ''
     });
   };
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingInvoice) return;
-    const netAmount = Math.max(0, editInvForm.subtotal - editInvForm.discount);
+    const netAmount = Math.max(0, Number(editInvForm.subtotal) - Number(editInvForm.discount));
     const maxDue = getMaxDueDate(editingInvoice.created_at);
     const safeDueDate = editInvForm.due_date > maxDue ? maxDue : editInvForm.due_date;
 
     store.updateInvoice(editingInvoice.id, {
-      ...editInvForm,
+      subtotal: Number(editInvForm.subtotal),
+      discount: Number(editInvForm.discount),
       amount: netAmount,
-      due_date: safeDueDate
+      kind: editInvForm.kind,
+      due_date: safeDueDate,
+      status: editInvForm.status,
+      notes: editInvForm.notes
     });
     setEditingInvoice(null);
+  };
+
+  const handleOpenPartPay = (inv: Invoice) => {
+    setPartPayInvoice(inv);
+    const alreadyPaid = state.payments
+      .filter((p) => p.invoice_id === inv.id)
+      .reduce((s, p) => s + p.amount, 0);
+    const balance = Math.max(0, inv.amount - alreadyPaid);
+
+    setPartPayForm({
+      amount: balance,
+      method: 'UPI / GPay',
+      note: ''
+    });
+  };
+
+  const handleRecordPartPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!partPayInvoice || partPayForm.amount <= 0) return;
+
+    store.addPayment({
+      invoice_id: partPayInvoice.id,
+      amount: Number(partPayForm.amount),
+      method: partPayForm.method,
+      note: partPayForm.note.trim()
+    });
+
+    setPartPayInvoice(null);
   };
 
   return (
@@ -92,7 +141,7 @@ export default function InvoicesPage() {
         <div>
           <h1 className="page-title">Invoicing &amp; Accounts Receivable</h1>
           <p className="page-subtitle">
-            All amounts in INR (₹) with owner discount option. Standard Portrait A4 print with official logo &amp; customizable bank details.
+            All amounts in INR (₹) with invoice discount &amp; part-payment recording. Strictly standard A4 Portrait format PDF &amp; Print.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -102,7 +151,7 @@ export default function InvoicesPage() {
             onClick={() => setIsBankModalOpen(true)}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 600 }}
           >
-            🏦 Edit Bank Details &amp; Terms (ബാങ്ക് വിവരങ്ങൾ)
+            🏦 Edit Bank Details &amp; Terms
           </button>
         </div>
       </div>
@@ -140,8 +189,9 @@ export default function InvoicesPage() {
                 <th>Event &amp; Client</th>
                 <th>Type</th>
                 <th>Due Date</th>
-                <th style={{ textAlign: 'right' }}>Amount</th>
-                <th style={{ textAlign: 'right' }}>Paid Amount</th>
+                <th style={{ textAlign: 'right' }}>Invoice Total</th>
+                <th style={{ textAlign: 'right' }}>Paid (Part Pay)</th>
+                <th style={{ textAlign: 'right' }}>Balance Due</th>
                 <th>Status</th>
                 <th style={{ textAlign: 'center' }}>Actions</th>
               </tr>
@@ -149,7 +199,7 @@ export default function InvoicesPage() {
             <tbody>
               {state.invoices.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                  <td colSpan={9} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
                     No invoices recorded yet. Generate invoices from the Event detail view.
                   </td>
                 </tr>
@@ -160,9 +210,10 @@ export default function InvoicesPage() {
                   const paymentsForThis = state.payments
                     .filter((p) => p.invoice_id === inv.id)
                     .reduce((sum, p) => sum + p.amount, 0);
+                  const balanceDue = Math.max(0, inv.amount - paymentsForThis);
 
                   const waText = encodeURIComponent(
-                    `Hello ${client?.name}, here is the invoice ${inv.invoice_number} from ${state.settings.name} for ${evt?.title}. Amount: ₹${inv.amount.toLocaleString('en-IN')}. Due date: ${inv.due_date || 'immediate'}. Thank you!`
+                    `Hello ${client?.name}, here is the invoice ${inv.invoice_number} from ${state.settings.name} for ${evt?.title}. Amount: ₹${inv.amount.toLocaleString('en-IN')}, Paid: ₹${paymentsForThis.toLocaleString('en-IN')}, Balance Due: ₹${balanceDue.toLocaleString('en-IN')}. Due date: ${inv.due_date || 'immediate'}. Thank you!`
                   );
                   const waUrl = `https://wa.me/${client?.phone?.replace(/[^0-9]/g, '') || ''}?text=${waText}`;
 
@@ -182,15 +233,23 @@ export default function InvoicesPage() {
                       </td>
                       <td>
                         <span className="badge" style={{ background: '#f1f5f9' }}>
-                          {inv.kind}
+                          {inv.kind === 'deposit' ? 'Advance Deposit' : 'Final Settlement'}
                         </span>
                       </td>
                       <td>{inv.due_date || 'Immediate'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700 }}>
                         ₹{inv.amount.toLocaleString('en-IN')}
+                        {(inv.discount || 0) > 0 && (
+                          <div style={{ fontSize: '0.7rem', color: '#16a34a', fontWeight: 500 }}>
+                            (₹{inv.discount} off)
+                          </div>
+                        )}
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--success)' }}>
                         ₹{paymentsForThis.toLocaleString('en-IN')}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: balanceDue > 0 ? '#dc2626' : '#16a34a' }}>
+                        ₹{balanceDue.toLocaleString('en-IN')}
                       </td>
                       <td>
                         <span className={`badge badge-${inv.status}`}>{inv.status}</span>
@@ -199,19 +258,28 @@ export default function InvoicesPage() {
                         <div style={{ display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
                           <button
                             className="btn btn-primary btn-sm"
-                            title="Print / Save PDF with Logo"
+                            title="Print / Save Standard A4 PDF"
                             onClick={() => setSelectedInvoiceForPrint(inv)}
                           >
-                            🖨️ PDF
+                            🖨️ A4 PDF
+                          </button>
+
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            style={{ background: '#ecfdf5', borderColor: '#a7f3d0', color: '#065f46', fontWeight: 600 }}
+                            title="Add Part Payment on same invoice"
+                            onClick={() => handleOpenPartPay(inv)}
+                          >
+                            + Part Pay
                           </button>
 
                           {isFinance && (
                             <button
                               className="btn btn-secondary btn-sm"
-                              title="Unlock Invoice for Editing"
+                              title="Edit Invoice Details"
                               onClick={() => handleOpenEdit(inv)}
                             >
-                              🔓 Unlock
+                              ✏️ Edit
                             </button>
                           )}
 
@@ -235,70 +303,26 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      {/* A4 Print Modal (WITH WIDE A4 & LOGO INCLUDED) */}
+      {/* STRICT STANDARD A4 PORTRAIT PRINT & PDF MODAL */}
       {selectedInvoiceForPrint && (
         <div className="modal-overlay" onClick={() => setSelectedInvoiceForPrint(null)}>
           <div
             className="modal-content print-page"
             style={{
-              maxWidth: printOrientation === 'landscape' ? '1120px' : '780px',
+              maxWidth: '820px',
               width: '96%',
               background: '#ffffff',
-              transition: 'max-width 0.2s ease'
+              padding: '1.25rem'
             }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Toolbar */}
             <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 700, fontSize: '1rem' }}>🧾 Official Invoice (A4 PDF)</span>
+                <span style={{ fontWeight: 700, fontSize: '1rem' }}>🧾 Official Tax Invoice (Standard A4 Portrait)</span>
                 <span className="badge" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 600 }}>
-                  Logo Included
+                  A4 Print Ready
                 </span>
-
-                {/* Wide A4 / Portrait Switcher */}
-                <div style={{ display: 'inline-flex', alignItems: 'center', background: '#f1f5f9', padding: '3px', borderRadius: '8px', marginLeft: '0.25rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrintOrientation('landscape');
-                      document.body.classList.remove('print-portrait-mode');
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      background: printOrientation === 'landscape' ? '#0f172a' : 'transparent',
-                      color: printOrientation === 'landscape' ? '#ffffff' : '#64748b',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    📐 Wide A4 (ലാൻഡ്‌സ്‌കേപ്പ്)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrintOrientation('portrait');
-                      document.body.classList.add('print-portrait-mode');
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      background: printOrientation === 'portrait' ? '#0f172a' : 'transparent',
-                      color: printOrientation === 'portrait' ? '#ffffff' : '#64748b',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    📄 Portrait
-                  </button>
-                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
@@ -308,26 +332,22 @@ export default function InvoicesPage() {
                   onClick={async () => {
                     setIsDownloadingPdf(true);
                     await downloadElementAsPdf('invoice-printable-area', `${selectedInvoiceForPrint.invoice_number}`, {
-                      orientation: printOrientation
+                      orientation: 'portrait'
                     });
                     setIsDownloadingPdf(false);
                   }}
                   style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                 >
-                  {isDownloadingPdf ? '⏳ Generating Wide PDF...' : '📥 Download Wide PDF'}
+                  {isDownloadingPdf ? '⏳ Generating A4 PDF...' : '📥 Download A4 PDF'}
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => {
-                    if (printOrientation === 'portrait') {
-                      document.body.classList.add('print-portrait-mode');
-                    } else {
-                      document.body.classList.remove('print-portrait-mode');
-                    }
+                    document.body.classList.add('print-portrait-mode');
                     window.print();
                   }}
                 >
-                  🖨️ Print
+                  🖨️ Print A4
                 </button>
                 <button className="btn btn-secondary btn-sm" onClick={() => setSelectedInvoiceForPrint(null)}>
                   Close
@@ -335,48 +355,54 @@ export default function InvoicesPage() {
               </div>
             </div>
 
-            {/* Scrollable Container for mobile preview */}
-            <div className="wide-scroll-container">
+            {/* Standard A4 Portrait Container */}
+            <div style={{ maxHeight: '82vh', overflowY: 'auto', background: '#f8fafc', padding: '1rem', borderRadius: '8px' }}>
               {(() => {
                 const inv = selectedInvoiceForPrint;
                 const evt = state.events.find((e) => e.id === inv.event_id);
                 const client = state.clients.find((c) => c.id === evt?.client_id);
                 const { grandTotal } = evt ? store.getEventTotal(evt.id) : { grandTotal: 0 };
                 const evtItems = evt ? state.eventItems.filter((i) => i.event_id === evt.id) : [];
-                const paymentsForThis = state.payments
-                  .filter((p) => p.invoice_id === inv.id)
-                  .reduce((s, p) => s + p.amount, 0);
-                const isWide = printOrientation === 'landscape';
+                const invPayments = state.payments.filter((p) => p.invoice_id === inv.id);
+                const paymentsForThis = invPayments.reduce((s, p) => s + p.amount, 0);
+                const subtotal = inv.subtotal !== undefined ? inv.subtotal : (grandTotal > 0 ? grandTotal : inv.amount);
+                const discount = inv.discount || 0;
+                const netAmount = inv.amount;
+                const balanceDue = Math.max(0, netAmount - paymentsForThis);
 
                 return (
                   <div
                     id="invoice-printable-area"
-                    className="wide-a4-sheet"
                     style={{
-                      padding: isWide ? '2.5rem 3rem' : '2.25rem 2rem',
+                      width: '100%',
+                      maxWidth: '750px',
+                      minHeight: '260mm',
+                      padding: '2.5rem 2.25rem',
                       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
                       color: '#111827',
                       background: '#ffffff',
-                      maxWidth: isWide ? '1060px' : '750px',
-                      minWidth: isWide ? '920px' : 'auto',
                       margin: '0 auto',
-                      boxSizing: 'border-box'
+                      boxSizing: 'border-box',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)'
                     }}
                   >
-                    {/* Top Header: Logo on left, "Invoice" on right */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.25rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1.25rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                    {/* Header: Logo and Title */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.75rem', borderBottom: '2px solid #0f172a', paddingBottom: '1.25rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                         <img
                           src="/logo.png"
                           alt="IPPAS Food Service & Events"
-                          style={{ height: '70px', width: 'auto', objectFit: 'contain', display: 'block' }}
+                          style={{ height: '64px', width: 'auto', objectFit: 'contain', display: 'block' }}
                         />
                         <div>
-                          <div style={{ fontWeight: 800, fontSize: '1.15rem', letterSpacing: '0.5px', color: '#111827' }}>
-                            IPPAS FOOD SERVICE &amp; EVENTS
+                          <div style={{ fontWeight: 800, fontSize: '1.15rem', letterSpacing: '0.5px', color: '#0f172a' }}>
+                            {state.settings.name || 'IPPAS FOOD SERVICE & EVENTS'}
                           </div>
-                          <div style={{ fontSize: '0.8rem', color: '#64748b', letterSpacing: '0.2px' }}>
-                            Premium Outdoor Catering &bull; Event Management &bull; Kerala
+                          <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                            Outdoor Catering &bull; Event Management &bull; Kerala
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                            Phone: {state.settings.phone} &bull; Email: {state.settings.email}
                           </div>
                         </div>
                       </div>
@@ -384,272 +410,223 @@ export default function InvoicesPage() {
                         <h1
                           style={{
                             fontFamily: "'Playfair Display', Georgia, serif",
-                            fontSize: isWide ? '3.4rem' : '3rem',
-                            fontWeight: 400,
-                            color: '#111827',
+                            fontSize: '2.4rem',
+                            fontWeight: 700,
+                            color: '#0f172a',
                             lineHeight: 1,
-                            margin: 0,
-                            letterSpacing: '-0.5px'
+                            margin: 0
                           }}
                         >
-                          Invoice
+                          INVOICE
                         </h1>
-                        <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.35rem', fontWeight: 500 }}>
-                          Official Tax Invoice / Bill
+                        <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.3rem', fontWeight: 600 }}>
+                          #{inv.invoice_number}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: '#475569' }}>
+                          Kind: {inv.kind === 'deposit' ? 'Advance Deposit' : 'Final Settlement'}
                         </div>
                       </div>
                     </div>
 
-                    {/* Billed to & Invoice Meta Section */}
-                    {isWide ? (
-                      /* 3-Column Wide Metadata Layout */
-                      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1fr', gap: '2rem', marginBottom: '2.25rem', background: '#f8fafc', padding: '1.25rem 1.5rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.4rem' }}>
-                            Billed To:
-                          </div>
-                          <div style={{ fontSize: '0.95rem', color: '#0f172a', lineHeight: 1.45 }}>
-                            <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#111827' }}>
-                              {client?.name || 'Valued Client'}
-                            </div>
-                            {client?.phone && <div style={{ color: '#334155' }}>📞 {client.phone}</div>}
-                            {client?.email && <div style={{ color: '#334155' }}>✉️ {client.email}</div>}
-                            {client?.company && <div style={{ color: '#475569' }}>🏢 {client.company}</div>}
-                          </div>
+                    {/* Metadata: Billed To and Event Details */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1.5rem', marginBottom: '1.5rem', background: '#f8fafc', padding: '1rem 1.25rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.3rem' }}>
+                          Billed To:
                         </div>
-
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.4rem' }}>
-                            Event Particulars:
-                          </div>
-                          <div style={{ fontSize: '0.9rem', color: '#0f172a', lineHeight: 1.45 }}>
-                            <div style={{ fontWeight: 600, color: '#111827' }}>{evt?.title || 'Catering Event'}</div>
-                            {evt?.event_date && (
-                              <div style={{ color: '#334155' }}>
-                                📅 Date: <strong>{new Date(evt.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
-                              </div>
-                            )}
-                            {evt?.venue && <div style={{ color: '#334155' }}>📍 Venue: {evt.venue}</div>}
-                            {evt?.guest_count && <div style={{ color: '#334155' }}>👥 Guests: <strong>{evt.guest_count} Pax</strong></div>}
-                          </div>
+                        <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
+                          {client?.name || 'Valued Client'}
                         </div>
-
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.4rem' }}>
-                            Invoice Details:
-                          </div>
-                          <div style={{ fontSize: '0.9rem', color: '#0f172a', lineHeight: 1.5 }}>
-                            <div style={{ fontWeight: 700, fontSize: '1rem', color: '#111827' }}>
-                              #{inv.invoice_number.replace(/^INV-/, '') || '12345'}
-                            </div>
-                            <div>
-                              Issued: {new Date(inv.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                            </div>
-                            <div style={{ color: '#475569' }}>
-                              Due: {inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'On Receipt'}
-                            </div>
-                            <div style={{ marginTop: '0.35rem' }}>
-                              <span
-                                style={{
-                                  display: 'inline-block',
-                                  padding: '0.2rem 0.55rem',
-                                  borderRadius: '4px',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 700,
-                                  textTransform: 'uppercase',
-                                  background: inv.status === 'paid' ? '#dcfce7' : '#fee2e2',
-                                  color: inv.status === 'paid' ? '#15803d' : '#b91c1c'
-                                }}
-                              >
-                                Status: {inv.status}
-                              </span>
-                            </div>
-                          </div>
+                        {client?.company && <div style={{ fontSize: '0.85rem', color: '#334155' }}>🏢 {client.company}</div>}
+                        {client?.phone && <div style={{ fontSize: '0.85rem', color: '#334155' }}>📞 {client.phone}</div>}
+                        {client?.email && <div style={{ fontSize: '0.85rem', color: '#334155' }}>✉️ {client.email}</div>}
+                        <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '0.2rem' }}>
+                          📍 Venue: {evt?.venue || 'Kerala'}
                         </div>
                       </div>
-                    ) : (
-                      /* Standard 2-Column Metadata Layout */
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2.25rem' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#111827', marginBottom: '0.35rem' }}>
-                            Billed to:
-                          </div>
-                          <div style={{ fontSize: '0.9rem', color: '#1f2937', lineHeight: 1.45 }}>
-                            <div style={{ fontWeight: 600 }}>{client?.name || 'Valued Client'}</div>
-                            {client?.phone && <div>{client.phone}</div>}
-                            {client?.email && <div>{client.email}</div>}
-                            <div>{evt?.venue || client?.company || '123 Anywhere St., Any City'}</div>
-                          </div>
-                        </div>
 
-                        <div style={{ textAlign: 'right', fontSize: '0.9rem', color: '#1f2937', lineHeight: 1.5 }}>
-                          <div style={{ fontWeight: 600, color: '#111827' }}>
-                            Invoice No. {inv.invoice_number.replace(/^INV-/, '') || '12345'}
-                          </div>
+                      <div style={{ textAlign: 'right', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                        <div><strong>Event:</strong> {evt?.title || 'Catering Order'}</div>
+                        {evt?.event_date && (
                           <div>
-                            {new Date(inv.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                            <strong>Event Date:</strong> {new Date(evt.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                           </div>
-                          <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '0.2rem' }}>
-                            Due: {inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'On Receipt'}
-                          </div>
+                        )}
+                        {evt?.guest_count && <div><strong>Guests:</strong> {evt.guest_count} Pax</div>}
+                        <div><strong>Issue Date:</strong> {new Date(inv.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                        <div><strong>Due Date:</strong> {inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'On Receipt'}</div>
+                        <div style={{ marginTop: '0.35rem' }}>
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '0.15rem 0.5rem',
+                              borderRadius: '4px',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              textTransform: 'uppercase',
+                              background: inv.status === 'paid' ? '#dcfce7' : (balanceDue === 0 ? '#dcfce7' : '#fee2e2'),
+                              color: inv.status === 'paid' ? '#15803d' : (balanceDue === 0 ? '#15803d' : '#b91c1c')
+                            }}
+                          >
+                            Status: {balanceDue === 0 ? 'Fully Paid' : inv.status}
+                          </span>
                         </div>
                       </div>
-                    )}
+                    </div>
 
-                    {/* Wide Table with Full-Width Columns */}
-                    <div style={{ marginBottom: '1.75rem' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.92rem' }}>
+                    {/* Particulars Table */}
+                    <div style={{ marginBottom: '1.25rem' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                         <thead>
-                          <tr style={{ borderBottom: '2.5px solid #111827', background: isWide ? '#f8fafc' : 'transparent' }}>
-                            <th style={{ textAlign: 'left', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827' }}>
-                              Item &amp; Description
-                            </th>
-                            <th style={{ textAlign: 'center', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827', width: isWide ? '15%' : '20%' }}>
-                              Quantity / Pax
-                            </th>
-                            <th style={{ textAlign: 'right', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827', width: isWide ? '18%' : '20%' }}>
-                              Unit Price
-                            </th>
-                            <th style={{ textAlign: 'right', padding: '0.75rem 0.6rem', fontWeight: 700, color: '#111827', width: isWide ? '20%' : '22%' }}>
-                              Total
-                            </th>
+                          <tr style={{ borderBottom: '2px solid #0f172a', background: '#f1f5f9' }}>
+                            <th style={{ textAlign: 'left', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Description</th>
+                            <th style={{ textAlign: 'center', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Unit / Type</th>
+                            <th style={{ textAlign: 'right', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Rate</th>
+                            <th style={{ textAlign: 'right', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Total (₹)</th>
                           </tr>
                         </thead>
                         <tbody>
                           {evtItems.length > 0 ? (
-                            evtItems.map((ei) => {
-                              const mItem = state.menuItems.find((m) => m.id === ei.menu_item_id);
-                              const qty = evt?.guest_count || 1;
-                              const lineTotal = ei.price_per_guest * qty;
+                            evtItems.map((item) => {
+                              const mi = state.menuItems.find((m) => m.id === item.menu_item_id);
+                              const isPerKg = item.pricing_type === 'per_kg';
+                              const qty = item.quantity !== undefined ? item.quantity : (isPerKg ? 1 : (evt?.guest_count || 1));
+                              const rate = item.price_per_unit || item.price_per_guest || 0;
+                              const lineTotal = rate * qty;
+
                               return (
-                                <tr key={ei.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                  <td style={{ padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                    <div style={{ fontWeight: 600, color: '#0f172a' }}>{mItem?.name || 'Catering Dish'}</div>
-                                    {mItem?.category && (
-                                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{mItem.category}</div>
-                                    )}
+                                <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                  <td style={{ padding: '0.55rem 0.5rem' }}>
+                                    <div style={{ fontWeight: 600, color: '#0f172a' }}>{mi?.name || 'Menu Item'}</div>
+                                    {mi?.category && <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{mi.category}</div>}
                                   </td>
-                                  <td style={{ textAlign: 'center', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                    {qty} Pax
+                                  <td style={{ textAlign: 'center', padding: '0.55rem 0.5rem', color: '#334155' }}>
+                                    {qty} {isPerKg ? 'Kg' : 'Pax'}
                                   </td>
-                                  <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                    ₹{ei.price_per_guest.toLocaleString('en-IN')}
+                                  <td style={{ textAlign: 'right', padding: '0.55rem 0.5rem', color: '#334155' }}>
+                                    ₹{rate.toLocaleString('en-IN')} {isPerKg ? '/Kg' : '/Pax'}
                                   </td>
-                                  <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937', fontWeight: 600 }}>
+                                  <td style={{ textAlign: 'right', padding: '0.55rem 0.5rem', fontWeight: 600, color: '#0f172a' }}>
                                     ₹{lineTotal.toLocaleString('en-IN')}
                                   </td>
                                 </tr>
                               );
                             })
                           ) : (
-                            <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                              <td style={{ padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                <div style={{ fontWeight: 600 }}>{evt?.title || 'Catering & Event Package'}</div>
-                                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                            <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                              <td style={{ padding: '0.6rem 0.5rem' }}>
+                                <div style={{ fontWeight: 600 }}>{evt?.title || 'Catering Package'}</div>
+                                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
                                   {inv.kind === 'deposit' ? 'Advance Deposit Payment' : 'Final Event Settlement'}
                                 </div>
                               </td>
-                              <td style={{ textAlign: 'center', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                1 Lot
-                              </td>
-                              <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937' }}>
-                                ₹{inv.amount.toLocaleString('en-IN')}
-                              </td>
-                              <td style={{ textAlign: 'right', padding: '0.85rem 0.6rem', color: '#1f2937', fontWeight: 600 }}>
-                                ₹{inv.amount.toLocaleString('en-IN')}
-                              </td>
+                              <td style={{ textAlign: 'center', padding: '0.6rem 0.5rem' }}>1 Lot</td>
+                              <td style={{ textAlign: 'right', padding: '0.6rem 0.5rem' }}>₹{subtotal.toLocaleString('en-IN')}</td>
+                              <td style={{ textAlign: 'right', padding: '0.6rem 0.5rem', fontWeight: 600 }}>₹{subtotal.toLocaleString('en-IN')}</td>
                             </tr>
                           )}
                         </tbody>
                       </table>
                     </div>
 
-                    {/* Subtotal & Total Row */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
-                      <div style={{ width: isWide ? '340px' : '290px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0.5rem', fontSize: '0.95rem', fontWeight: 600, color: '#111827' }}>
-                          <span>Subtotal</span>
-                          <span>₹{grandTotal > 0 ? grandTotal.toLocaleString('en-IN') : inv.amount.toLocaleString('en-IN')}</span>
+                    {/* Totals Section with Discount */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.25rem' }}>
+                      <div style={{ width: '310px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0.4rem', fontSize: '0.85rem' }}>
+                          <span style={{ color: '#475569' }}>Subtotal:</span>
+                          <span style={{ fontWeight: 600 }}>₹{subtotal.toLocaleString('en-IN')}</span>
                         </div>
-
-                        {paymentsForThis > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0.5rem', fontSize: '0.9rem', color: '#059669', fontWeight: 600 }}>
-                            <span>Paid / Reconciled</span>
-                            <span>- ₹{paymentsForThis.toLocaleString('en-IN')}</span>
+                        {discount > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0.4rem', fontSize: '0.85rem', color: '#16a34a' }}>
+                            <span>Discount:</span>
+                            <span style={{ fontWeight: 700 }}>- ₹{discount.toLocaleString('en-IN')}</span>
                           </div>
                         )}
-
-                        {/* Solid Black Highlight Total Bar */}
-                        <div
-                          style={{
-                            background: '#111827',
-                            color: '#ffffff',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '0.85rem 1.25rem',
-                            marginTop: '0.65rem',
-                            width: '100%',
-                            boxSizing: 'border-box',
-                            borderRadius: '4px'
-                          }}
-                        >
-                          <span style={{ fontSize: '1.2rem', fontWeight: 700, letterSpacing: '0.5px' }}>
-                            Total
-                          </span>
-                          <span style={{ fontSize: '1.35rem', fontWeight: 800 }}>
-                            ₹{inv.amount.toLocaleString('en-IN')}
-                          </span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0.6rem', background: '#0f172a', color: '#ffffff', borderRadius: '4px', marginTop: '0.4rem' }}>
+                          <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>Net Invoice Total:</span>
+                          <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>₹{netAmount.toLocaleString('en-IN')}</span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Footer Section: Script Thank You! & Payment Info on Left, Authorized Company Details on Right */}
-                    <div style={{ display: 'grid', gridTemplateColumns: isWide ? '1.4fr 1fr' : '1.2fr 1fr', gap: '2.5rem', marginTop: '2.5rem', alignItems: 'flex-end', borderTop: '1px solid #e2e8f0', paddingTop: '1.75rem' }}>
-                      <div>
-                        <div
-                          style={{
-                            fontFamily: "'Caveat', 'Alex Brush', 'Brush Script MT', cursive",
-                            fontSize: '3.2rem',
-                            lineHeight: 1,
-                            color: '#111827',
-                            marginBottom: '1rem',
-                            transform: 'rotate(-3deg)',
-                            display: 'inline-block'
-                          }}
-                        >
-                          Thank You!
-                        </div>
+                    {/* Part-Payments History on the SAME invoice */}
+                    <div style={{ marginBottom: '1.5rem', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0.85rem 1rem', background: '#f8fafc' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                        <span style={{ fontWeight: 700, fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#0f172a' }}>
+                          💳 Payment &amp; Installments History
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                          {invPayments.length} installment{invPayments.length === 1 ? '' : 's'} recorded
+                        </span>
+                      </div>
 
-                        <div style={{ fontSize: '0.85rem', color: '#1f2937', lineHeight: 1.55 }}>
-                          <div style={{ fontWeight: 700, color: '#111827', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.3px', fontSize: '0.8rem' }}>
-                            Payment &amp; Banking Information
-                          </div>
-                          <div>Bank: <strong>Federal Bank / State Bank of India</strong></div>
-                          <div>Account Name: <strong>IPPAS Food Service &amp; Events</strong></div>
-                          <div>Account No: <strong>9876-5432-1000</strong> &bull; IFSC: <strong>FDRL0001234</strong></div>
-                          <div>Pay by: <strong>{inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Immediate'}</strong></div>
+                      {invPayments.length === 0 ? (
+                        <div style={{ fontSize: '0.8rem', color: '#64748b', fontStyle: 'italic', padding: '0.4rem 0' }}>
+                          No payments recorded yet against this invoice.
                         </div>
+                      ) : (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid #cbd5e1', color: '#475569' }}>
+                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Receipt Date</th>
+                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Method</th>
+                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Note / Reference</th>
+                              <th style={{ textAlign: 'right', padding: '0.35rem 0.25rem' }}>Amount Paid</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {invPayments.map((p) => (
+                              <tr key={p.id} style={{ borderBottom: '1px dashed #e2e8f0' }}>
+                                <td style={{ padding: '0.35rem 0.25rem' }}>
+                                  {new Date(p.paid_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                </td>
+                                <td style={{ padding: '0.35rem 0.25rem', fontWeight: 500 }}>{p.method}</td>
+                                <td style={{ padding: '0.35rem 0.25rem', color: '#64748b' }}>{p.note || '-'}</td>
+                                <td style={{ textAlign: 'right', padding: '0.35rem 0.25rem', fontWeight: 600, color: '#16a34a' }}>
+                                  ₹{p.amount.toLocaleString('en-IN')}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.65rem', paddingTop: '0.5rem', borderTop: '1px solid #cbd5e1' }}>
+                        <div style={{ fontSize: '0.85rem' }}>
+                          <span style={{ color: '#475569' }}>Total Paid so far: </span>
+                          <strong style={{ color: '#16a34a' }}>₹{paymentsForThis.toLocaleString('en-IN')}</strong>
+                        </div>
+                        <div style={{ fontSize: '0.9rem' }}>
+                          <span style={{ color: '#475569' }}>Balance Due: </span>
+                          <strong style={{ color: balanceDue > 0 ? '#dc2626' : '#16a34a', fontSize: '1.05rem' }}>
+                            ₹{balanceDue.toLocaleString('en-IN')}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Bank & Signature Footer */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '1.5rem', borderTop: '1px solid #e2e8f0', paddingTop: '1.25rem', alignItems: 'flex-end' }}>
+                      <div style={{ fontSize: '0.78rem', color: '#334155', lineHeight: 1.5 }}>
+                        <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.2rem', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                          Bank &amp; Payment Details
+                        </div>
+                        <div>Bank: <strong>{state.settings.bank_name || 'Federal Bank / State Bank of India'}</strong></div>
+                        <div>Account Name: <strong>{state.settings.account_name || state.settings.name}</strong></div>
+                        <div>Account No: <strong>{state.settings.account_number || '9876-5432-1000'}</strong> &bull; IFSC: <strong>{state.settings.ifsc_code || 'FDRL0001234'}</strong></div>
+                        <div>UPI ID: <strong>{state.settings.upi_id || 'ippas@upi'}</strong></div>
+                        {state.settings.payment_terms && (
+                          <div style={{ marginTop: '0.3rem', color: '#64748b', fontSize: '0.72rem' }}>
+                            Terms: {state.settings.payment_terms}
+                          </div>
+                        )}
                       </div>
 
                       <div style={{ textAlign: 'right' }}>
-                        <div
-                          style={{
-                            fontFamily: "'Playfair Display', Georgia, serif",
-                            fontSize: '1.35rem',
-                            fontWeight: 700,
-                            color: '#111827',
-                            marginBottom: '0.25rem'
-                          }}
-                        >
+                        <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: '1.05rem', fontWeight: 700, color: '#0f172a' }}>
                           {state.settings.name}
                         </div>
-                        <div style={{ fontSize: '0.85rem', color: '#4b5563', lineHeight: 1.45 }}>
-                          {state.settings.address}
-                          <br />
-                          Phone: {state.settings.phone} &bull; {state.settings.email}
-                        </div>
-                        <div style={{ marginTop: '1.5rem', paddingTop: '0.5rem', borderTop: '1px dashed #cbd5e1', display: 'inline-block', minWidth: '180px', textAlign: 'center', fontSize: '0.75rem', color: '#64748b' }}>
+                        <div style={{ marginTop: '1.75rem', paddingTop: '0.4rem', borderTop: '1px dashed #94a3b8', display: 'inline-block', minWidth: '150px', textAlign: 'center', fontSize: '0.72rem', color: '#64748b' }}>
                           Authorized Signatory
                         </div>
                       </div>
@@ -662,14 +639,121 @@ export default function InvoicesPage() {
         </div>
       )}
 
+      {/* PART-PAYMENT MODAL (Updates the same invoice) */}
+      {partPayInvoice && (
+        <div className="modal-overlay" onClick={() => setPartPayInvoice(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', width: '95%' }}>
+            <div className="modal-header">
+              <div>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0 }}>
+                  💳 Record Part-Payment ({partPayInvoice.invoice_number})
+                </h3>
+                <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.2rem 0 0 0' }}>
+                  Record a part-payment installment on this same invoice.
+                </p>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => setPartPayInvoice(null)}>✕</button>
+            </div>
 
-      {/* UNLOCK / EDIT INVOICE MODAL */}
+            {/* Existing payments on this same invoice */}
+            {(() => {
+              const existingPayments = state.payments.filter((p) => p.invoice_id === partPayInvoice.id);
+              const alreadyPaid = existingPayments.reduce((s, p) => s + p.amount, 0);
+              const balance = Math.max(0, partPayInvoice.amount - alreadyPaid);
+
+              return (
+                <div style={{ marginBottom: '1rem', background: '#f8fafc', padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
+                    <span>Invoice Net Amount:</span>
+                    <strong>₹{partPayInvoice.amount.toLocaleString('en-IN')}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#16a34a', marginBottom: '0.35rem' }}>
+                    <span>Total Received to Date:</span>
+                    <strong>₹{alreadyPaid.toLocaleString('en-IN')}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: balance > 0 ? '#dc2626' : '#16a34a', fontWeight: 700, borderTop: '1px solid #e2e8f0', paddingTop: '0.35rem' }}>
+                    <span>Remaining Balance Due:</span>
+                    <span>₹{balance.toLocaleString('en-IN')}</span>
+                  </div>
+
+                  {existingPayments.length > 0 && (
+                    <div style={{ marginTop: '0.65rem', borderTop: '1px dashed #cbd5e1', paddingTop: '0.5rem' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '0.25rem' }}>
+                        Previous Installments:
+                      </div>
+                      {existingPayments.map((p) => (
+                        <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#334155', padding: '0.15rem 0' }}>
+                          <span>
+                            {new Date(p.paid_at).toLocaleDateString('en-GB')} &bull; {p.method} {p.note ? `(${p.note})` : ''}
+                          </span>
+                          <span style={{ fontWeight: 600 }}>₹{p.amount.toLocaleString('en-IN')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            <form onSubmit={handleRecordPartPayment}>
+              <div className="form-group">
+                <label className="form-label">Payment Amount (INR ₹) *</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={partPayForm.amount}
+                  onChange={(e) => setPartPayForm({ ...partPayForm, amount: parseFloat(e.target.value) || 0 })}
+                  required
+                  min={1}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Payment Method</label>
+                <select
+                  className="form-control"
+                  value={partPayForm.method}
+                  onChange={(e) => setPartPayForm({ ...partPayForm, method: e.target.value })}
+                >
+                  <option value="UPI / GPay">UPI / GPay / PhonePe</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Bank Transfer">Bank Transfer (NEFT/IMPS)</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="Card">Debit / Credit Card</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Reference Note / Transaction ID</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. Part 1 advance, UPI Ref 410293..."
+                  value={partPayForm.note}
+                  onChange={(e) => setPartPayForm({ ...partPayForm, note: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPartPayInvoice(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary btn-sm" style={{ fontWeight: 600 }}>
+                  Save Part-Payment
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT INVOICE MODAL (Subtotal, Discount, Status) */}
       {editingInvoice && (
         <div className="modal-overlay" onClick={() => setEditingInvoice(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '450px' }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', width: '95%' }}>
             <div className="modal-header">
-              <h3 style={{ fontSize: '1.15rem', fontWeight: 700 }}>
-                🔓 Unlock &amp; Edit {editingInvoice.invoice_number}
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0 }}>
+                ✏️ Edit Invoice ({editingInvoice.invoice_number})
               </h3>
               <button className="btn btn-secondary btn-sm" onClick={() => setEditingInvoice(null)}>✕</button>
             </div>
@@ -686,15 +770,36 @@ export default function InvoicesPage() {
                 </select>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Amount (INR ₹) *</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  value={editInvForm.amount}
-                  onChange={(e) => setEditInvForm({ ...editInvForm, amount: parseFloat(e.target.value) || 0 })}
-                  required
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Subtotal (INR ₹) *</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={editInvForm.subtotal}
+                    onChange={(e) => setEditInvForm({ ...editInvForm, subtotal: parseFloat(e.target.value) || 0 })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Discount (₹)</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={editInvForm.discount}
+                    onChange={(e) => setEditInvForm({ ...editInvForm, discount: parseFloat(e.target.value) || 0 })}
+                    min={0}
+                  />
+                </div>
+              </div>
+
+              {/* Calculated Net Amount indicator */}
+              <div style={{ background: '#f1f5f9', padding: '0.6rem 0.8rem', borderRadius: '6px', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.85rem', color: '#475569', fontWeight: 600 }}>Net Payable:</span>
+                <span style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>
+                  ₹{Math.max(0, editInvForm.subtotal - editInvForm.discount).toLocaleString('en-IN')}
+                </span>
               </div>
 
               <div className="form-group">
@@ -748,6 +853,12 @@ export default function InvoicesPage() {
           </div>
         </div>
       )}
+
+      {/* Edit Bank Details Modal */}
+      <EditBankDetailsModal
+        isOpen={isBankModalOpen}
+        onClose={() => setIsBankModalOpen(false)}
+      />
     </div>
   );
 }

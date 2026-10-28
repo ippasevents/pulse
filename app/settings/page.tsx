@@ -113,7 +113,7 @@ export default function SettingsPage() {
 
             <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
               <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem', color: '#0f172a' }}>
-                🏦 Official Bank Details &amp; Payment Terms (ഇൻവോയ്സ് ബാങ്ക് വിവരങ്ങൾ)
+                🏦 Official Bank Details &amp; Payment Terms
               </h3>
 
               <div className="form-group">
@@ -182,7 +182,7 @@ export default function SettingsPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <label className="form-label">Payment Terms &amp; Instructions</label>
                   <span style={{ fontSize: '0.75rem', color: '#dc2626', fontWeight: 600 }}>
-                    ⏱️ ഡ്യൂ ഡേറ്റ് പരമാവധി 3 ദിവസങ്ങൾ
+                    ⏱️ Due date strictly within 3 days
                   </span>
                 </div>
                 <textarea

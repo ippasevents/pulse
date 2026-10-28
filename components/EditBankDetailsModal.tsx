@@ -46,7 +46,7 @@ export default function EditBankDetailsModal({ isOpen, onClose }: EditBankDetail
               🏦 Edit Bank Details &amp; Payment Terms
             </h3>
             <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.2rem 0 0 0' }}>
-              ഇൻവോയ്‌സിലും കൊട്ടേഷനിലും പ്രിന്റ് ചെയ്യപ്പെടുന്ന ബാങ്ക് വിവരങ്ങളും വ്യവസ്ഥകളും ഇവിടെ മാറ്റാം.
+              Update banking and settlement information printed on official invoices and quotes.
             </p>
           </div>
           <button className="btn btn-secondary btn-sm" onClick={onClose} type="button">✕</button>
@@ -54,14 +54,14 @@ export default function EditBankDetailsModal({ isOpen, onClose }: EditBankDetail
 
         {saved && (
           <div style={{ background: '#dcfce7', color: '#15803d', padding: '0.6rem 0.8rem', borderRadius: '6px', fontSize: '0.85rem', marginBottom: '1rem', fontWeight: 600 }}>
-            ✓ ബാങ്ക് വിവരങ്ങൾ സേവ് ചെയ്തു (Saved successfully)!
+            ✓ Bank details saved successfully!
           </div>
         )}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label className="form-label" style={{ fontWeight: 600 }}>
-              Bank Name (ബാങ്ക് പേര്) *
+              Bank Name *
             </label>
             <input
               type="text"
@@ -75,7 +75,7 @@ export default function EditBankDetailsModal({ isOpen, onClose }: EditBankDetail
 
           <div className="form-group">
             <label className="form-label" style={{ fontWeight: 600 }}>
-              Account Holder Name (അക്കൗണ്ട് ഉടമ) *
+              Account Holder Name *
             </label>
             <input
               type="text"
@@ -90,7 +90,7 @@ export default function EditBankDetailsModal({ isOpen, onClose }: EditBankDetail
           <div className="grid-2">
             <div className="form-group">
               <label className="form-label" style={{ fontWeight: 600 }}>
-                Account Number (അക്കൗണ്ട് നമ്പർ) *
+                Account Number *
               </label>
               <input
                 type="text"
@@ -103,7 +103,7 @@ export default function EditBankDetailsModal({ isOpen, onClose }: EditBankDetail
             </div>
             <div className="form-group">
               <label className="form-label" style={{ fontWeight: 600 }}>
-                IFSC Code (IFSC കോഡ്) *
+                IFSC Code *
               </label>
               <input
                 type="text"
@@ -119,7 +119,7 @@ export default function EditBankDetailsModal({ isOpen, onClose }: EditBankDetail
 
           <div className="form-group">
             <label className="form-label" style={{ fontWeight: 600 }}>
-              UPI ID / Google Pay / PhonePe (ഓപ്ഷണൽ)
+              UPI ID / Google Pay / PhonePe (Optional)
             </label>
             <input
               type="text"
@@ -133,10 +133,10 @@ export default function EditBankDetailsModal({ isOpen, onClose }: EditBankDetail
           <div className="form-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label className="form-label" style={{ fontWeight: 600 }}>
-                Payment Terms (പേയ്‌മെന്റ് വ്യവസ്ഥകൾ)
+                Payment Terms &amp; Conditions
               </label>
               <span style={{ fontSize: '0.75rem', color: '#dc2626', fontWeight: 600 }}>
-                ⏱️ പരമാവധി 3 ദിവസത്തെ ഡ്യൂ ഡേറ്റ്
+                ⏱️ Standard 3-Day Due Date
               </span>
             </div>
             <textarea
@@ -153,7 +153,7 @@ export default function EditBankDetailsModal({ isOpen, onClose }: EditBankDetail
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" style={{ fontWeight: 600 }}>
-              💾 Save Bank Details (സേവ് ചെയ്യുക)
+              💾 Save Bank Details
             </button>
           </div>
         </form>
