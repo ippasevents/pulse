@@ -16,7 +16,6 @@ import {
 import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
 import { getAuditTargetLink } from '@/components/OwnerActivityAlertModal';
 import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
-import OwnerDatabaseExportCard from '@/components/OwnerDatabaseExportCard';
 
 export default function DashboardPage() {
   const [state, setState] = useState(store.getState());
@@ -1255,9 +1254,6 @@ export default function DashboardPage() {
           </span>
         </div>
       </div>
-
-      {/* Owner-Only Full Database Download (Excel .xlsx & CSV .csv) */}
-      <OwnerDatabaseExportCard role={role} compact />
 
       {/* Bank vs Cash & Destination Account Holdings */}
       <InvoiceCollectionsCard
