@@ -88,6 +88,21 @@ export default function EventDetailPage() {
   // Per-kg item quantity staging when adding dishes
   const [kgQuantities, setKgQuantities] = useState<Record<string, number>>({});
 
+  // Payment Terms state
+  const [paymentTerms, setPaymentTerms] = useState<string>('');
+
+  // Shortage Stock Procurement Modal state
+  const [isShortageModalOpen, setIsShortageModalOpen] = useState(false);
+  const [shortageVendorName, setShortageVendorName] = useState('Metro Wholesale / Market Supplier');
+  const [shortageVendorPhone, setShortageVendorPhone] = useState('');
+  const [shortageBillNo, setShortageBillNo] = useState('');
+  const [shortagePaidAmt, setShortagePaidAmt] = useState<number>(0);
+  const [shortageMethod, setShortageMethod] = useState('bank transfer');
+  const [shortageChannel, setShortageChannel] = useState<PaymentChannel>('bank');
+  const [shortageDestAccount, setShortageDestAccount] = useState('');
+  const [shortageCustomAccount, setShortageCustomAccount] = useState('');
+  const [shortageNotes, setShortageNotes] = useState('');
+
   useEffect(() => {
     setState(store.getState());
     const unsub = store.subscribe(() => {
@@ -115,6 +130,7 @@ export default function EventDetailPage() {
         status: event.status,
         notes: event.notes || ''
       });
+      setPaymentTerms(event.payment_terms || '');
       const totals = store.getEventTotal(event.id);
       setInvSubtotal(totals.grandTotal > 0 ? totals.grandTotal : 50000);
     }
@@ -180,8 +196,127 @@ export default function EventDetailPage() {
 
   const handleUpdateDetails = (e: React.FormEvent) => {
     e.preventDefault();
-    store.updateEvent(event.id, editForm);
+    store.updateEvent(event.id, {
+      ...editForm,
+      payment_terms: paymentTerms
+    });
     setStatusBanner({ type: 'success', message: 'Event details updated successfully.' });
+  };
+
+  // Confirm Quotation: sets status to confirmed, creates unified master invoice, checks inventory shortages
+  const handleConfirmQuotation = () => {
+    store.updateEvent(event.id, {
+      status: 'confirmed',
+      payment_terms: paymentTerms || event.payment_terms
+    });
+    const masterInv = store.ensureEventInvoice(event.id);
+    const updatedStockEst = store.getEventStockEstimation(event.id);
+
+    if (updatedStockEst.totalShortageCount > 0) {
+      setStatusBanner({
+        type: 'info',
+        message: `✓ ക്വട്ടേഷൻ കൺഫേം ആയി! ഏകീകൃത മാസ്റ്റർ ഇൻവോയിസ് #${masterInv.invoice_number} ജനറേറ്റ് ചെയ്തു. ⚠️ ഈ മെനു ഉണ്ടാക്കാൻ ആവശ്യമായ ${updatedStockEst.totalShortageCount} സാധനങ്ങൾ വെയർഹൗസ് സ്റ്റോക്കിൽ കുറവാണ്. ദയവായി താഴെ നിന്ന് ഓർഡർ പ്ലേസ് ചെയ്യുക.`
+      });
+    } else {
+      setStatusBanner({
+        type: 'success',
+        message: `✓ ക്വട്ടേഷൻ കൺഫേം ആയി! ഏകീകൃത മാസ്റ്റർ ഇൻവോയിസ് #${masterInv.invoice_number} ജനറേറ്റ് ചെയ്തു. ആവശ്യമായ എല്ലാ ചേരുവകളും വെയർഹൗസിൽ ലഭ്യമാണ്.`
+      });
+    }
+  };
+
+  // Mark Event Completed: triggers automatic deduction of recipe ingredients from warehouse inventory
+  const handleCompleteEvent = () => {
+    const proceed = confirm(
+      'ഈ ഇവന്റ് കംപ്ലീറ്റ് ആയി രേഖപ്പെടുത്തണോ? ഇവന്റിന്റെ മെനു ഉണ്ടാക്കാൻ എടുത്ത എല്ലാ ചേരുവകളുടെയും ക്വാണ്ടിറ്റി വെയർഹൗസ് ഇൻവെന്ററിയിൽ നിന്ന് ഓട്ടോമാറ്റിക്കായി കുറവു വരുത്തുന്നതാണ്.'
+    );
+    if (!proceed) return;
+
+    store.updateEvent(event.id, { status: 'completed' });
+    setStatusBanner({
+      type: 'success',
+      message: '🎉 ഇവന്റ് വിജയകരമായി പൂർത്തിയായി! മെനു ചേരുവകൾ വെയർഹൗസ് സ്റ്റോക്കിൽ നിന്ന് ഓട്ടോമാറ്റിക്കായി കുറവു വരുത്തി.'
+    });
+  };
+
+  // Open Shortage Order Procurement Modal
+  const handleOpenShortageOrderModal = () => {
+    const defaultMethod = 'bank transfer';
+    const defaultChannel: PaymentChannel = 'bank';
+    const defaultAcc = store.getDefaultDestinationAccount(defaultChannel, defaultMethod);
+    setShortageVendorName('Metro Wholesale / Market Supplier');
+    setShortageVendorPhone('');
+    setShortageBillNo(`PO-${Date.now().toString().slice(-6)}`);
+    setShortagePaidAmt(stockEst.totalEstimatedCost);
+    setShortageMethod(defaultMethod);
+    setShortageChannel(defaultChannel);
+    setShortageDestAccount(defaultAcc);
+    setShortageCustomAccount('');
+    setShortageNotes(`Procurement for ${event.title} (${event.event_date})`);
+    setIsShortageModalOpen(true);
+  };
+
+  // Place Shortage Purchase Order and auto-add to Warehouse Stock
+  const handlePlaceShortagePurchase = (e: React.FormEvent) => {
+    e.preventDefault();
+    const shortageItems = stockEst.items.filter((it) => it.isShortage);
+    if (shortageItems.length === 0) {
+      alert('No shortage items detected.');
+      return;
+    }
+
+    const totalCost = shortageItems.reduce((s, it) => s + it.estimatedCost, 0);
+    const finalAccount =
+      shortageDestAccount === '__custom__'
+        ? shortageCustomAccount.trim() || store.getDefaultDestinationAccount(shortageChannel, shortageMethod)
+        : shortageDestAccount || store.getDefaultDestinationAccount(shortageChannel, shortageMethod);
+
+    store.addStockPurchase(
+      {
+        vendor_name: shortageVendorName || 'Wholesale Supplier',
+        vendor_phone: shortageVendorPhone,
+        bill_number: shortageBillNo || `PO-${Date.now().toString().slice(-6)}`,
+        purchase_date: new Date().toISOString().slice(0, 10),
+        items: shortageItems.map((it) => ({
+          item_name: it.ingredientName,
+          quantity: it.shortageQty,
+          unit: it.unit,
+          unit_price: it.costPerUnit || 0,
+          total_price: it.estimatedCost,
+          ingredient_id: it.ingredientId
+        })),
+        total_amount: totalCost,
+        paid_amount: shortagePaidAmt,
+        payment_method: `${shortageMethod} (${shortageChannel === 'cash' ? 'Cash' : 'Bank'} - ${finalAccount})`,
+        notes: shortageNotes || `Shortage Stock Purchase for Event: ${event.title} (${event.event_date})`
+      },
+      true // updateWarehouseStock = true: directly adds purchased items to warehouse inventory!
+    );
+
+    setIsShortageModalOpen(false);
+    setStatusBanner({
+      type: 'success',
+      message: `📦 സ്റ്റോക്ക് പർച്ചേസ് ഓർഡർ വിജയകരമായി പ്ലേസ് ചെയ്തു! പർച്ചേസ് ചെയ്ത സാധനങ്ങൾ വെയർഹൗസ് ഇൻവെന്ററിയിൽ ഓട്ടോമാറ്റിക്കായി ആഡ് ചെയ്യപ്പെട്ടു.`
+    });
+  };
+
+  // Sync Master Invoice with Latest Event Total
+  const handleSyncInvoice = () => {
+    store.syncInvoiceWithEventTotal(event.id);
+    setStatusBanner({
+      type: 'success',
+      message: `ഏകീകൃത മാസ്റ്റർ ഇൻവോയിസ് ഏറ്റവും പുതിയ ഇവന്റ് തുകയുമായി (₹${grandTotal.toLocaleString('en-IN')}) സിങ്ക് ചെയ്തു.`
+    });
+  };
+
+  // Save Quotation Payment Terms
+  const handleSavePaymentTerms = (newTerms: string) => {
+    setPaymentTerms(newTerms);
+    store.updateEvent(event.id, { payment_terms: newTerms });
+    setStatusBanner({
+      type: 'success',
+      message: 'Quotation Payment Terms updated successfully.'
+    });
   };
 
   // Add Dish (No locking system!)
@@ -449,15 +584,45 @@ export default function EventDetailPage() {
           </p>
         </div>
 
-        {/* Header Actions: A4 PDF Quotation & Total */}
+        {/* Header Actions: Status progression & A4 PDF Quotation & Total */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
+            {(event.status === 'inquiry' || event.status === 'quoted') && canEditOps && (
+              <button
+                type="button"
+                onClick={handleConfirmQuotation}
+                className="btn btn-sm"
+                style={{ background: '#16a34a', color: '#ffffff', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                title="Confirm quotation and auto-generate Master Invoice"
+              >
+                ✓ Confirm Quotation / കൺഫേം ചെയ്യുക
+              </button>
+            )}
+
+            {event.status === 'confirmed' && canEditOps && (
+              <button
+                type="button"
+                onClick={handleCompleteEvent}
+                className="btn btn-sm"
+                style={{ background: '#2563eb', color: '#ffffff', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                title="Mark event completed and automatically deduct raw materials from inventory"
+              >
+                🏁 Mark Event Completed / പൂർത്തിയായി
+              </button>
+            )}
+
+            {event.status === 'completed' && (
+              <span className="badge" style={{ background: '#dbeafe', color: '#1e40af', fontWeight: 700, padding: '0.35rem 0.65rem' }}>
+                ✓ Completed &amp; Stock Deducted
+              </span>
+            )}
+
             <button
               onClick={() => setIsPrintQuoteOpen(true)}
               className="btn btn-primary btn-sm"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600 }}
             >
-              📄 Print / Download A4 Quotation PDF
+              📄 A4 Quotation PDF
             </button>
           </div>
 
@@ -469,6 +634,81 @@ export default function EventDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Stock Shortage Warning / Reassurance Banner */}
+      {stockEst.totalShortageCount > 0 && (
+        <div
+          style={{
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            borderRadius: '8px',
+            padding: '0.85rem 1.1rem',
+            marginBottom: '1.25rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.75rem'
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 700, color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span>⚠️ സ്റ്റോക്ക് തികവില്ല (Raw Material Shortage Detected)</span>
+              <span className="badge" style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700 }}>
+                {stockEst.totalShortageCount} Raw Material Items Insufficient
+              </span>
+            </div>
+            <div style={{ fontSize: '0.84rem', color: '#7f1d1d', marginTop: '0.25rem' }}>
+              ഈ മെനു തയ്യാറാക്കാൻ ആവശ്യമായ ചേരുവകൾ വെയർഹൗസ് ഇൻവെന്ററിയിൽ കുറവാണ്. എസ്റ്റിമേറ്റ് പർച്ചേസ് ചെലവ്: <strong>₹{stockEst.totalEstimatedCost.toLocaleString('en-IN')}</strong>.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{ background: '#dc2626', color: '#ffffff', fontWeight: 700, padding: '0.4rem 0.8rem' }}
+              onClick={handleOpenShortageOrderModal}
+            >
+              📦 ഓർഡർ പ്ലേസ് ചെയ്യുക (Place Stock Purchase Order)
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              style={{ fontWeight: 600 }}
+              onClick={() => setActiveTab('stock')}
+            >
+              🔍 View Stock Details
+            </button>
+          </div>
+        </div>
+      )}
+
+      {stockEst.totalShortageCount === 0 && stockEst.items.length > 0 && event.status === 'confirmed' && (
+        <div
+          style={{
+            background: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            borderRadius: '8px',
+            padding: '0.65rem 1rem',
+            marginBottom: '1.25rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
+            fontSize: '0.84rem'
+          }}
+        >
+          <div style={{ color: '#166534', fontWeight: 600 }}>
+            ✓ വെയർഹൗസ് സ്റ്റോക്ക് പൂർണ്ണമാണ് (All {stockEst.items.length} recipe raw materials are available in warehouse inventory).
+          </div>
+          <div style={{ fontSize: '0.78rem', color: '#15803d' }}>
+            {event.stock_deducted
+              ? '✓ ഈ ഇവന്റിനുള്ള സ്റ്റോക്ക് ഓട്ടോമാറ്റിക്കായി കുറവു ചെയ്തു കഴിഞ്ഞു.'
+              : 'ഇവന്റ് കംപ്ലീറ്റ് ചെയ്യുമ്പോൾ ഈ സ്റ്റോക്ക് ഓട്ടോമാറ്റിക്കായി കുറവു ചെയ്യപ്പെടും.'}
+          </div>
+        </div>
+      )}
 
       {/* Owner-Only Event & Quotation Login ID Attribution Banner */}
       {role === 'owner' && (auditSummary?.eventAudit || auditSummary?.quoteAudit) && (
@@ -851,6 +1091,73 @@ export default function EventDetailPage() {
               </div>
             </div>
           </div>
+
+          {/* Quotation Payment Terms & Instant Confirmation Card */}
+          <div className="card" style={{ marginTop: '1.25rem', borderTop: '2px solid var(--primary)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>
+                  📜 Quotation Payment Terms (പേയ്‌മെന്റ് നിബന്ധനകൾ)
+                </h3>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
+                  Specify the advance deposit and milestone payment terms to print directly on this quotation and master invoice.
+                </p>
+              </div>
+
+              {(event.status === 'inquiry' || event.status === 'quoted') && canEditOps && (
+                <button
+                  type="button"
+                  onClick={handleConfirmQuotation}
+                  className="btn btn-sm"
+                  style={{ background: '#16a34a', color: '#ffffff', fontWeight: 700, padding: '0.45rem 0.9rem' }}
+                >
+                  ✓ Confirm Quotation / കൺഫേം ചെയ്യുക
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.65rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', alignSelf: 'center', fontWeight: 600 }}>Quick Presets:</span>
+              {[
+                '50% Advance upon confirmation, 40% 2 days prior to event, 10% on settlement',
+                '30% Advance on booking, 50% on event morning, 20% post event settlement',
+                '100% Full Advance prior to event setup',
+                'Payment strictly due within 3 days. 50% advance deposit upon confirmation.'
+              ].map((term) => (
+                <button
+                  key={term}
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                  onClick={() => handleSavePaymentTerms(term)}
+                >
+                  {term.length > 45 ? term.slice(0, 42) + '...' : term}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. 50% Advance on confirmation, 40% 2 days prior, 10% on settlement"
+                value={paymentTerms}
+                onChange={(e) => setPaymentTerms(e.target.value)}
+                disabled={!canEditQuote}
+                style={{ flex: 1 }}
+              />
+              {canEditQuote && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  style={{ fontWeight: 600, whiteSpace: 'nowrap' }}
+                  onClick={() => handleSavePaymentTerms(paymentTerms)}
+                >
+                  Save Terms
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -897,14 +1204,24 @@ export default function EventDetailPage() {
                 </p>
               </div>
 
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {stockEst.totalShortageCount > 0 && canEditOps && (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    style={{ background: '#dc2626', color: '#ffffff', fontWeight: 700 }}
+                    onClick={handleOpenShortageOrderModal}
+                  >
+                    📦 ഓർഡർ പ്ലേസ് ചെയ്യുക (Place Purchase Order)
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"
                   style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600 }}
                   onClick={() => setIsPrintStockOpen(true)}
                 >
-                  🖨️ Print / Download A4 Stock Estimation Sheet
+                  🖨️ Print / Download A4 Sheet
                 </button>
                 <Link href="/stock" className="btn btn-secondary btn-sm">
                   Warehouse Stock &rarr;
@@ -1241,11 +1558,46 @@ export default function EventDetailPage() {
           <div className="grid-2" style={{ marginBottom: '1.5rem' }}>
             {/* Invoices list with Part-Payments on Same Invoice */}
             <div className="card">
-              <h2 className="card-title">Event Invoices</h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                <div>
+                  <h2 className="card-title" style={{ margin: 0 }}>
+                    Unified Master Invoice &amp; Settlement Bill (ഏകീകൃത ഇൻവോയിസ്)
+                  </h2>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
+                    Single invoice lifecycle: covers initial advance deposit through final settlement with complete payment history.
+                  </p>
+                </div>
+                {isFinance && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                    onClick={handleSyncInvoice}
+                    title="Synchronize master invoice subtotal with latest event total"
+                  >
+                    🔄 Sync with Event Total (₹{grandTotal.toLocaleString('en-IN')})
+                  </button>
+                )}
+              </div>
               {invoices.length === 0 ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                  No invoices generated for this event yet. Create one using the form on the right.
-                </p>
+                <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1', textAlign: 'center' }}>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0 0 0.75rem 0' }}>
+                    No invoice generated for this event yet. You can confirm the quotation or generate the unified master invoice directly:
+                  </p>
+                  {isFinance && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      style={{ fontWeight: 700 }}
+                      onClick={() => {
+                        const inv = store.ensureEventInvoice(event.id);
+                        setStatusBanner({ type: 'success', message: `Unified Master Invoice #${inv.invoice_number} generated successfully.` });
+                      }}
+                    >
+                      ⚡ Generate Unified Master Invoice (₹{grandTotal.toLocaleString('en-IN')})
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div className="data-table-container">
                   <table className="data-table">
@@ -1337,11 +1689,11 @@ export default function EventDetailPage() {
 
                                     <button
                                       className="btn btn-secondary btn-sm"
-                                      title="Record Part-Payment on this invoice"
+                                      title="Record Advance Deposit or Milestone Payment on this invoice"
                                       onClick={() => handleOpenPartPayment(inv)}
-                                      style={{ fontWeight: 600 }}
+                                      style={{ fontWeight: 600, background: '#f0fdf4', borderColor: '#86efac', color: '#15803d' }}
                                     >
-                                      + Part Pay
+                                      + Record Advance / Pay
                                     </button>
 
                                     <button
@@ -1665,6 +2017,18 @@ export default function EventDetailPage() {
                   <option value="completed">Completed</option>
                   <option value="cancelled">Cancelled</option>
                 </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Quotation Payment Terms (പേയ്‌മെന്റ് നിബന്ധനകൾ)</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. 50% Advance on confirmation, 40% 2 days prior, 10% on settlement"
+                  value={paymentTerms}
+                  onChange={(e) => setPaymentTerms(e.target.value)}
+                  disabled={!canEditOps}
+                />
               </div>
 
               <div className="form-group">
@@ -2651,6 +3015,189 @@ export default function EventDetailPage() {
                 </button>
                 <button type="submit" className="btn btn-primary" style={{ fontWeight: 600 }}>
                   Save Payment Receipt
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------------------------- */}
+      {/* MODAL 6: SHORTAGE STOCK PROCUREMENT (PLACE ORDER & AUTO-ADD TO WAREHOUSE INVENTORY) */}
+      {/* ----------------------------------------------------------------------------------- */}
+      {isShortageModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsShortageModalOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '640px' }}>
+            <div className="modal-header">
+              <div>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+                  📦 Place Stock Purchase Order (ഷോർട്ടേജ് പർച്ചേസ് ഓർഡർ)
+                </h2>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                  Auto-populated missing raw materials needed for <strong>{event.title}</strong>. Purchasing will automatically add these items into warehouse inventory.
+                </p>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => setIsShortageModalOpen(false)}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handlePlaceShortagePurchase}>
+              {/* Shortage Items Table */}
+              <div style={{ marginBottom: '1rem', border: '1px solid #fee2e2', borderRadius: '8px', background: '#fff5f5', padding: '0.75rem' }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#b91c1c', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Shortage Ingredients to Procure ({stockEst.items.filter((it) => it.isShortage).length} items):</span>
+                  <span>Est. Cost: ₹{stockEst.totalEstimatedCost.toLocaleString('en-IN')}</span>
+                </div>
+                <div style={{ maxHeight: '180px', overflowY: 'auto', background: '#ffffff', borderRadius: '6px', border: '1px solid #fecaca' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                    <thead>
+                      <tr style={{ background: '#fef2f2', borderBottom: '1px solid #fecaca', textAlign: 'left', color: '#991b1b' }}>
+                        <th style={{ padding: '4px 8px' }}>Ingredient</th>
+                        <th style={{ padding: '4px 8px', textAlign: 'right' }}>Shortage Qty</th>
+                        <th style={{ padding: '4px 8px', textAlign: 'right' }}>Est. Rate</th>
+                        <th style={{ padding: '4px 8px', textAlign: 'right' }}>Total Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stockEst.items
+                        .filter((it) => it.isShortage)
+                        .map((item) => (
+                          <tr key={item.ingredientId} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '4px 8px', fontWeight: 600 }}>{item.ingredientName}</td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 700, color: '#dc2626' }}>
+                              {item.shortageQty} {item.unit}
+                            </td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right' }}>₹{item.costPerUnit}</td>
+                            <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 700 }}>
+                              ₹{item.estimatedCost.toLocaleString('en-IN')}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Vendor / Wholesale Supplier Name *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Metro Wholesale / Market Supplier"
+                    value={shortageVendorName}
+                    onChange={(e) => setShortageVendorName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Vendor Phone (Optional)</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. +91 98460 11223"
+                    value={shortageVendorPhone}
+                    onChange={(e) => setShortageVendorPhone(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Purchase Bill / PO Reference #</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={shortageBillNo}
+                    onChange={(e) => setShortageBillNo(e.target.value)}
+                    placeholder="e.g. PO-784920"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Amount Paid Now (₹) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    className="form-control"
+                    value={shortagePaidAmt || ''}
+                    onChange={(e) => setShortagePaidAmt(parseFloat(e.target.value) || 0)}
+                    placeholder="Amount paid"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Payment Channel *</label>
+                  <select
+                    className="form-control"
+                    value={shortageChannel}
+                    onChange={(e) => {
+                      const nextCh = e.target.value as PaymentChannel;
+                      const nextAcc = store.getDefaultDestinationAccount(nextCh, shortageMethod);
+                      setShortageChannel(nextCh);
+                      setShortageDestAccount(nextAcc);
+                    }}
+                  >
+                    <option value="bank">🏦 Bank Account</option>
+                    <option value="cash">💵 Cash in Hand</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Paid From Account *</label>
+                  <select
+                    className="form-control"
+                    value={shortageDestAccount}
+                    onChange={(e) => setShortageDestAccount(e.target.value)}
+                  >
+                    {store.getPresetPaymentAccounts(shortageChannel).map((acc) => (
+                      <option key={acc.label} value={acc.label}>
+                        {acc.label}
+                      </option>
+                    ))}
+                    <option value="__custom__">+ Enter Custom Account...</option>
+                  </select>
+                </div>
+              </div>
+
+              {shortageDestAccount === '__custom__' && (
+                <div className="form-group">
+                  <label className="form-label">Custom Account Name *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Main Kitchen Petty Cash"
+                    value={shortageCustomAccount}
+                    onChange={(e) => setShortageCustomAccount(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
+
+              <div className="form-group">
+                <label className="form-label">Procurement Note</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={shortageNotes}
+                  onChange={(e) => setShortageNotes(e.target.value)}
+                  placeholder="Notes for procurement"
+                />
+              </div>
+
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '0.65rem 0.85rem', marginBottom: '1rem', fontSize: '0.8rem', color: '#166534' }}>
+                ⚡ <strong>Automatic Warehouse Inventory Adding:</strong> Upon confirming this order, all {stockEst.items.filter((it) => it.isShortage).length} shortage items will be automatically credited to warehouse inventory, clearing the shortage immediately!
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setIsShortageModalOpen(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ fontWeight: 700, background: '#16a34a', borderColor: '#15803d' }}>
+                  ✓ Confirm Order &amp; Auto-Add to Warehouse
                 </button>
               </div>
             </form>

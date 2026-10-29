@@ -44,6 +44,27 @@ export default function EventsPage() {
     'Payment strictly due within 3 days after function'
   ];
 
+  useEffect(() => {
+    const unsub = store.subscribe(() => {
+      setState(store.getState());
+    });
+    return unsub;
+  }, []);
+
+  const role = state.currentRole;
+  const canEdit = role === 'owner' || role === 'manager';
+  const isFinance = role === 'owner' || role === 'accountant';
+
+  const filteredEvents = state.events.filter((evt) => {
+    const matchesStatus = statusFilter === 'all' || evt.status === statusFilter;
+    const client = state.clients.find((c) => c.id === evt.client_id);
+    const matchesSearch =
+      evt.title.toLowerCase().includes(search.toLowerCase()) ||
+      (evt.venue && evt.venue.toLowerCase().includes(search.toLowerCase())) ||
+      (client && client.name.toLowerCase().includes(search.toLowerCase()));
+    return matchesStatus && matchesSearch;
+  });
+
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
 
