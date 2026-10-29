@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { Pool } from 'pg';
+import { createPool } from '@/src/db/index';
 
 export type DbOperation =
   | {
@@ -46,6 +48,15 @@ const ALLOWED_TABLES = new Set([
   'activity_logs'
 ]);
 
+function isCloudSqlConfigured(): boolean {
+  return Boolean(
+    process.env.SQL_HOST &&
+    process.env.SQL_USER &&
+    process.env.SQL_PASSWORD &&
+    process.env.SQL_DB_NAME
+  );
+}
+
 function getServerSupabase(): SupabaseClient | null {
   const url = (
     process.env.SUPABASE_URL ||
@@ -72,9 +83,6 @@ function getServerSupabase(): SupabaseClient | null {
 }
 
 function extractMissingColumn(errMessage: string): string | null {
-  // PostgREST / Postgres missing column patterns:
-  // Could not find the 'auto_email_invoices' column of 'business_settings' in the schema cache
-  // column "pricing_type" of relation "menu_items" does not exist
   const m1 = errMessage.match(/Could not find the '([^']+)' column/i);
   if (m1?.[1]) return m1[1];
   const m2 = errMessage.match(/column "([^"]+)" of relation/i);
@@ -98,7 +106,84 @@ function stripColumn(
   return next;
 }
 
-async function runSingleOperation(
+// ---------------------------------------------------------------------------
+// Cloud SQL Operations Handler (pg Pool)
+// ---------------------------------------------------------------------------
+async function runSingleCloudSqlOperation(
+  pool: Pool,
+  op: DbOperation
+): Promise<{ error: any | null }> {
+  if (!ALLOWED_TABLES.has(op.table)) {
+    return { error: { message: `Disallowed table: ${op.table}` } };
+  }
+
+  try {
+    if (op.type === 'delete') {
+      const matchEntries = Object.entries(op.match || {});
+      if (matchEntries.length === 0) return { error: null };
+      const whereClauses = matchEntries.map(([k], idx) => `"${k}" = $${idx + 1}`).join(' AND ');
+      const params = matchEntries.map(([, v]) => v);
+      await pool.query(`DELETE FROM "${op.table}" WHERE ${whereClauses}`, params);
+      return { error: null };
+    }
+
+    if (op.type === 'update') {
+      const valEntries = Object.entries(op.values || {});
+      if (valEntries.length === 0) return { error: null };
+      const matchEntries = Object.entries(op.match || {});
+      const setClauses = valEntries.map(([k], idx) => `"${k}" = $${idx + 1}`).join(', ');
+      const whereClauses = matchEntries
+        .map(([k], idx) => `"${k}" = $${valEntries.length + idx + 1}`)
+        .join(' AND ');
+      const params = [...valEntries.map(([, v]) => v), ...matchEntries.map(([, v]) => v)];
+      await pool.query(`UPDATE "${op.table}" SET ${setClauses} WHERE ${whereClauses}`, params);
+      return { error: null };
+    }
+
+    // Insert or Upsert
+    const rows = Array.isArray(op.values) ? op.values : [op.values];
+    for (const rawRow of rows) {
+      if (!rawRow || Object.keys(rawRow).length === 0) continue;
+      const keys = Object.keys(rawRow);
+      const cols = keys.map((k) => `"${k}"`).join(', ');
+      const placeholders = keys.map((_, idx) => `$${idx + 1}`).join(', ');
+      const params = keys.map((k) => rawRow[k]);
+
+      if (op.type === 'upsert') {
+        const conflictKeys = (op.onConflict || 'id')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const conflictTarget = conflictKeys.map((k) => `"${k}"`).join(', ');
+        const updateCols = keys.filter((k) => !conflictKeys.includes(k));
+
+        if (updateCols.length > 0) {
+          const updateSet = updateCols.map((k) => `"${k}" = EXCLUDED."${k}"`).join(', ');
+          await pool.query(
+            `INSERT INTO "${op.table}" (${cols}) VALUES (${placeholders}) ON CONFLICT (${conflictTarget}) DO UPDATE SET ${updateSet}`,
+            params
+          );
+        } else {
+          await pool.query(
+            `INSERT INTO "${op.table}" (${cols}) VALUES (${placeholders}) ON CONFLICT (${conflictTarget}) DO NOTHING`,
+            params
+          );
+        }
+      } else {
+        await pool.query(`INSERT INTO "${op.table}" (${cols}) VALUES (${placeholders})`, params);
+      }
+    }
+
+    return { error: null };
+  } catch (err: any) {
+    return { error: { message: err?.message || String(err) } };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Supabase Fallback Operations Handler
+// ---------------------------------------------------------------------------
+async function runSingleSupabaseOperation(
   sb: SupabaseClient,
   op: DbOperation
 ): Promise<{ error: any | null }> {
@@ -112,16 +197,6 @@ async function runSingleOperation(
       query = query.eq(k, v);
     }
     const { error } = await query;
-    if (error) {
-      const msg = String(error.message || '');
-      if (
-        msg.includes('does not exist') ||
-        msg.includes('Could not find the table') ||
-        msg.includes('schema cache')
-      ) {
-        return { error: null };
-      }
-    }
     return { error };
   }
 
@@ -146,7 +221,6 @@ async function runSingleOperation(
     return { error: null };
   }
 
-  // insert or upsert with automatic missing-column stripping & unique-key recovery
   let currentValues = Array.isArray(op.values)
     ? op.values.map((r) => ({ ...r }))
     : { ...op.values };
@@ -169,7 +243,6 @@ async function runSingleOperation(
       continue;
     }
 
-    // Handle ingredients unique name conflict gracefully
     if (
       op.table === 'ingredients' &&
       !Array.isArray(currentValues) &&
@@ -185,7 +258,6 @@ async function runSingleOperation(
       if (!byNameErr) return { error: null };
     }
 
-    // Handle profiles unique username conflict gracefully
     if (
       op.table === 'profiles' &&
       !Array.isArray(currentValues) &&
@@ -201,83 +273,50 @@ async function runSingleOperation(
       if (!byUserErr) return { error: null };
     }
 
-    // Handle invoices unique invoice_number conflict if another row claimed the sequence number
-    if (
-      op.table === 'invoices' &&
-      !Array.isArray(currentValues) &&
-      currentValues.invoice_number &&
-      (msg.includes('invoices_invoice_number_key') || error.code === '23505')
-    ) {
-      const suffix = String(Date.now()).slice(-4);
-      currentValues = {
-        ...currentValues,
-        invoice_number: `${currentValues.invoice_number}-${suffix}`
-      };
-      continue;
-    }
-
     return { error };
   }
 
   return { error: null };
 }
 
-export async function GET(req: NextRequest) {
+function getActiveDatabaseType(): 'supabase' | 'cloudsql' | 'none' {
   const sb = getServerSupabase();
-  const mode = req.nextUrl.searchParams.get('mode');
+  const hasCloudSql = isCloudSqlConfigured();
 
+  if (process.env.DATABASE_PROVIDER === 'supabase' && sb) return 'supabase';
+  if (process.env.DATABASE_PROVIDER === 'cloudsql' && hasCloudSql) return 'cloudsql';
+
+  // If Supabase keys are provided in environment, use Supabase
+  if (sb) return 'supabase';
+  if (hasCloudSql) return 'cloudsql';
+  return 'none';
+}
+
+// ---------------------------------------------------------------------------
+// GET & POST Handlers
+// ---------------------------------------------------------------------------
+export async function GET(req: NextRequest) {
+  const dbType = getActiveDatabaseType();
+  const isConfigured = dbType !== 'none';
+  const sb = getServerSupabase();
+
+  const mode = req.nextUrl.searchParams.get('mode');
   if (mode === 'status') {
-    return NextResponse.json({ configured: Boolean(sb) });
+    return NextResponse.json({
+      configured: isConfigured,
+      engine: dbType
+    });
   }
 
-  if (!sb) {
+  if (!isConfigured) {
     return NextResponse.json({ configured: false });
   }
 
-  try {
-    const [
-      settingsRes,
-      profilesRes,
-      clientsRes,
-      ingredientsRes,
-      menuItemsRes,
-      recipesRes,
-      eventsRes,
-      eventItemsRes,
-      eventExtrasRes,
-      staffRes,
-      shiftsRes,
-      salaryRecordsRes,
-      invoicesRes,
-      paymentsRes,
-      purchasesRes,
-      purchaseItemsRes,
-      purchasePaymentsRes,
-      activityLogsRes
-    ] = await Promise.all([
-      sb.from('business_settings').select('*').eq('id', 1).maybeSingle(),
-      sb.from('profiles').select('*'),
-      sb.from('clients').select('*').order('created_at', { ascending: false }),
-      sb.from('ingredients').select('*').order('name', { ascending: true }),
-      sb.from('menu_items').select('*').order('name', { ascending: true }),
-      sb.from('menu_item_ingredients').select('*'),
-      sb.from('events').select('*').order('event_date', { ascending: true }),
-      sb.from('event_items').select('*'),
-      sb.from('event_extras').select('*'),
-      sb.from('staff_members').select('*').order('name', { ascending: true }),
-      sb.from('shifts').select('*'),
-      sb.from('staff_salary_records').select('*').order('recorded_at', { ascending: false }),
-      sb.from('invoices').select('*').order('created_at', { ascending: false }),
-      sb.from('payments').select('*').order('paid_at', { ascending: false }),
-      sb.from('stock_purchases').select('*').order('created_at', { ascending: false }),
-      sb.from('stock_purchase_items').select('*'),
-      sb.from('stock_purchase_payments').select('*').order('paid_at', { ascending: false }),
-      sb.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(400)
-    ]);
-
-    return NextResponse.json({
-      configured: true,
-      results: {
+  // Read via Cloud SQL (pg Pool)
+  if (dbType === 'cloudsql') {
+    try {
+      const pool = createPool();
+      const [
         settingsRes,
         profilesRes,
         clientsRes,
@@ -296,26 +335,153 @@ export async function GET(req: NextRequest) {
         purchaseItemsRes,
         purchasePaymentsRes,
         activityLogsRes
-      }
-    });
-  } catch (err: any) {
-    return NextResponse.json(
-      {
+      ] = await Promise.all([
+        pool.query('SELECT * FROM business_settings WHERE id = 1 LIMIT 1'),
+        pool.query('SELECT * FROM profiles ORDER BY full_name ASC'),
+        pool.query('SELECT * FROM clients ORDER BY created_at DESC'),
+        pool.query('SELECT * FROM ingredients ORDER BY name ASC'),
+        pool.query('SELECT * FROM menu_items ORDER BY name ASC'),
+        pool.query('SELECT * FROM menu_item_ingredients'),
+        pool.query('SELECT * FROM events ORDER BY event_date ASC'),
+        pool.query('SELECT * FROM event_items'),
+        pool.query('SELECT * FROM event_extras'),
+        pool.query('SELECT * FROM staff_members ORDER BY name ASC'),
+        pool.query('SELECT * FROM shifts'),
+        pool.query('SELECT * FROM staff_salary_records ORDER BY recorded_at DESC'),
+        pool.query('SELECT * FROM invoices ORDER BY created_at DESC'),
+        pool.query('SELECT * FROM payments ORDER BY paid_at DESC'),
+        pool.query('SELECT * FROM stock_purchases ORDER BY created_at DESC'),
+        pool.query('SELECT * FROM stock_purchase_items'),
+        pool.query('SELECT * FROM stock_purchase_payments ORDER BY paid_at DESC'),
+        pool.query('SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 400')
+      ]);
+
+      return NextResponse.json({
         configured: true,
-        error: err?.message || 'Failed to read from SQL database.'
-      },
-      { status: 500 }
-    );
+        engine: 'cloudsql',
+        results: {
+          settingsRes: { data: settingsRes.rows[0] || null },
+          profilesRes: { data: profilesRes.rows },
+          clientsRes: { data: clientsRes.rows },
+          ingredientsRes: { data: ingredientsRes.rows },
+          menuItemsRes: { data: menuItemsRes.rows },
+          recipesRes: { data: recipesRes.rows },
+          eventsRes: { data: eventsRes.rows },
+          eventItemsRes: { data: eventItemsRes.rows },
+          eventExtrasRes: { data: eventExtrasRes.rows },
+          staffRes: { data: staffRes.rows },
+          shiftsRes: { data: shiftsRes.rows },
+          salaryRecordsRes: { data: salaryRecordsRes.rows },
+          invoicesRes: { data: invoicesRes.rows },
+          paymentsRes: { data: paymentsRes.rows },
+          purchasesRes: { data: purchasesRes.rows },
+          purchaseItemsRes: { data: purchaseItemsRes.rows },
+          purchasePaymentsRes: { data: purchasePaymentsRes.rows },
+          activityLogsRes: { data: activityLogsRes.rows }
+        }
+      });
+    } catch (err: any) {
+      console.error('[Cloud SQL Read Error]', err);
+      return NextResponse.json(
+        {
+          configured: true,
+          error: err?.message || 'Failed to read from Cloud SQL database.'
+        },
+        { status: 500 }
+      );
+    }
   }
+
+  // Read via Supabase
+  if (sb) {
+    try {
+      const [
+        settingsRes,
+        profilesRes,
+        clientsRes,
+        ingredientsRes,
+        menuItemsRes,
+        recipesRes,
+        eventsRes,
+        eventItemsRes,
+        eventExtrasRes,
+        staffRes,
+        shiftsRes,
+        salaryRecordsRes,
+        invoicesRes,
+        paymentsRes,
+        purchasesRes,
+        purchaseItemsRes,
+        purchasePaymentsRes,
+        activityLogsRes
+      ] = await Promise.all([
+        sb.from('business_settings').select('*').eq('id', 1).maybeSingle(),
+        sb.from('profiles').select('*'),
+        sb.from('clients').select('*').order('created_at', { ascending: false }),
+        sb.from('ingredients').select('*').order('name', { ascending: true }),
+        sb.from('menu_items').select('*').order('name', { ascending: true }),
+        sb.from('menu_item_ingredients').select('*'),
+        sb.from('events').select('*').order('event_date', { ascending: true }),
+        sb.from('event_items').select('*'),
+        sb.from('event_extras').select('*'),
+        sb.from('staff_members').select('*').order('name', { ascending: true }),
+        sb.from('shifts').select('*'),
+        sb.from('staff_salary_records').select('*').order('recorded_at', { ascending: false }),
+        sb.from('invoices').select('*').order('created_at', { ascending: false }),
+        sb.from('payments').select('*').order('paid_at', { ascending: false }),
+        sb.from('stock_purchases').select('*').order('created_at', { ascending: false }),
+        sb.from('stock_purchase_items').select('*'),
+        sb.from('stock_purchase_payments').select('*').order('paid_at', { ascending: false }),
+        sb.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(400)
+      ]);
+
+      return NextResponse.json({
+        configured: true,
+        engine: 'supabase',
+        results: {
+          settingsRes,
+          profilesRes,
+          clientsRes,
+          ingredientsRes,
+          menuItemsRes,
+          recipesRes,
+          eventsRes,
+          eventItemsRes,
+          eventExtrasRes,
+          staffRes,
+          shiftsRes,
+          salaryRecordsRes,
+          invoicesRes,
+          paymentsRes,
+          purchasesRes,
+          purchaseItemsRes,
+          purchasePaymentsRes,
+          activityLogsRes
+        }
+      });
+    } catch (err: any) {
+      return NextResponse.json(
+        {
+          configured: true,
+          error: err?.message || 'Failed to read from SQL database.'
+        },
+        { status: 500 }
+      );
+    }
+  }
+
+  return NextResponse.json({ configured: false });
 }
 
 export async function POST(req: NextRequest) {
+  const dbType = getActiveDatabaseType();
   const sb = getServerSupabase();
-  if (!sb) {
+
+  if (dbType === 'none') {
     return NextResponse.json({
       configured: false,
       success: false,
-      error: 'Supabase SQL database credentials are not configured.'
+      error: 'SQL database credentials are not configured.'
     });
   }
 
@@ -325,23 +491,44 @@ export async function POST(req: NextRequest) {
       ? body.operations
       : [];
 
-    for (const op of operations) {
-      const { error } = await runSingleOperation(sb, op);
-      if (error) {
-        return NextResponse.json(
-          {
-            configured: true,
-            success: false,
-            failedTable: op.table,
-            error: error.message || String(error)
-          },
-          { status: 400 }
-        );
+    if (dbType === 'cloudsql') {
+      const pool = createPool();
+      for (const op of operations) {
+        const { error } = await runSingleCloudSqlOperation(pool, op);
+        if (error) {
+          return NextResponse.json(
+            {
+              configured: true,
+              engine: 'cloudsql',
+              success: false,
+              failedTable: op.table,
+              error: error.message || String(error)
+            },
+            { status: 400 }
+          );
+        }
+      }
+    } else if (dbType === 'supabase' && sb) {
+      for (const op of operations) {
+        const { error } = await runSingleSupabaseOperation(sb, op);
+        if (error) {
+          return NextResponse.json(
+            {
+              configured: true,
+              engine: 'supabase',
+              success: false,
+              failedTable: op.table,
+              error: error.message || String(error)
+            },
+            { status: 400 }
+          );
+        }
       }
     }
 
     return NextResponse.json({
       configured: true,
+      engine: dbType,
       success: true,
       count: operations.length
     });
