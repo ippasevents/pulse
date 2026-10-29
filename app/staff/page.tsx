@@ -3,8 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { store } from '@/lib/store';
-import { ShiftAttendanceStatus, StaffMember, StaffSalaryRecordType } from '@/lib/types';
+import { EventRecord, Shift, ShiftAttendanceStatus, StaffMember, StaffSalaryRecordType } from '@/lib/types';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
+import StaffWhatsAppModal from '@/components/StaffWhatsAppModal';
 
 export default function StaffPage() {
   const [state, setState] = useState(store.getState());
@@ -31,6 +32,8 @@ export default function StaffPage() {
   const [confirmDeleteSalaryId, setConfirmDeleteSalaryId] = useState<string | null>(null);
   const [attendanceEventFilter, setAttendanceEventFilter] = useState<string>('');
   const [notice, setNotice] = useState<string | null>(null);
+  const [whatsAppModalEvent, setWhatsAppModalEvent] = useState<EventRecord | null>(null);
+  const [whatsAppModalShift, setWhatsAppModalShift] = useState<Shift | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -533,17 +536,36 @@ export default function StaffPage() {
             </select>
 
             {canMarkAttendance && attendanceEventFilter && filteredShifts.length > 0 && (
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                style={{ fontWeight: 600 }}
-                onClick={() => {
-                  store.markEventShiftsAttendance(attendanceEventFilter, 'present');
-                  showNotice('Marked all shifts for the selected event as Present.');
-                }}
-              >
-                ✓ Mark All Present
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{
+                    fontWeight: 700,
+                    background: '#16a34a',
+                    color: '#ffffff',
+                    border: '1px solid #15803d'
+                  }}
+                  onClick={() => {
+                    const evt = state.events.find((e) => e.id === attendanceEventFilter) || null;
+                    setWhatsAppModalShift(null);
+                    setWhatsAppModalEvent(evt);
+                  }}
+                >
+                  💬 Notify Event Crew on WhatsApp
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  style={{ fontWeight: 600 }}
+                  onClick={() => {
+                    store.markEventShiftsAttendance(attendanceEventFilter, 'present');
+                    showNotice('Marked all shifts for the selected event as Present.');
+                  }}
+                >
+                  ✓ Mark All Present
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -560,6 +582,7 @@ export default function StaffPage() {
                   <th>Event &amp; Date</th>
                   <th>Assigned Staff &amp; Role</th>
                   <th>Shift Timing</th>
+                  <th style={{ textAlign: 'center' }}>WhatsApp Alert</th>
                   <th style={{ textAlign: 'center' }}>Attendance Register</th>
                   <th style={{ textAlign: 'right' }}>Shift Payment (Present Only)</th>
                   {canEditStaff && <th style={{ textAlign: 'center' }}>Remove Shift</th>}
@@ -608,6 +631,32 @@ export default function StaffPage() {
                           {sh.starts_at.slice(11, 16)} - {sh.ends_at.slice(11, 16)}
                         </div>
                         <div style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>{hrs} hrs</div>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        {evt && (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            style={{
+                              background: sh.whatsapp_notified_at ? '#f0fdf4' : '#dcfce7',
+                              color: '#15803d',
+                              border: '1px solid #86efac',
+                              fontWeight: 700,
+                              fontSize: '0.73rem',
+                              padding: '0.24rem 0.55rem',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem'
+                            }}
+                            onClick={() => {
+                              setWhatsAppModalShift(sh);
+                              setWhatsAppModalEvent(evt);
+                            }}
+                          >
+                            <span>💬</span>
+                            <span>{sh.whatsapp_notified_at ? '✓ Sent' : 'Notify'}</span>
+                          </button>
+                        )}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         {canMarkAttendance ? (
@@ -1437,6 +1486,18 @@ export default function StaffPage() {
           </div>
         );
       })()}
+
+      {/* Staff Duty Assignment WhatsApp Notification Module */}
+      <StaffWhatsAppModal
+        isOpen={Boolean(whatsAppModalEvent)}
+        onClose={() => {
+          setWhatsAppModalEvent(null);
+          setWhatsAppModalShift(null);
+        }}
+        event={whatsAppModalEvent}
+        targetShift={whatsAppModalShift}
+        initialNote={whatsAppModalShift?.duty_note || ''}
+      />
     </div>
   );
 }

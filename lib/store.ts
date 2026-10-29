@@ -2211,19 +2211,25 @@ class DataStore {
         staff: loadedStaff,
         shifts: (shiftsRes?.data || [])
           .filter((sh: any) => sh.staff_member_id || sh.staff_id)
-          .map((sh: any) => ({
-            id: sh.id,
-            event_id: sh.event_id,
-            staff_member_id: sh.staff_member_id || sh.staff_id,
-            role_label: sh.role_label || '',
-            starts_at: sh.starts_at,
-            ends_at: sh.ends_at,
-            attendance_status:
-              sh.attendance_status === 'present' || sh.attendance_status === 'absent'
-                ? sh.attendance_status
-                : 'pending',
-            attendance_marked_at: sh.attendance_marked_at || undefined
-          })),
+          .map((sh: any) => {
+            const existingLocal = this.state.shifts.find((old) => old.id === sh.id);
+            return {
+              id: sh.id,
+              event_id: sh.event_id,
+              staff_member_id: sh.staff_member_id || sh.staff_id,
+              role_label: sh.role_label || '',
+              starts_at: sh.starts_at,
+              ends_at: sh.ends_at,
+              duty_note: sh.duty_note || existingLocal?.duty_note || undefined,
+              whatsapp_notified_at:
+                sh.whatsapp_notified_at || existingLocal?.whatsapp_notified_at || undefined,
+              attendance_status:
+                sh.attendance_status === 'present' || sh.attendance_status === 'absent'
+                  ? sh.attendance_status
+                  : 'pending',
+              attendance_marked_at: sh.attendance_marked_at || undefined
+            };
+          }),
         staffSalaryRecords: !salaryRecordsRes?.error
           ? (salaryRecordsRes?.data || []).map((sr: any) => ({
               id: sr.id,
@@ -4131,6 +4137,8 @@ class DataStore {
             role_label: newShift.role_label || null,
             starts_at: newShift.starts_at,
             ends_at: newShift.ends_at,
+            duty_note: newShift.duty_note || null,
+            whatsapp_notified_at: newShift.whatsapp_notified_at || null,
             attendance_status: newShift.attendance_status || 'pending',
             attendance_marked_at: newShift.attendance_marked_at || null
           },
@@ -4140,6 +4148,64 @@ class DataStore {
     }
 
     return newShift;
+  }
+
+  public markShiftWhatsAppNotified(shiftId: string, dutyNote?: string) {
+    let updatedShift: Shift | undefined;
+    const nowIso = new Date().toISOString();
+
+    this.state.shifts = this.state.shifts.map((sh) => {
+      if (sh.id !== shiftId) return sh;
+      updatedShift = {
+        ...sh,
+        duty_note: dutyNote !== undefined ? dutyNote : sh.duty_note,
+        whatsapp_notified_at: nowIso
+      };
+      return updatedShift;
+    });
+
+    if (!updatedShift) return;
+
+    const staffMember = this.state.staff.find((s) => s.id === updatedShift!.staff_member_id);
+    const evt = this.state.events.find((e) => e.id === updatedShift!.event_id);
+
+    this.logMutation({
+      entity_type: 'shift',
+      entity_id: shiftId,
+      parent_event_id: updatedShift.event_id,
+      action: 'update',
+      summary: `Sent WhatsApp duty notification to "${staffMember?.name || 'Staff'}" for "${evt?.title || 'Event'}"`,
+      details: `Mobile: ${staffMember?.phone || 'N/A'} • Role: ${updatedShift.role_label || staffMember?.role_title || 'Crew'}`
+    });
+    this.save();
+
+    if (
+      isValidUUID(updatedShift.id) &&
+      isValidUUID(updatedShift.event_id) &&
+      isValidUUID(updatedShift.staff_member_id)
+    ) {
+      this.enqueueSqlOperations('Update Shift WhatsApp Notification', [
+        ...this.ensureEventParentOps(updatedShift.event_id),
+        ...this.ensureStaffParentOps(updatedShift.staff_member_id),
+        {
+          type: 'upsert',
+          table: 'shifts',
+          values: {
+            id: updatedShift.id,
+            event_id: updatedShift.event_id,
+            staff_member_id: updatedShift.staff_member_id,
+            role_label: updatedShift.role_label || null,
+            starts_at: updatedShift.starts_at,
+            ends_at: updatedShift.ends_at,
+            duty_note: updatedShift.duty_note || null,
+            whatsapp_notified_at: updatedShift.whatsapp_notified_at || null,
+            attendance_status: updatedShift.attendance_status || 'pending',
+            attendance_marked_at: updatedShift.attendance_marked_at || null
+          },
+          onConflict: 'id'
+        }
+      ]);
+    }
   }
 
   public updateShiftAttendance(shiftId: string, status: ShiftAttendanceStatus) {

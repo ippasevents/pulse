@@ -10,6 +10,9 @@ import { sendInvoiceEmailNotification } from '@/lib/emailInvoice';
 import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
 import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
 import WhatsAppShareModal from '@/components/WhatsAppShareModal';
+import StaffWhatsAppModal from '@/components/StaffWhatsAppModal';
+import { Shift } from '@/lib/types';
+import { formatDisplayWhatsAppPhone } from '@/lib/staffWhatsApp';
 
 export default function EventDetailPage() {
   const params = useParams();
@@ -42,11 +45,16 @@ export default function EventDetailPage() {
   const [extraDesc, setExtraDesc] = useState('');
   const [extraAmount, setExtraAmount] = useState<number>(0);
 
-  // Shift assignment form
+  // Shift assignment form + WhatsApp notification controls
   const [shiftStaffId, setShiftStaffId] = useState('');
   const [shiftRoleLabel, setShiftRoleLabel] = useState('Server');
   const [shiftStart, setShiftStart] = useState('16:00');
   const [shiftEnd, setShiftEnd] = useState('23:00');
+  const [shiftDutyNote, setShiftDutyNote] = useState('');
+  const [autoNotifyWhatsApp, setAutoNotifyWhatsApp] = useState(true);
+  const [isStaffWhatsAppOpen, setIsStaffWhatsAppOpen] = useState(false);
+  const [selectedShiftForWhatsApp, setSelectedShiftForWhatsApp] = useState<Shift | null>(null);
+  const [shiftModalInitialNote, setShiftModalInitialNote] = useState('');
 
   // New Invoice form with Discount & Auto-Email to Gmail
   const [invKind, setInvKind] = useState<'deposit' | 'final'>('deposit');
@@ -371,14 +379,24 @@ export default function EventDetailPage() {
 
     const isoStart = `${event.event_date}T${shiftStart}:00Z`;
     const isoEnd = `${event.event_date}T${shiftEnd}:00Z`;
+    const trimmedNote = shiftDutyNote.trim();
 
-    store.addShift({
+    const createdShift = store.addShift({
       event_id: event.id,
       staff_member_id: shiftStaffId,
       role_label: shiftRoleLabel,
       starts_at: isoStart,
-      ends_at: isoEnd
+      ends_at: isoEnd,
+      duty_note: trimmedNote || undefined
     });
+
+    setShiftDutyNote('');
+
+    if (autoNotifyWhatsApp) {
+      setSelectedShiftForWhatsApp(createdShift);
+      setShiftModalInitialNote(trimmedNote);
+      setIsStaffWhatsAppOpen(true);
+    }
   };
 
   const handleSendInvoiceEmail = async (inv: Invoice, isAutomatic: boolean = false) => {
@@ -1309,14 +1327,36 @@ export default function EventDetailPage() {
                   Attended Pay ({attendedStaffCount}/{shifts.length}): ₹{attendedStaffCost.toLocaleString('en-IN')}
                 </div>
                 {(canEditOps || isFinance) && shifts.length > 0 && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    style={{ fontWeight: 700 }}
-                    onClick={() => store.markEventShiftsAttendance(event.id, 'present')}
-                  >
-                    ✓ Mark All Present
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      style={{
+                        fontWeight: 700,
+                        background: '#16a34a',
+                        color: '#ffffff',
+                        border: '1px solid #15803d',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem'
+                      }}
+                      onClick={() => {
+                        setSelectedShiftForWhatsApp(null);
+                        setShiftModalInitialNote('');
+                        setIsStaffWhatsAppOpen(true);
+                      }}
+                    >
+                      💬 Notify All Crew ({shifts.filter((s) => Boolean(s.whatsapp_notified_at)).length}/{shifts.length})
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontWeight: 700 }}
+                      onClick={() => store.markEventShiftsAttendance(event.id, 'present')}
+                    >
+                      ✓ Mark All Present
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -1332,6 +1372,7 @@ export default function EventDetailPage() {
                     <tr>
                       <th>Staff Member</th>
                       <th>Role &amp; Times</th>
+                      <th style={{ textAlign: 'center' }}>WhatsApp Duty Alert</th>
                       <th style={{ textAlign: 'center' }}>Attendance</th>
                       <th style={{ textAlign: 'right' }}>Shift Pay</th>
                       {canEditOps && <th style={{ textAlign: 'center' }}>Action</th>}
@@ -1370,6 +1411,32 @@ export default function EventDetailPage() {
                             <div style={{ color: 'var(--text-muted)' }}>
                               {sh.starts_at.slice(11, 16)} - {sh.ends_at.slice(11, 16)} ({hrs} hrs)
                             </div>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              style={{
+                                background: sh.whatsapp_notified_at ? '#f0fdf4' : '#dcfce7',
+                                color: '#15803d',
+                                border: '1px solid #86efac',
+                                fontWeight: 700,
+                                fontSize: '0.73rem',
+                                padding: '0.25rem 0.55rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem'
+                              }}
+                              title="Send role & event duty details on WhatsApp"
+                              onClick={() => {
+                                setSelectedShiftForWhatsApp(sh);
+                                setShiftModalInitialNote(sh.duty_note || '');
+                                setIsStaffWhatsAppOpen(true);
+                              }}
+                            >
+                              <span>💬</span>
+                              <span>{sh.whatsapp_notified_at ? '✓ Sent (Resend)' : 'Notify'}</span>
+                            </button>
                           </td>
                           <td style={{ textAlign: 'center' }}>
                             {canEditOps || isFinance ? (
@@ -1464,7 +1531,14 @@ export default function EventDetailPage() {
                   <select
                     className="form-control"
                     value={shiftStaffId}
-                    onChange={(e) => setShiftStaffId(e.target.value)}
+                    onChange={(e) => {
+                      const pickedId = e.target.value;
+                      setShiftStaffId(pickedId);
+                      const pickedStaff = state.staff.find((st) => st.id === pickedId);
+                      if (pickedStaff?.role_title) {
+                        setShiftRoleLabel(pickedStaff.role_title);
+                      }
+                    }}
                     required
                   >
                     <option value="">Choose staff...</option>
@@ -1474,6 +1548,24 @@ export default function EventDetailPage() {
                       </option>
                     ))}
                   </select>
+                  {shiftStaffId && (() => {
+                    const picked = state.staff.find((st) => st.id === shiftStaffId);
+                    const formattedPhone = formatDisplayWhatsAppPhone(picked?.phone);
+                    return (
+                      <div
+                        style={{
+                          marginTop: '0.35rem',
+                          fontSize: '0.76rem',
+                          color: formattedPhone ? '#15803d' : '#b45309',
+                          fontWeight: 600
+                        }}
+                      >
+                        {formattedPhone
+                          ? `📱 WhatsApp Mobile: ${formattedPhone}`
+                          : '⚠️ No mobile number saved for this staff member (can be entered when sending)'}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="form-group">
@@ -1508,9 +1600,56 @@ export default function EventDetailPage() {
                   </div>
                 </div>
 
+                <div className="form-group">
+                  <label className="form-label">Duty Instructions / Note (Optional)</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Report 30 mins early in black uniform"
+                    value={shiftDutyNote}
+                    onChange={(e) => setShiftDutyNote(e.target.value)}
+                  />
+                </div>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.6rem 0.75rem',
+                    borderRadius: '8px',
+                    background: '#f0fdf4',
+                    border: '1px solid #bbf7d0',
+                    cursor: 'pointer',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    color: '#166534',
+                    marginTop: '0.35rem'
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={autoNotifyWhatsApp}
+                    onChange={(e) => setAutoNotifyWhatsApp(e.target.checked)}
+                    style={{ width: '16px', height: '16px', accentColor: '#16a34a' }}
+                  />
+                  <span>💬 Send WhatsApp duty notification on assign</span>
+                </label>
+
                 <div style={{ marginTop: '1rem' }}>
-                  <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
-                    + Schedule Shift
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    style={{
+                      width: '100%',
+                      background: autoNotifyWhatsApp ? '#16a34a' : undefined,
+                      borderColor: autoNotifyWhatsApp ? '#15803d' : undefined,
+                      fontWeight: 700
+                    }}
+                  >
+                    {autoNotifyWhatsApp
+                      ? '💬 Assign Role & Notify on WhatsApp'
+                      : '+ Schedule Shift'}
                   </button>
                 </div>
               </form>
@@ -3210,6 +3349,19 @@ export default function EventDetailPage() {
         invoice={selectedInvoiceForWhatsApp}
         isOpen={Boolean(selectedInvoiceForWhatsApp)}
         onClose={() => setSelectedInvoiceForWhatsApp(null)}
+      />
+
+      {/* Staff Duty Assignment WhatsApp Notification Module */}
+      <StaffWhatsAppModal
+        isOpen={isStaffWhatsAppOpen}
+        onClose={() => {
+          setIsStaffWhatsAppOpen(false);
+          setSelectedShiftForWhatsApp(null);
+          setShiftModalInitialNote('');
+        }}
+        event={event}
+        targetShift={selectedShiftForWhatsApp}
+        initialNote={shiftModalInitialNote}
       />
     </div>
   );

@@ -142,6 +142,8 @@ export interface Shift {
   role_label?: string;
   starts_at: string;
   ends_at: string;
+  duty_note?: string;
+  whatsapp_notified_at?: string;
   attendance_status?: ShiftAttendanceStatus;
   attendance_marked_at?: string;
 }
