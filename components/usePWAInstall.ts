@@ -15,11 +15,44 @@ export function usePWAInstall() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // Detect standalone mode (already installed)
-    const isStandalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-    setIsInstalled(isStandalone);
+    // Detect standalone mode (already installed or running inside standalone PWA)
+    const checkStandalone = (): boolean => {
+      const isStandaloneMedia = window.matchMedia('(display-mode: standalone)').matches;
+      const isFullscreenMedia = window.matchMedia('(display-mode: fullscreen)').matches;
+      const isMinimalUi = window.matchMedia('(display-mode: minimal-ui)').matches;
+      const isNavigatorStandalone = (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+      const isModeParam = window.location.search.includes('mode=standalone');
+      const isAndroidApp = typeof document !== 'undefined' && document.referrer.includes('android-app://');
+      const isStoredInstalled = localStorage.getItem('ippas_pwa_installed') === 'true';
+
+      return (
+        isStandaloneMedia ||
+        isFullscreenMedia ||
+        isMinimalUi ||
+        isNavigatorStandalone ||
+        isModeParam ||
+        isAndroidApp ||
+        isStoredInstalled
+      );
+    };
+
+    const standaloneActive = checkStandalone();
+    setIsInstalled(standaloneActive);
+    if (standaloneActive) {
+      localStorage.setItem('ippas_pwa_installed', 'true');
+    }
+
+    // Media query change listener
+    const mediaQuery = window.matchMedia('(display-mode: standalone)');
+    const handleMediaChange = (e: MediaQueryListEvent) => {
+      if (e.matches) {
+        setIsInstalled(true);
+        localStorage.setItem('ippas_pwa_installed', 'true');
+      }
+    };
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', handleMediaChange);
+    }
 
     // Detect iOS devices
     const userAgent = window.navigator.userAgent.toLowerCase();
@@ -28,18 +61,25 @@ export function usePWAInstall() {
 
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
+      // If already installed, never show install prompts
+      if (checkStandalone()) return;
       setDeferredPrompt(e as BeforeInstallPromptEvent);
     };
 
     const handleAppInstalled = () => {
       setIsInstalled(true);
       setDeferredPrompt(null);
+      localStorage.setItem('ippas_pwa_installed', 'true');
+      localStorage.setItem('ippas_pwa_banner_dismissed', 'true');
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
+      if (mediaQuery.removeEventListener) {
+        mediaQuery.removeEventListener('change', handleMediaChange);
+      }
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
@@ -52,13 +92,15 @@ export function usePWAInstall() {
     if (outcome === 'accepted') {
       setIsInstalled(true);
       setDeferredPrompt(null);
+      localStorage.setItem('ippas_pwa_installed', 'true');
+      localStorage.setItem('ippas_pwa_banner_dismissed', 'true');
       return true;
     }
     return false;
   };
 
   return {
-    isInstallable: !!deferredPrompt,
+    isInstallable: !!deferredPrompt && !isInstalled,
     isInstalled,
     isIOS,
     install,

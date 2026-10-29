@@ -7,11 +7,13 @@ import { store } from '@/lib/store';
 import { UserRole } from '@/lib/types';
 import { PWAInstallButton } from './PWAInstallButton';
 import StockNotificationModal from './StockNotificationModal';
+import ChangePasswordModal from './ChangePasswordModal';
 
 export default function MobileBottomNav() {
   const pathname = usePathname();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [role, setRole] = useState<UserRole>('owner');
   const [currentUser, setCurrentUser] = useState(store.getCurrentUser());
   const [lowStockCount, setLowStockCount] = useState(0);
@@ -46,6 +48,7 @@ export default function MobileBottomNav() {
     if (isStaff) {
       return [
         { label: 'Duty & Salary', href: '/dashboard', icon: '📍' },
+        { label: 'Password', href: '#password', icon: '🔑', isPassword: true },
         { label: 'Logout', href: '#logout', icon: '🚪', isLogout: true }
       ];
     }
@@ -120,6 +123,20 @@ export default function MobileBottomNav() {
             );
           }
 
+          if (item.isPassword) {
+            return (
+              <button
+                key="password-btn"
+                type="button"
+                onClick={() => setIsChangePasswordOpen(true)}
+                className="mobile-nav-item"
+              >
+                <span className="mobile-nav-icon">{item.icon}</span>
+                <span className="mobile-nav-label">{item.label}</span>
+              </button>
+            );
+          }
+
           if (item.isMore) {
             return (
               <button
@@ -177,7 +194,7 @@ export default function MobileBottomNav() {
                 type="button"
                 onClick={() => {
                   setIsMoreOpen(false);
-                  setIsNotifOpen(true);
+                  setIsChangePasswordOpen(true);
                 }}
                 className="btn btn-secondary btn-sm"
                 style={{
@@ -186,11 +203,11 @@ export default function MobileBottomNav() {
                   justifyContent: 'center',
                   gap: '0.35rem',
                   fontWeight: 600,
-                  background: lowStockCount > 0 ? '#fff1f2' : '#f8fafc',
-                  color: lowStockCount > 0 ? '#e11d48' : 'var(--text-main)'
+                  background: '#f8fafc',
+                  color: 'var(--text-main)'
                 }}
               >
-                🔔 Stock Alerts {lowStockCount > 0 && `(${lowStockCount})`}
+                🔑 Change Password
               </button>
 
               <button
@@ -209,6 +226,33 @@ export default function MobileBottomNav() {
                 🚪 Logout
               </button>
             </div>
+
+            {/* Stock Alerts button if items are low */}
+            {lowStockCount > 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMoreOpen(false);
+                    setIsNotifOpen(true);
+                  }}
+                  className="btn btn-sm"
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.35rem',
+                    fontWeight: 600,
+                    background: '#fff1f2',
+                    color: '#e11d48',
+                    border: '1px solid #fecaca'
+                  }}
+                >
+                  🔔 Stock Alerts ({lowStockCount} Items Low)
+                </button>
+              </div>
+            )}
 
             {/* Links list */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
@@ -238,8 +282,8 @@ export default function MobileBottomNav() {
               ))}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '0.5rem' }}>
-              <PWAInstallButton />
+            <div style={{ paddingTop: '0.5rem', borderTop: '1px solid var(--border)' }}>
+              <PWAInstallButton variant="banner" showAlways={true} />
             </div>
           </div>
         </div>
@@ -248,6 +292,11 @@ export default function MobileBottomNav() {
       {!isStaff && (
         <StockNotificationModal isOpen={isNotifOpen} onClose={() => setIsNotifOpen(false)} />
       )}
+
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
     </>
   );
 }

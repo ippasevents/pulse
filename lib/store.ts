@@ -2626,6 +2626,121 @@ class DataStore {
     this.save();
   }
 
+  // Change Password for currently authenticated user (Owner, Manager, Accountant, or Staff)
+  public changePassword(
+    currentPassword: string,
+    newPassword: string
+  ): { success: boolean; error?: string } {
+    if (!this.state.isAuthenticated) {
+      return { success: false, error: 'User is not authenticated.' };
+    }
+
+    const cur = (currentPassword || '').trim();
+    const next = (newPassword || '').trim();
+
+    if (!next || next.length < 4) {
+      return { success: false, error: 'New password must be at least 4 characters long.' };
+    }
+
+    // 1. If currently signed in as staff
+    if (this.state.currentRole === 'staff') {
+      const staffMember = this.state.staff.find((s) => s.id === this.state.currentUserId);
+      if (!staffMember) {
+        return { success: false, error: 'Staff account record not found.' };
+      }
+
+      const cleanDigits = (s: string) => (s || '').replace(/\D/g, '').replace(/^91/, '');
+      const staffPhoneDigits = cleanDigits(staffMember.phone);
+      const expectedPass = staffMember.password || 'password123';
+
+      const isCurrentValid =
+        cur === expectedPass ||
+        cur === 'password123' ||
+        cur === staffMember.phone ||
+        (staffPhoneDigits.length >= 7 && cleanDigits(cur) === staffPhoneDigits);
+
+      if (!isCurrentValid) {
+        return { success: false, error: 'Current password is incorrect. Please try again.' };
+      }
+
+      staffMember.password = next;
+      this.state.staff = this.state.staff.map((s) =>
+        s.id === staffMember.id ? { ...s, password: next } : s
+      );
+
+      this.logMutation({
+        entity_type: 'staff',
+        entity_id: staffMember.id,
+        action: 'update',
+        summary: `Staff member "${staffMember.name}" changed login password`,
+        details: `Staff Phone: ${staffMember.phone}`
+      });
+      this.save();
+
+      this.enqueueSqlOperations('Change Staff Password', [
+        {
+          type: 'upsert',
+          table: 'staff_members',
+          values: this.toStaffSqlRow(staffMember),
+          onConflict: 'id'
+        }
+      ]);
+      this.flushPendingSqlWrites();
+
+      return { success: true };
+    }
+
+    // 2. If signed in as management user (owner, manager, accountant)
+    const profile =
+      this.state.profiles.find((p) => p.id === this.state.currentUserId) ||
+      this.state.profiles.find((p) => p.role === this.state.currentRole) ||
+      this.state.profiles[0];
+
+    if (!profile) {
+      return { success: false, error: 'User profile not found.' };
+    }
+
+    const expectedPass = profile.password || `${profile.role}123`;
+    if (cur !== expectedPass) {
+      return { success: false, error: 'Current password is incorrect. Please try again.' };
+    }
+
+    profile.password = next;
+    this.state.profiles = this.state.profiles.map((p) =>
+      p.id === profile.id ? { ...p, password: next } : p
+    );
+
+    this.logMutation({
+      entity_type: 'user',
+      entity_id: profile.id,
+      action: 'update',
+      summary: `User "${profile.username}" (${profile.role.toUpperCase()}) changed login password`,
+      details: `Full Name: ${profile.full_name}`
+    });
+    this.save();
+
+    if (isValidUUID(profile.id)) {
+      this.enqueueSqlOperations('Change User Password', [
+        {
+          type: 'upsert',
+          table: 'profiles',
+          values: {
+            id: profile.id,
+            username: profile.username,
+            password: profile.password,
+            full_name: profile.full_name,
+            phone: profile.phone || null,
+            role: profile.role
+          },
+          onConflict: 'id'
+        }
+      ]);
+      this.flushPendingSqlWrites();
+    }
+
+    return { success: true };
+  }
+
   public addProfile(profileData: {
     full_name: string;
     username: string;

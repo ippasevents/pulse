@@ -8,6 +8,7 @@ import { UserRole } from '@/lib/types';
 import { PWAInstallButton } from './PWAInstallButton';
 import StockNotificationModal from './StockNotificationModal';
 import OwnerActivityAlertModal from './OwnerActivityAlertModal';
+import ChangePasswordModal from './ChangePasswordModal';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -17,6 +18,7 @@ export default function Navbar() {
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [unreadAuditCount, setUnreadAuditCount] = useState(0);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   useEffect(() => {
     const update = () => {
@@ -173,6 +175,28 @@ export default function Navbar() {
               </button>
             )}
 
+            {/* Change Password for ANY user */}
+            <button
+              type="button"
+              onClick={() => setIsChangePasswordOpen(true)}
+              style={{
+                background: '#334155',
+                color: '#ffffff',
+                border: '1px solid #475569',
+                borderRadius: '6px',
+                padding: '0.25rem 0.65rem',
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.3rem'
+              }}
+              title="Change your login password (പാസ്‌വേഡ് മാറ്റുക)"
+            >
+              🔑 Password
+            </button>
+
             <PWAInstallButton />
 
             {/* Logout Button */}
@@ -286,6 +310,17 @@ export default function Navbar() {
               {role.toUpperCase()}
             </span>
 
+            {/* Mobile Change Password */}
+            <button
+              type="button"
+              onClick={() => setIsChangePasswordOpen(true)}
+              className="btn btn-secondary btn-sm"
+              style={{ padding: '0.2rem 0.45rem', fontSize: '0.75rem' }}
+              title="Change Password (പാസ്‌വേഡ് മാറ്റുക)"
+            >
+              🔑
+            </button>
+
             <button
               type="button"
               onClick={handleLogout}
@@ -311,6 +346,11 @@ export default function Navbar() {
           onClose={() => setIsAuditModalOpen(false)}
         />
       )}
+
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
     </>
   );
 }

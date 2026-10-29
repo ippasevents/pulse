@@ -3,12 +3,14 @@
 import React, { useEffect, useState } from 'react';
 import { store } from '@/lib/store';
 import { UserRole, Profile, StaffMember } from '@/lib/types';
+import ChangePasswordModal from '@/components/ChangePasswordModal';
 
 export default function UsersPage() {
   const [state, setState] = useState(store.getState());
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [savedNotice, setSavedNotice] = useState('');
   const [errorNotice, setErrorNotice] = useState('');
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   // Add New User Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -236,7 +238,14 @@ export default function UsersPage() {
           </p>
         </div>
         {isOwner && (
-          <div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setIsChangePasswordOpen(true)}
+              className="btn btn-secondary"
+            >
+              🔑 Change My Password
+            </button>
             <button type="button" onClick={handleOpenAddModal} className="btn btn-primary">
               + Add New User
             </button>
@@ -970,6 +979,11 @@ export default function UsersPage() {
           </div>
         </div>
       )}
+
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
     </div>
   );
 }

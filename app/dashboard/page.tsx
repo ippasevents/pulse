@@ -16,12 +16,15 @@ import {
 import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
 import { getAuditTargetLink } from '@/components/OwnerActivityAlertModal';
 import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
+import PWAInstallBanner from '@/components/PWAInstallBanner';
+import ChangePasswordModal from '@/components/ChangePasswordModal';
 
 export default function DashboardPage() {
   const [state, setState] = useState(store.getState());
   const [isMounted, setIsMounted] = useState(false);
   const [managerSearch, setManagerSearch] = useState('');
   const [accountantSearch, setAccountantSearch] = useState('');
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
@@ -153,7 +156,26 @@ export default function DashboardPage() {
               View your salary received, pending balance receivable, and upcoming catering venue assignments.
             </p>
           </div>
+          <div>
+            <button
+              type="button"
+              onClick={() => setIsChangePasswordOpen(true)}
+              className="btn btn-secondary btn-sm"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                fontWeight: 700,
+                fontSize: '0.82rem',
+                padding: '0.45rem 0.85rem'
+              }}
+            >
+              🔑 പാസ്‌വേഡ് മാറ്റുക (Change Password)
+            </button>
+          </div>
         </div>
+
+        <PWAInstallBanner />
 
         {/* STAFF SALARY SUMMARY CARDS */}
         <div
@@ -522,6 +544,10 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+        <ChangePasswordModal
+          isOpen={isChangePasswordOpen}
+          onClose={() => setIsChangePasswordOpen(false)}
+        />
       </div>
     );
   }
@@ -571,6 +597,8 @@ export default function DashboardPage() {
             </Link>
           </div>
         </div>
+
+        <PWAInstallBanner />
 
         {/* Manager Operational KPI Cards */}
         <div className="grid-3" style={{ marginBottom: '1.5rem' }}>
@@ -828,6 +856,9 @@ export default function DashboardPage() {
             </Link>
           </div>
         </div>
+
+        {/* PWA App Install Banner */}
+        <PWAInstallBanner />
 
         {/* Accountant Top Financial KPI Cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
@@ -1204,6 +1235,9 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {/* PWA App Install Banner */}
+      <PWAInstallBanner />
 
       {/* Top Executive KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
@@ -1638,6 +1672,10 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
     </div>
   );
 }

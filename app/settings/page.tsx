@@ -5,6 +5,8 @@ import { store } from '@/lib/store';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import OwnerDatabaseExportCard from '@/components/OwnerDatabaseExportCard';
+import { PWAInstallButton } from '@/components/PWAInstallButton';
+import ChangePasswordModal from '@/components/ChangePasswordModal';
 
 export default function SettingsPage() {
   const [state, setState] = useState(store.getState());
@@ -13,6 +15,7 @@ export default function SettingsPage() {
   const [savedNotice, setSavedNotice] = useState(false);
   const [isPushingSql, setIsPushingSql] = useState(false);
   const [pushFeedback, setPushFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   useEffect(() => {
     const unsub = store.subscribe(() => {
@@ -398,6 +401,33 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* Account Security & Password */}
+          <div className="card" style={{ borderLeft: '4px solid #0f172a' }}>
+            <h2 className="card-title">🔐 Account Password &amp; Security (പാസ്‌വേഡ് മാറ്റുക)</h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+              Change the login password for your currently signed-in account. All users can independently update their own passwords.
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsChangePasswordOpen(true)}
+              className="btn btn-secondary"
+              style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+            >
+              🔑 Change Login Password (പാസ്‌വേഡ് മാറ്റുക)
+            </button>
+          </div>
+
+          {/* Progressive Web App Installation */}
+          <div className="card" style={{ borderLeft: '4px solid #e11d48' }}>
+            <h2 className="card-title">📱 App Installation (ആപ്പ് ഇൻസ്റ്റാൾ ചെയ്യുക)</h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+              Install IPPAS Pulse as a standalone application on your Android phone, iPhone / iPad, or Windows / Mac laptop for instant full-screen access, fast loading, and app-like experience.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <PWAInstallButton variant="card" showAlways={true} />
+            </div>
+          </div>
+
           {/* Reset Demo Data */}
           <div className="card">
             <h2 className="card-title">Demo State Controls</h2>
@@ -410,6 +440,11 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
     </div>
   );
 }
