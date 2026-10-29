@@ -605,7 +605,7 @@ const INITIAL_AUDIT_LOGS: AuditLogEntry[] = [
   }
 ];
 
-interface AppState {
+export interface AppState {
   _version?: number;
   settings: BusinessSettings;
   profiles: Profile[];

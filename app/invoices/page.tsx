@@ -10,10 +10,12 @@ import { getMaxDueDate, getDefaultDueDate, clampDueDate } from '@/lib/dateUtils'
 import { sendInvoiceEmailNotification } from '@/lib/emailInvoice';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
+import WhatsAppShareModal from '@/components/WhatsAppShareModal';
 
 export default function InvoicesPage() {
   const [state, setState] = useState(store.getState());
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
+  const [selectedInvoiceForWhatsApp, setSelectedInvoiceForWhatsApp] = useState<Invoice | null>(null);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isBankModalOpen, setIsBankModalOpen] = useState(false);
   const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
@@ -442,15 +444,15 @@ export default function InvoicesPage() {
                             {sendingEmailId === inv.id ? '⏳...' : '📧 Gmail'}
                           </button>
 
-                          <a
-                            href={waUrl}
-                            target="_blank"
-                            rel="noreferrer"
+                          <button
+                            type="button"
                             className="btn btn-secondary btn-sm"
-                            title="Send WhatsApp Message"
+                            style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
+                            title="Share Invoice PDF directly to Client's WhatsApp"
+                            onClick={() => setSelectedInvoiceForWhatsApp(inv)}
                           >
-                            💬 WA
-                          </a>
+                            💬 WA PDF
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -623,6 +625,14 @@ export default function InvoicesPage() {
                   }}
                 >
                   🖨️ Print A4
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
+                  onClick={() => setSelectedInvoiceForWhatsApp(selectedInvoiceForPrint)}
+                >
+                  💬 Share WA PDF
                 </button>
                 <button className="btn btn-secondary btn-sm" onClick={() => setSelectedInvoiceForPrint(null)}>
                   Close
@@ -1209,6 +1219,13 @@ export default function InvoicesPage() {
       <EditBankDetailsModal
         isOpen={isBankModalOpen}
         onClose={() => setIsBankModalOpen(false)}
+      />
+
+      {/* WhatsApp Invoice PDF Share Modal */}
+      <WhatsAppShareModal
+        invoice={selectedInvoiceForWhatsApp}
+        isOpen={Boolean(selectedInvoiceForWhatsApp)}
+        onClose={() => setSelectedInvoiceForWhatsApp(null)}
       />
     </div>
   );

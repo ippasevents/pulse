@@ -422,6 +422,42 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* WhatsApp & Client Invoice PDF Sharing Card */}
+          <div className="card" style={{ borderLeft: '4px solid #16a34a' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '1.25rem' }}>💬</span>
+                <h2 className="card-title" style={{ margin: 0, color: '#15803d' }}>
+                  WhatsApp &amp; Client PDF Sharing (വാട്സാപ്പ് സെറ്റിംഗ്സ്)
+                </h2>
+              </div>
+              <span
+                style={{
+                  background: '#dcfce7',
+                  color: '#15803d',
+                  padding: '0.2rem 0.55rem',
+                  borderRadius: '9999px',
+                  fontSize: '0.72rem',
+                  fontWeight: 700
+                }}
+              >
+                ACTIVE &bull; A4 PDF READY
+              </span>
+            </div>
+
+            <p style={{ fontSize: '0.85rem', color: '#475569', marginBottom: '0.85rem', lineHeight: 1.6 }}>
+              ഇൻവോയ്സ് പേജിൽ നിന്നും ഇവന്റ് ഡീറ്റെയിൽസ് പേജിൽ നിന്നും <strong>&ldquo;💬 WA PDF&rdquo;</strong> ബട്ടൺ ക്ലിക്ക് ചെയ്യുമ്പോൾ ഓരോ ക്ലയന്റിന്റെയും ഇൻവോയ്സ് A4 PDF ഫോർമാറ്റിൽ ഓട്ടോമാറ്റിക്കായി തയ്യാറാക്കപ്പെടുന്നു.
+            </p>
+
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '0.75rem 0.95rem', fontSize: '0.8rem', color: '#166534', lineHeight: 1.5 }}>
+              <div style={{ fontWeight: 700, marginBottom: '0.25rem' }}>📱 പ്രവർത്തനം (How it Works):</div>
+              <ul style={{ paddingLeft: '1.2rem', margin: 0 }}>
+                <li><strong>സ്മാർട്ട്ഫോണുകളിൽ (Android / iPhone)</strong>: വെബ് ഷെയർ (Web Share API) വഴി വാട്സാപ്പിലേക്ക് ക്ലിക്ക് ചെയ്യുമ്പോൾ ഇൻവോയ്സ് PDF ഫയൽ ഓട്ടോമാറ്റിക് ആയി ചാറ്റിൽ അറ്റാച്ച് ആകുന്നു.</li>
+                <li><strong>കമ്പ്യൂട്ടർ / ലാപ്ടോപ്പിൽ</strong>: ഫയൽ സിസ്റ്റത്തിൽ ഉടൻ ഡൗൺലോഡ് ആവുകയും വാട്സാപ്പ് വെബ് ചാറ്റ് തുറക്കുകയും ചെയ്യുന്നു (ചാറ്റിലെ 📎 Attachment ബട്ടൺ വഴി സെൻഡ് ചെയ്യാം).</li>
+              </ul>
+            </div>
+          </div>
+
           {/* Owner-Only Database Reset & Clear Data Controls */}
           <OwnerDatabaseResetCard
             role={role}

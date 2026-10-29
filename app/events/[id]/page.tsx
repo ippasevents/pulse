@@ -9,6 +9,7 @@ import { downloadElementAsPdf } from '@/lib/downloadPdf';
 import { sendInvoiceEmailNotification } from '@/lib/emailInvoice';
 import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
 import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
+import WhatsAppShareModal from '@/components/WhatsAppShareModal';
 
 export default function EventDetailPage() {
   const params = useParams();
@@ -23,6 +24,7 @@ export default function EventDetailPage() {
   const [isPrintQuoteOpen, setIsPrintQuoteOpen] = useState(false);
   const [isPrintStockOpen, setIsPrintStockOpen] = useState(false);
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
+  const [selectedInvoiceForWhatsApp, setSelectedInvoiceForWhatsApp] = useState<Invoice | null>(null);
 
   // Edit details form state
   const [editForm, setEditForm] = useState({
@@ -1310,6 +1312,16 @@ export default function EventDetailPage() {
                                   🖨️ A4 PDF
                                 </button>
 
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
+                                  title="Share Invoice PDF directly to Client's WhatsApp"
+                                  onClick={() => setSelectedInvoiceForWhatsApp(inv)}
+                                >
+                                  💬 WA PDF
+                                </button>
+
                                 {isFinance && (
                                   <>
                                     <button
@@ -2218,6 +2230,14 @@ export default function EventDetailPage() {
                 >
                   🖨️ Print A4
                 </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
+                  onClick={() => setSelectedInvoiceForWhatsApp(selectedInvoiceForPrint)}
+                >
+                  💬 Share WA PDF
+                </button>
                 <button className="btn btn-secondary btn-sm" onClick={() => setSelectedInvoiceForPrint(null)}>
                   Close
                 </button>
@@ -2637,6 +2657,13 @@ export default function EventDetailPage() {
           </div>
         </div>
       )}
+
+      {/* WhatsApp Invoice PDF Share Modal */}
+      <WhatsAppShareModal
+        invoice={selectedInvoiceForWhatsApp}
+        isOpen={Boolean(selectedInvoiceForWhatsApp)}
+        onClose={() => setSelectedInvoiceForWhatsApp(null)}
+      />
     </div>
   );
 }
