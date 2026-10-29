@@ -5,7 +5,7 @@ import { usePWAInstall } from './usePWAInstall';
 
 interface PWAInstallButtonProps {
   className?: string;
-  variant?: 'nav' | 'banner' | 'card' | 'bottom';
+  variant?: 'nav' | 'banner' | 'card' | 'bottom' | 'login';
   showAlways?: boolean;
 }
 
@@ -14,12 +14,12 @@ export function PWAInstallButton({
   variant = 'nav',
   showAlways = false
 }: PWAInstallButtonProps) {
-  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
+  const { isInstallable, isInstalled, install } = usePWAInstall();
   const [showModal, setShowModal] = useState(false);
 
   // If already installed and running standalone, hide unless forced
   if (isInstalled && !showAlways) {
-    if (variant === 'card' || variant === 'banner') {
+    if (variant === 'card') {
       return (
         <div
           style={{
@@ -54,6 +54,47 @@ export function PWAInstallButton({
   };
 
   const renderButton = () => {
+    if (variant === 'bottom') {
+      return (
+        <button
+          type="button"
+          onClick={handleClick}
+          className={`mobile-nav-item ${className}`}
+          style={{ color: '#e11d48', fontWeight: 700 }}
+        >
+          <span className="mobile-nav-icon">📲</span>
+          <span className="mobile-nav-label">Install App</span>
+        </button>
+      );
+    }
+
+    if (variant === 'login') {
+      return (
+        <button
+          type="button"
+          onClick={handleClick}
+          className={`btn btn-secondary ${className}`}
+          style={{
+            width: '100%',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+            fontWeight: 700,
+            fontSize: '0.88rem',
+            padding: '0.65rem 1rem',
+            borderRadius: '8px',
+            background: '#fff1f2',
+            color: '#be123c',
+            border: '1px solid #fecdd3'
+          }}
+        >
+          <span style={{ fontSize: '1.05rem' }}>📲</span>
+          <span>Install IPPAS Pulse App</span>
+        </button>
+      );
+    }
+
     if (variant === 'banner') {
       return (
         <button
@@ -105,19 +146,20 @@ export function PWAInstallButton({
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          gap: '0.35rem',
-          fontSize: '0.75rem',
-          padding: '0.3rem 0.65rem',
+          gap: '0.3rem',
+          fontSize: '0.73rem',
+          padding: '0.28rem 0.6rem',
           borderRadius: '6px',
           fontWeight: 700,
           background: '#e11d48',
           color: '#ffffff',
+          whiteSpace: 'nowrap',
           boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
         }}
         title="Install IPPAS Pulse as an app on your phone or laptop"
       >
         <span>📲</span>
-        <span>Install App</span>
+        <span>Install</span>
       </button>
     );
   };

@@ -10,21 +10,17 @@ export function PWAInstallBanner() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const isDismissed =
-        localStorage.getItem('ippas_pwa_banner_dismissed') === 'true' ||
-        localStorage.getItem('ippas_pwa_installed') === 'true' ||
-        sessionStorage.getItem('ippas_pwa_banner_dismissed') === 'true';
+      const isDismissed = sessionStorage.getItem('ippas_pwa_banner_dismissed') === 'true';
       if (isDismissed) setDismissed(true);
     }
   }, []);
 
-  // Strict check: If already installed or dismissed by user, do NOT render the banner at all
+  // Hide if already running as installed standalone app or dismissed for current session
   if (isInstalled || dismissed) return null;
 
   const handleDismiss = () => {
     setDismissed(true);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('ippas_pwa_banner_dismissed', 'true');
       sessionStorage.setItem('ippas_pwa_banner_dismissed', 'true');
     }
   };

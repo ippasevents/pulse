@@ -52,6 +52,7 @@ export default function MobileBottomNav() {
     if (isStaff) {
       return [
         { label: 'Duty & Salary', href: '/dashboard', icon: '📍' },
+        { label: 'Install App', href: '#install', icon: '📲', isInstall: true },
         { label: 'Password', href: '#password', icon: '🔑', isPassword: true },
         { label: 'Logout', href: '#logout', icon: '🚪', isLogout: true }
       ];
@@ -125,6 +126,10 @@ export default function MobileBottomNav() {
                 <span className="mobile-nav-label">{item.label}</span>
               </button>
             );
+          }
+
+          if (item.isInstall) {
+            return <PWAInstallButton key="install-btn" variant="bottom" />;
           }
 
           if (item.isPassword) {

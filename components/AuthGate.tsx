@@ -6,6 +6,7 @@ import { store } from '@/lib/store';
 import { UserRole } from '@/lib/types';
 import Navbar from '@/components/Navbar';
 import MobileBottomNav from '@/components/MobileBottomNav';
+import { PWAInstallButton } from '@/components/PWAInstallButton';
 import DashboardPage from '@/app/dashboard/page';
 
 function isRouteAllowed(role: UserRole, pathname: string): boolean {
@@ -352,6 +353,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
               {isLoading ? 'Authenticating...' : 'Sign In'}
             </button>
           </form>
+
+          <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
+            <PWAInstallButton variant="login" />
+          </div>
         </div>
       </div>
     );
