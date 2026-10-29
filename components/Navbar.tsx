@@ -20,11 +20,14 @@ export default function Navbar() {
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
+  const [isDbConnected, setIsDbConnected] = useState(false);
+
   useEffect(() => {
     const update = () => {
       const state = store.getState();
       setRole(state.currentRole);
       setCurrentUser(store.getCurrentUser());
+      setIsDbConnected(store.isSqlConnected());
       const lowCount = state.ingredients.filter((i) => i.stock_qty <= i.low_stock_level).length;
       setLowStockCount(lowCount);
       setUnreadAuditCount(
@@ -91,6 +94,68 @@ export default function Navbar() {
             >
               {role.toUpperCase().replace('_', ' ')}
             </span>
+
+            {/* Live Database Status Indicator */}
+            {isDbConnected ? (
+              <Link
+                href="/settings"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  background: '#064e3b',
+                  color: '#6ee7b7',
+                  border: '1px solid #059669',
+                  borderRadius: '9999px',
+                  padding: '0.12rem 0.55rem',
+                  fontSize: '0.7rem',
+                  fontWeight: 700,
+                  textDecoration: 'none',
+                  letterSpacing: '0.02em'
+                }}
+                title="Live connected to Supabase PostgreSQL database. Click to view settings."
+              >
+                <span
+                  style={{
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    background: '#10b981',
+                    boxShadow: '0 0 6px #10b981'
+                  }}
+                />
+                <span>LIVE DB</span>
+              </Link>
+            ) : (
+              <Link
+                href="/settings"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  background: '#334155',
+                  color: '#cbd5e1',
+                  border: '1px solid #475569',
+                  borderRadius: '9999px',
+                  padding: '0.12rem 0.55rem',
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  textDecoration: 'none'
+                }}
+                title="Running in local mode. Click to connect Supabase."
+              >
+                <span
+                  style={{
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    background: '#f59e0b'
+                  }}
+                />
+                <span>LOCAL DB</span>
+              </Link>
+            )}
+
             <span style={{ opacity: 0.7, fontSize: '0.75rem' }}>
               {role === 'super_admin' && '• Master System Control (Stealth Admin)'}
               {role === 'owner' && '• Full Executive Access'}
@@ -303,6 +368,29 @@ export default function Navbar() {
               >
                 🔔 {lowStockCount > 0 ? lowStockCount : ''}
               </button>
+            )}
+
+            {isDbConnected && (
+              <Link
+                href="/settings"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.2rem',
+                  background: '#064e3b',
+                  color: '#6ee7b7',
+                  border: '1px solid #059669',
+                  borderRadius: '9999px',
+                  padding: '0.12rem 0.4rem',
+                  fontSize: '0.62rem',
+                  fontWeight: 700,
+                  textDecoration: 'none'
+                }}
+                title="Live Supabase Database Connected"
+              >
+                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#10b981' }} />
+                <span>LIVE</span>
+              </Link>
             )}
 
             <span
