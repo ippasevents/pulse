@@ -36,6 +36,8 @@ export interface EventRecord {
   guest_count: number;
   status: EventStatus;
   notes?: string;
+  payment_terms?: string;
+  stock_deducted?: boolean;
   created_at: string;
 }
 
