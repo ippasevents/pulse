@@ -26,7 +26,7 @@ export default function OwnerResetDatabaseModal({
 
   const state = store.getState();
   const currentUser = store.getCurrentUser();
-  const isOwner = state.currentRole === 'owner';
+  const isOwner = state.currentRole === 'owner' || state.currentRole === 'super_admin';
 
   const handleClose = () => {
     if (!isSubmitting) {

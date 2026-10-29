@@ -61,16 +61,19 @@ export default function OwnerActivityAlertModal({
     const syncAuditState = () => {
       const s = store.getState();
       setRole(s.currentRole);
-      if (s.currentRole !== 'owner') {
+      if (s.currentRole !== 'owner' && s.currentRole !== 'super_admin') {
         setUnreadAlerts([]);
         setRecentNonOwnerLogs([]);
         setLiveToastEntry(null);
         return;
       }
 
-      const unread = store.getUnreadOwnerAlerts();
+      const isSuper = s.currentRole === 'super_admin';
+      const unread = isSuper
+        ? (s.auditLogs || []).filter((l) => !l.is_read_by_owner && l.actor_role !== 'super_admin')
+        : store.getUnreadOwnerAlerts();
       const nonOwner = (s.auditLogs || [])
-        .filter((l) => l.actor_role !== 'owner')
+        .filter((l) => isSuper ? true : (l.actor_role !== 'owner' && l.actor_role !== 'super_admin'))
         .slice(0, 30);
 
       setUnreadAlerts(unread);
@@ -95,8 +98,8 @@ export default function OwnerActivityAlertModal({
     return unsub;
   }, []);
 
-  // Strict Owner-only visibility: render nothing for Manager, Accountant, or Staff
-  if (role !== 'owner') {
+  // Strict Owner & Super Admin visibility: render nothing for Manager, Accountant, or Staff
+  if (role !== 'owner' && role !== 'super_admin') {
     return null;
   }
 

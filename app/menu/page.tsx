@@ -34,7 +34,7 @@ export default function MenuPage() {
   }, []);
 
   const role = state.currentRole;
-  const canEditMenu = role === 'owner' || role === 'manager';
+  const canEditMenu = role === 'owner' || role === 'manager' || role === 'super_admin';
 
   const categories = ['all', 'Starter', 'Main', 'Dessert', 'Drink', 'Bread'];
 

@@ -55,9 +55,9 @@ export default function StaffPage() {
   };
 
   const role = state.currentRole;
-  const canEditStaff = role === 'owner' || role === 'manager';
-  const canManageSalary = role === 'owner' || role === 'manager' || role === 'accountant';
-  const canMarkAttendance = role === 'owner' || role === 'manager' || role === 'accountant';
+  const canEditStaff = role === 'owner' || role === 'manager' || role === 'super_admin';
+  const canManageSalary = role === 'owner' || role === 'manager' || role === 'accountant' || role === 'super_admin';
+  const canMarkAttendance = role === 'owner' || role === 'manager' || role === 'accountant' || role === 'super_admin';
 
   // Summaries across all staff
   const staffRows = state.staff.map((st) => ({

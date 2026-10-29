@@ -1195,12 +1195,12 @@ export default function DashboardPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.25rem' }}>
             <span
               className="role-tag-badge"
-              style={{ background: '#e11d48', color: '#fff', fontSize: '0.75rem' }}
+              style={{ background: role === 'super_admin' ? '#4f46e5' : '#e11d48', color: '#fff', fontSize: '0.75rem' }}
             >
-              OWNER EXECUTIVE DASHBOARD
+              {role === 'super_admin' ? 'SUPER ADMIN MASTER DASHBOARD' : 'OWNER EXECUTIVE DASHBOARD'}
             </span>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Logged in as: <strong>{currentUser?.full_name}</strong>
+              Logged in as: <strong>{currentUser?.full_name}</strong> {role === 'super_admin' && '(Stealth Mode)'}
             </span>
           </div>
           <h1 className="page-title">Executive Overview &amp; Control</h1>
@@ -1454,7 +1454,25 @@ export default function DashboardPage() {
       {/* Role Access Information */}
       <div className="card">
         <h2 className="card-title">🛡️ System Modules &amp; Permissions</h2>
-        <div className="grid-3">
+        <div className={role === 'super_admin' ? 'grid-4' : 'grid-3'}>
+          {role === 'super_admin' && (
+            <div
+              style={{
+                padding: '0.85rem',
+                border: '1.5px solid #4f46e5',
+                borderRadius: '8px',
+                background: '#eef2ff'
+              }}
+            >
+              <div style={{ fontWeight: 700, color: '#4f46e5', marginBottom: '0.25rem' }}>
+                ⚡ Super Admin (Stealth Mode)
+              </div>
+              <p style={{ fontSize: '0.8rem', color: '#3730a3' }}>
+                Supreme system control. Invisible to Owner, Manager, and Staff. Full authority over user credentials, records, and database audits.
+              </p>
+            </div>
+          )}
+
           <div
             style={{
               padding: '0.85rem',

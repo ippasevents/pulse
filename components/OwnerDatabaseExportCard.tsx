@@ -23,8 +23,8 @@ export default function OwnerDatabaseExportCard({
     null
   );
 
-  // Strictly visible & operable by Owner ONLY
-  if (role !== 'owner') {
+  // Strictly visible & operable by Owner & Super Admin ONLY
+  if (role !== 'owner' && role !== 'super_admin') {
     return null;
   }
 

@@ -28,7 +28,11 @@ export default function Navbar() {
       const lowCount = state.ingredients.filter((i) => i.stock_qty <= i.low_stock_level).length;
       setLowStockCount(lowCount);
       setUnreadAuditCount(
-        state.currentRole === 'owner' ? store.getUnreadOwnerAlerts().length : 0
+        state.currentRole === 'owner'
+          ? store.getUnreadOwnerAlerts().length
+          : state.currentRole === 'super_admin'
+          ? (state.auditLogs || []).filter((l) => !l.is_read_by_owner && l.actor_role !== 'super_admin').length
+          : 0
       );
     };
 
@@ -46,21 +50,22 @@ export default function Navbar() {
   // Visible nav items strictly filtered per role
   const allNavItems = [
     { label: 'Duty & Salary', href: '/dashboard', roles: ['staff'] },
-    { label: 'Dashboard', href: '/dashboard', roles: ['owner', 'manager', 'accountant'] },
-    { label: 'Events & Quotes', href: '/events', roles: ['owner', 'manager', 'accountant'] },
-    { label: 'Clients', href: '/clients', roles: ['owner', 'manager', 'accountant'] },
-    { label: 'Menu & Recipes', href: '/menu', roles: ['owner', 'manager'] },
-    { label: 'Stock & Inventory', href: '/stock', roles: ['owner', 'manager'] },
-    { label: 'Staff & Salary', href: '/staff', roles: ['owner', 'manager', 'accountant'] },
-    { label: 'Invoices & Billing', href: '/invoices', roles: ['owner', 'accountant'] },
-    { label: 'Activity & Audit', href: '/activity', roles: ['owner'] },
-    { label: 'Users & Passwords', href: '/users', roles: ['owner'] },
-    { label: 'Settings', href: '/settings', roles: ['owner'] }
+    { label: 'Dashboard', href: '/dashboard', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
+    { label: 'Events & Quotes', href: '/events', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
+    { label: 'Clients', href: '/clients', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
+    { label: 'Menu & Recipes', href: '/menu', roles: ['super_admin', 'owner', 'manager'] },
+    { label: 'Stock & Inventory', href: '/stock', roles: ['super_admin', 'owner', 'manager'] },
+    { label: 'Staff & Salary', href: '/staff', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
+    { label: 'Invoices & Billing', href: '/invoices', roles: ['super_admin', 'owner', 'accountant'] },
+    { label: 'Activity & Audit', href: '/activity', roles: ['super_admin', 'owner'] },
+    { label: 'Users & Passwords', href: '/users', roles: ['super_admin', 'owner'] },
+    { label: 'Settings', href: '/settings', roles: ['super_admin', 'owner'] }
   ];
 
   const visibleNavItems = allNavItems.filter((item) => item.roles.includes(role));
 
   const roleColors: Record<UserRole, string> = {
+    super_admin: '#4f46e5',
     owner: '#e11d48',
     manager: '#2563eb',
     accountant: '#059669',
@@ -84,9 +89,10 @@ export default function Navbar() {
                 color: '#ffffff'
               }}
             >
-              {role.toUpperCase()}
+              {role.toUpperCase().replace('_', ' ')}
             </span>
             <span style={{ opacity: 0.7, fontSize: '0.75rem' }}>
+              {role === 'super_admin' && '• Master System Control (Stealth Admin)'}
               {role === 'owner' && '• Full Executive Access'}
               {role === 'manager' && '• Events & Operations Schedule'}
               {role === 'accountant' && '• Financial Billing & Invoicing'}
@@ -95,8 +101,8 @@ export default function Navbar() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            {/* Owner-Only User & Database Change Alerts */}
-            {role === 'owner' && (
+            {/* Activity Alerts for Owner and Super Admin */}
+            {(role === 'owner' || role === 'super_admin') && (
               <button
                 type="button"
                 onClick={() => setIsAuditModalOpen(true)}
@@ -114,7 +120,7 @@ export default function Navbar() {
                   gap: '0.4rem',
                   transition: 'all 0.15s ease'
                 }}
-                title="Owner Only: User Login ID Updates & Database Change Alerts"
+                title="Activity & Database Alerts"
               >
                 <span>🛡️</span>
                 <span>Activity Alerts</span>
@@ -256,7 +262,7 @@ export default function Navbar() {
 
           {/* Mobile Top Bar */}
           <div className="mobile-only" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            {role === 'owner' && (
+            {(role === 'owner' || role === 'super_admin') && (
               <button
                 type="button"
                 onClick={() => setIsAuditModalOpen(true)}
@@ -272,7 +278,7 @@ export default function Navbar() {
                   gap: '0.25rem',
                   fontWeight: 800
                 }}
-                title="Owner Activity & Database Alerts"
+                title="Activity & Database Alerts"
               >
                 🛡️ {unreadAuditCount > 0 ? unreadAuditCount : ''}
               </button>
@@ -340,7 +346,7 @@ export default function Navbar() {
         <StockNotificationModal isOpen={isNotifOpen} onClose={() => setIsNotifOpen(false)} />
       )}
 
-      {role === 'owner' && (
+      {(role === 'owner' || role === 'super_admin') && (
         <OwnerActivityAlertModal
           isOpen={isAuditModalOpen}
           onClose={() => setIsAuditModalOpen(false)}

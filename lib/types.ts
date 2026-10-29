@@ -1,4 +1,4 @@
-export type UserRole = 'owner' | 'manager' | 'accountant' | 'staff';
+export type UserRole = 'super_admin' | 'owner' | 'manager' | 'accountant' | 'staff';
 export type EventStatus = 'inquiry' | 'quoted' | 'confirmed' | 'completed' | 'cancelled';
 export type InvoiceStatus = 'draft' | 'sent' | 'partially_paid' | 'paid' | 'void';
 export type PricingType = 'per_guest' | 'per_kg';

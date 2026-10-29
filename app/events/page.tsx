@@ -52,8 +52,8 @@ export default function EventsPage() {
   }, []);
 
   const role = state.currentRole;
-  const canEdit = role === 'owner' || role === 'manager';
-  const isFinance = role === 'owner' || role === 'accountant';
+  const canEdit = role === 'owner' || role === 'manager' || role === 'super_admin';
+  const isFinance = role === 'owner' || role === 'accountant' || role === 'super_admin';
 
   const filteredEvents = state.events.filter((evt) => {
     const matchesStatus = statusFilter === 'all' || evt.status === statusFilter;

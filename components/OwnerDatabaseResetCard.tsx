@@ -14,7 +14,7 @@ export default function OwnerDatabaseResetCard({
   onResetComplete
 }: OwnerDatabaseResetCardProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const isOwner = role === 'owner';
+  const isOwner = role === 'owner' || role === 'super_admin';
 
   // If user is NOT the owner, display a strictly locked security badge with no reset buttons
   if (!isOwner) {

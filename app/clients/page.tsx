@@ -29,7 +29,7 @@ export default function ClientsPage() {
   }, []);
 
   const role = state.currentRole;
-  const canEdit = role === 'owner' || role === 'manager';
+  const canEdit = role === 'owner' || role === 'manager' || role === 'super_admin';
 
   const filteredClients = state.clients.filter(
     (c) =>

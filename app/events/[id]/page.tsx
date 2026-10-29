@@ -149,10 +149,10 @@ export default function EventDetailPage() {
   }
 
   const role = state.currentRole;
-  const canEditOps = role === 'owner' || role === 'manager';
-  const isFinance = role === 'owner' || role === 'accountant';
+  const canEditOps = role === 'owner' || role === 'manager' || role === 'super_admin';
+  const isFinance = role === 'owner' || role === 'accountant' || role === 'super_admin';
   const canEditQuote = canEditOps || isFinance;
-  const auditSummary = role === 'owner' ? store.getEventAuditSummary(event.id) : null;
+  const auditSummary = (role === 'owner' || role === 'super_admin') ? store.getEventAuditSummary(event.id) : null;
 
   const { menuTotal, extrasTotal, grandTotal } = store.getEventTotal(event.id);
   const displayTotal = isFinance ? grandTotal : menuTotal;
@@ -710,8 +710,8 @@ export default function EventDetailPage() {
         </div>
       )}
 
-      {/* Owner-Only Event & Quotation Login ID Attribution Banner */}
-      {role === 'owner' && (auditSummary?.eventAudit || auditSummary?.quoteAudit) && (
+      {/* Owner & Super Admin Event & Quotation Login ID Attribution Banner */}
+      {(role === 'owner' || role === 'super_admin') && (auditSummary?.eventAudit || auditSummary?.quoteAudit) && (
         <div
           className="no-print"
           style={{
@@ -1355,7 +1355,7 @@ export default function EventDetailPage() {
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                               {staffMember?.phone}
                             </div>
-                            {role === 'owner' && (
+                            {(role === 'owner' || role === 'super_admin') && (
                               <OwnerAuditBadge
                                 role={role}
                                 entry={store.getEntityAudit(sh.id, ['shift'])}

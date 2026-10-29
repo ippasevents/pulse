@@ -29,7 +29,7 @@ export default function SettingsPage() {
   }, []);
 
   const role = state.currentRole;
-  const isOwner = role === 'owner';
+  const isOwner = role === 'owner' || role === 'super_admin';
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();

@@ -27,7 +27,11 @@ export default function MobileBottomNav() {
       const lowCount = state.ingredients.filter((i) => i.stock_qty <= i.low_stock_level).length;
       setLowStockCount(lowCount);
       setUnreadAuditCount(
-        state.currentRole === 'owner' ? store.getUnreadOwnerAlerts().length : 0
+        state.currentRole === 'owner'
+          ? store.getUnreadOwnerAlerts().length
+          : state.currentRole === 'super_admin'
+          ? (state.auditLogs || []).filter((l) => !l.is_read_by_owner && l.actor_role !== 'super_admin').length
+          : 0
       );
     };
 
@@ -73,7 +77,7 @@ export default function MobileBottomNav() {
       ];
     }
 
-    // Owner (all)
+    // Owner & Super Admin (all)
     return [
       { label: 'Dashboard', href: '/dashboard', icon: '📊' },
       { label: 'Events', href: '/events', icon: '📅' },
@@ -86,21 +90,21 @@ export default function MobileBottomNav() {
   const navItems = getNavItems();
 
   const allMoreLinks = [
-    { label: 'Events & Quotes', href: '/events', icon: '📅', desc: 'Banquet bookings & quotations', roles: ['owner', 'manager', 'accountant'] },
-    { label: 'Clients Directory', href: '/clients', icon: '👥', desc: 'Customer profiles & past history', roles: ['owner', 'manager', 'accountant'] },
-    { label: 'Menu & Recipes', href: '/menu', icon: '🍽️', desc: 'Dishes (per guest & per kg)', roles: ['owner', 'manager'] },
-    { label: 'Stock & Inventory', href: '/stock', icon: '📦', desc: 'Pantry ingredients & stock purchases', roles: ['owner', 'manager'] },
-    { label: 'Staff & Salary Management', href: '/staff', icon: '🧑‍🍳', desc: 'Crew wages, paid salary & pending balances', roles: ['owner', 'manager', 'accountant'] },
-    { label: 'Invoices & Receipts', href: '/invoices', icon: '🧾', desc: 'Billing, A4 prints & payments', roles: ['owner', 'accountant'] },
+    { label: 'Events & Quotes', href: '/events', icon: '📅', desc: 'Banquet bookings & quotations', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
+    { label: 'Clients Directory', href: '/clients', icon: '👥', desc: 'Customer profiles & past history', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
+    { label: 'Menu & Recipes', href: '/menu', icon: '🍽️', desc: 'Dishes (per guest & per kg)', roles: ['super_admin', 'owner', 'manager'] },
+    { label: 'Stock & Inventory', href: '/stock', icon: '📦', desc: 'Pantry ingredients & stock purchases', roles: ['super_admin', 'owner', 'manager'] },
+    { label: 'Staff & Salary Management', href: '/staff', icon: '🧑‍🍳', desc: 'Crew wages, paid salary & pending balances', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
+    { label: 'Invoices & Receipts', href: '/invoices', icon: '🧾', desc: 'Billing, A4 prints & payments', roles: ['super_admin', 'owner', 'accountant'] },
     {
       label: unreadAuditCount > 0 ? `Activity & Audit (${unreadAuditCount} New)` : 'Activity & Audit Log',
       href: '/activity',
       icon: '🕵️',
       desc: 'Track user login IDs & live database updates',
-      roles: ['owner']
+      roles: ['super_admin', 'owner']
     },
-    { label: 'User Roles & Passwords', href: '/users', icon: '🛡️', desc: 'System user accounts & passwords', roles: ['owner'] },
-    { label: 'Business Settings', href: '/settings', icon: '⚙️', desc: 'Bank details & payment terms', roles: ['owner'] }
+    { label: 'User Roles & Passwords', href: '/users', icon: '🛡️', desc: 'System user accounts & passwords', roles: ['super_admin', 'owner'] },
+    { label: 'Business Settings', href: '/settings', icon: '⚙️', desc: 'Bank details & payment terms', roles: ['super_admin', 'owner'] }
   ];
 
   const visibleMoreLinks = allMoreLinks.filter((l) => l.roles.includes(role));

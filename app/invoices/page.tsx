@@ -58,7 +58,7 @@ export default function InvoicesPage() {
   }, []);
 
   const role = state.currentRole;
-  const isFinance = role === 'owner' || role === 'accountant';
+  const isFinance = role === 'owner' || role === 'accountant' || role === 'super_admin';
   const canViewInvoices = isFinance;
 
   if (!canViewInvoices) {

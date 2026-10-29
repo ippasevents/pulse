@@ -27,6 +27,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
   const currentRole: UserRole = store.getState().currentRole;
 
   const roleColors: Record<UserRole, string> = {
+    super_admin: '#4f46e5',
     owner: '#e11d48',
     manager: '#2563eb',
     accountant: '#059669',

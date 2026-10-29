@@ -34,6 +34,15 @@ export function getActorRoleStyle(actorRole: UserRole | 'database'): {
   label: string;
 } {
   switch (actorRole) {
+    case 'super_admin':
+      return {
+        bg: '#eef2ff',
+        text: '#312e81',
+        border: '#c7d2fe',
+        badgeBg: '#4f46e5',
+        badgeText: '#ffffff',
+        label: 'SUPER ADMIN'
+      };
     case 'manager':
       return {
         bg: '#eff6ff',
@@ -91,8 +100,14 @@ export default function OwnerAuditBadge({
 }: OwnerAuditBadgeProps) {
   const activeRole = role ?? store.getState().currentRole;
 
-  // Strictly visible ONLY to Owner
-  if (activeRole !== 'owner' || !entry) {
+  // Strictly visible ONLY to Owner and Super Admin
+  const isPrivileged = activeRole === 'owner' || activeRole === 'super_admin';
+  if (!isPrivileged || !entry) {
+    return null;
+  }
+
+  // CRITICAL STEALTH: Super Admin activities must NEVER be visible to Owner!
+  if (activeRole === 'owner' && entry.actor_role === 'super_admin') {
     return null;
   }
 

@@ -79,7 +79,7 @@ export default function StockPage() {
   }, []);
 
   const role = state.currentRole;
-  const canManageStock = role === 'owner' || role === 'manager';
+  const canManageStock = role === 'owner' || role === 'manager' || role === 'super_admin';
 
   // Calculations for Inventory
   const filteredIngredients = state.ingredients.filter((i) =>

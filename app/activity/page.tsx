@@ -23,30 +23,35 @@ export default function OwnerActivityAuditPage() {
   }, []);
 
   useEffect(() => {
-    if (state.currentRole !== 'owner') {
+    if (state.currentRole !== 'owner' && state.currentRole !== 'super_admin') {
       router.replace('/dashboard');
     }
   }, [state.currentRole, router]);
 
-  // Strict Owner-Only Visibility
-  if (state.currentRole !== 'owner') {
+  // Strict Owner & Super Admin Visibility
+  if (state.currentRole !== 'owner' && state.currentRole !== 'super_admin') {
     return null;
   }
 
-  const allLogs = state.auditLogs || [];
+  const isSuperAdmin = state.currentRole === 'super_admin';
+  const rawLogs = state.auditLogs || [];
+  // Super Admin activities are completely invisible to Owner
+  const allLogs = isSuperAdmin ? rawLogs : rawLogs.filter((l) => l.actor_role !== 'super_admin');
   const unreadAlerts = store.getUnreadOwnerAlerts();
   const managerCount = allLogs.filter((l) => l.actor_role === 'manager').length;
   const accountantCount = allLogs.filter((l) => l.actor_role === 'accountant').length;
   const dbDirectCount = allLogs.filter((l) => l.source === 'database' || l.actor_role === 'database').length;
+  const superAdminCount = rawLogs.filter((l) => l.actor_role === 'super_admin').length;
 
   const filteredLogs = allLogs.filter((log) => {
-    if (actorFilter === 'all_non_owner' && log.actor_role === 'owner') return false;
-    if (actorFilter === 'unread' && (log.is_read_by_owner || log.actor_role === 'owner')) return false;
+    if (actorFilter === 'all_non_owner' && (log.actor_role === 'owner' || log.actor_role === 'super_admin')) return false;
+    if (actorFilter === 'unread' && (log.is_read_by_owner || log.actor_role === 'owner' || log.actor_role === 'super_admin')) return false;
     if (actorFilter === 'manager' && log.actor_role !== 'manager') return false;
     if (actorFilter === 'accountant' && log.actor_role !== 'accountant') return false;
     if (actorFilter === 'staff' && log.actor_role !== 'staff') return false;
     if (actorFilter === 'database' && log.source !== 'database' && log.actor_role !== 'database') return false;
     if (actorFilter === 'owner' && log.actor_role !== 'owner') return false;
+    if (actorFilter === 'super_admin' && log.actor_role !== 'super_admin') return false;
 
     if (moduleFilter !== 'all') {
       if (moduleFilter === 'events_quotes' && log.entity_type !== 'event' && log.entity_type !== 'quotation') {
@@ -90,12 +95,14 @@ export default function OwnerActivityAuditPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
             <span
               className="role-tag-badge"
-              style={{ background: '#e11d48', color: '#ffffff', fontSize: '0.72rem' }}
+              style={{ background: isSuperAdmin ? '#4f46e5' : '#e11d48', color: '#ffffff', fontSize: '0.72rem' }}
             >
-              OWNER EXCLUSIVE MODULE
+              {isSuperAdmin ? 'SUPER ADMIN MASTER AUDIT' : 'OWNER EXCLUSIVE MODULE'}
             </span>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Hidden from Manager, Accountant &amp; Staff logins
+              {isSuperAdmin
+                ? 'Master audit view — your actions remain completely invisible to Owner'
+                : 'Hidden from Manager, Accountant & Staff logins'}
             </span>
           </div>
           <h1 className="page-title">User Activity &amp; Database Audit Log</h1>
@@ -193,6 +200,9 @@ export default function OwnerActivityAuditPage() {
               <option value="all_non_owner">All Non-Owner &amp; DB Changes</option>
               <option value="unread">Unread Alerts Only ({unreadAlerts.length})</option>
               <option value="all">All Users (Including Owner)</option>
+              {isSuperAdmin && (
+                <option value="super_admin">Super Admin Logins ({superAdminCount})</option>
+              )}
               <option value="manager">Manager Logins Only</option>
               <option value="accountant">Accountant Logins Only</option>
               <option value="staff">Staff Logins Only</option>
@@ -257,7 +267,7 @@ export default function OwnerActivityAuditPage() {
                 filteredLogs.map((log) => {
                   const meta = getActorRoleStyle(log.actor_role);
                   const target = getAuditTargetLink(log);
-                  const isUnread = !log.is_read_by_owner && log.actor_role !== 'owner';
+                  const isUnread = !log.is_read_by_owner && log.actor_role !== 'owner' && log.actor_role !== 'super_admin';
 
                   return (
                     <tr
