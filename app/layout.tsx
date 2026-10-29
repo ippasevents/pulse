@@ -20,9 +20,9 @@ export const metadata: Metadata = {
     title: 'IPPAS Pulse'
   },
   icons: {
-    icon: '/favicon.png?v=2',
-    shortcut: '/favicon.png?v=2',
-    apple: '/apple-touch-icon.png'
+    icon: '/favicon.png?v=3',
+    shortcut: '/favicon.png?v=3',
+    apple: '/apple-touch-icon.png?v=3'
   },
   openGraph: {
     title: 'IPPAS Pulse - Catering Manager',

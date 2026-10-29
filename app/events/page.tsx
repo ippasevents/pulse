@@ -23,39 +23,66 @@ export default function EventsPage() {
     venue: '',
     guest_count: 100,
     status: 'inquiry' as EventStatus,
+    payment_terms: '50% Advance on Booking, Balance on Event Day',
     notes: ''
   });
 
-  useEffect(() => {
-    const unsub = store.subscribe(() => {
-      setState(store.getState());
-    });
-    return unsub;
-  }, []);
-
-  const role = state.currentRole;
-  const canEdit = role === 'owner' || role === 'manager';
-  const isFinance = role === 'owner' || role === 'accountant';
-
-  const filteredEvents = state.events.filter((evt) => {
-    const matchesStatus = statusFilter === 'all' || evt.status === statusFilter;
-    const client = state.clients.find((c) => c.id === evt.client_id);
-    const matchesSearch =
-      evt.title.toLowerCase().includes(search.toLowerCase()) ||
-      (evt.venue && evt.venue.toLowerCase().includes(search.toLowerCase())) ||
-      (client && client.name.toLowerCase().includes(search.toLowerCase()));
-    return matchesStatus && matchesSearch;
+  // Client Selection / Inline Creation State
+  const [isNewClientMode, setIsNewClientMode] = useState(false);
+  const [newClientData, setNewClientData] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    company: '',
+    notes: ''
   });
+
+  const paymentTermsPresets = [
+    '50% Advance on Booking, Balance on Event Day',
+    '30% Advance, 50% Pre-Event, 20% on Event Completion',
+    '100% Full Payment on Confirmation',
+    'Payment strictly due within 3 days after function'
+  ];
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.client_id || !formData.title) {
-      setFormError('Please fill in an event title and select a client.');
+
+    if (!formData.title.trim()) {
+      setFormError('Please enter an event title.');
       return;
     }
+
+    let targetClientId = formData.client_id;
+
+    if (isNewClientMode) {
+      if (!newClientData.name.trim()) {
+        setFormError('Please enter the client full name.');
+        return;
+      }
+      const createdClient = store.addClient({
+        name: newClientData.name.trim(),
+        phone: newClientData.phone.trim() || undefined,
+        email: newClientData.email.trim() || undefined,
+        company: newClientData.company.trim() || undefined,
+        notes: newClientData.notes.trim() || undefined
+      });
+      targetClientId = createdClient.id;
+    } else {
+      if (!targetClientId) {
+        setFormError('Please select a client from the list or switch to "+ Add New Client".');
+        return;
+      }
+    }
+
     setFormError(null);
-    store.addEvent(formData);
+    store.addEvent({
+      ...formData,
+      client_id: targetClientId
+    });
+
     setIsModalOpen(false);
+    setIsNewClientMode(false);
+    setNewClientData({ name: '', phone: '', email: '', company: '', notes: '' });
     // Reset form
     setFormData({
       client_id: state.clients[0]?.id || '',
@@ -66,6 +93,7 @@ export default function EventsPage() {
       venue: '',
       guest_count: 100,
       status: 'inquiry',
+      payment_terms: '50% Advance on Booking, Balance on Event Day',
       notes: ''
     });
   };
@@ -264,24 +292,102 @@ export default function EventsPage() {
                   {formError}
                 </div>
               )}
-              <div className="form-group">
-                <label className="form-label">Client *</label>
-                <select
-                  className="form-control"
-                  value={formData.client_id}
-                  onChange={(e) => setFormData({ ...formData, client_id: e.target.value })}
-                  required
-                >
-                  <option value="">Select a client...</option>
-                  {state.clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} {c.company ? `(${c.company})` : ''}
-                    </option>
-                  ))}
-                </select>
-                <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                  Need a new client? Add them in the <Link href="/clients" style={{ color: 'var(--primary)', textDecoration: 'underline' }}>Clients</Link> tab.
+              {/* Client Selection: Existing List vs Inline New Client */}
+              <div style={{ marginBottom: '1.15rem' }}>
+                <div style={{ display: 'flex', gap: '0.4rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem', marginBottom: '0.75rem' }}>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${!isNewClientMode ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                    onClick={() => {
+                      setIsNewClientMode(false);
+                      setFormError(null);
+                    }}
+                  >
+                    👥 Select Existing Client ({state.clients.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${isNewClientMode ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                    onClick={() => {
+                      setIsNewClientMode(true);
+                      setFormError(null);
+                    }}
+                  >
+                    ➕ Register New Client
+                  </button>
                 </div>
+
+                {!isNewClientMode ? (
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Client Name *</label>
+                    <select
+                      className="form-control"
+                      value={formData.client_id}
+                      onChange={(e) => setFormData({ ...formData, client_id: e.target.value })}
+                      required={!isNewClientMode}
+                    >
+                      <option value="">Select an existing client...</option>
+                      {state.clients.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} {c.company ? `(${c.company})` : ''} {c.phone ? `• ${c.phone}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.85rem' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a', marginBottom: '0.6rem' }}>
+                      ✨ New Client Details (ഓൺ-ദി-സ്പോട്ട് രജിസ്ട്രേഷൻ)
+                    </div>
+                    <div className="grid-2">
+                      <div className="form-group">
+                        <label className="form-label" style={{ fontSize: '0.78rem' }}>Client Full Name *</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. Dr. Mathew Philip"
+                          value={newClientData.name}
+                          onChange={(e) => setNewClientData({ ...newClientData, name: e.target.value })}
+                          required={isNewClientMode}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" style={{ fontSize: '0.78rem' }}>Phone Number (WhatsApp)</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. +91 98470 12345"
+                          value={newClientData.phone}
+                          onChange={(e) => setNewClientData({ ...newClientData, phone: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid-2">
+                      <div className="form-group">
+                        <label className="form-label" style={{ fontSize: '0.78rem' }}>Company / Organization (Optional)</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. Apollo Hospital / Malabar Builders"
+                          value={newClientData.company}
+                          onChange={(e) => setNewClientData({ ...newClientData, company: e.target.value })}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" style={{ fontSize: '0.78rem' }}>Email Address (Optional)</label>
+                        <input
+                          type="email"
+                          className="form-control"
+                          placeholder="e.g. client@example.com"
+                          value={newClientData.email}
+                          onChange={(e) => setNewClientData({ ...newClientData, email: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
@@ -350,6 +456,30 @@ export default function EventsPage() {
                   value={formData.venue}
                   onChange={(e) => setFormData({ ...formData, venue: e.target.value })}
                 />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Payment Terms (പേയ്മെന്റ് വ്യവസ്ഥകൾ)</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. 50% Advance on Booking, Balance on Event Day"
+                  value={formData.payment_terms}
+                  onChange={(e) => setFormData({ ...formData, payment_terms: e.target.value })}
+                />
+                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                  {paymentTermsPresets.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '0.72rem', padding: '0.2rem 0.45rem' }}
+                      onClick={() => setFormData({ ...formData, payment_terms: preset })}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="form-group">

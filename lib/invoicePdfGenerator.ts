@@ -194,17 +194,57 @@ export async function generateInvoicePdfBlob(
         </div>
       </div>
 
-      <!-- Payment History Summary -->
+      <!-- Payment History Table from the Beginning -->
       <div style="margin-bottom: 22px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px 14px; background: #f8fafc;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px;">
           <span style="font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.5px; color: #0f172a;">
-            💳 Payment History & Balance
+            💳 Payment History & Advance Details (ആദ്യം മുതലുള്ള പേയ്മെന്റുകൾ)
           </span>
-          <span style="font-size: 0.75rem; color: #64748b;">
+          <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">
             ${invPayments.length} installment${invPayments.length === 1 ? '' : 's'} recorded
           </span>
         </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 6px;">
+
+        ${
+          invPayments.length > 0
+            ? `
+          <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-bottom: 8px;">
+            <thead>
+              <tr style="border-bottom: 1px solid #cbd5e1; color: #475569; text-align: left;">
+                <th style="padding: 4px 6px;">Date</th>
+                <th style="padding: 4px 6px;">Payment Method</th>
+                <th style="padding: 4px 6px;">Destination Account</th>
+                <th style="padding: 4px 6px;">Note</th>
+                <th style="padding: 4px 6px; text-align: right;">Amount Paid</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invPayments
+                .map((p) => {
+                  const ch = store.inferPaymentChannel(p.method, p.payment_channel);
+                  const acc = store.resolveDestinationAccount(p);
+                  return `
+                    <tr style="border-bottom: 1px solid #e2e8f0;">
+                      <td style="padding: 5px 6px; font-weight: 600;">${new Date(p.paid_at).toLocaleDateString('en-GB')}</td>
+                      <td style="padding: 5px 6px; text-transform: capitalize;">${p.method} (${ch === 'cash' ? 'Cash' : 'Bank'})</td>
+                      <td style="padding: 5px 6px; color: #0f172a;">${acc}</td>
+                      <td style="padding: 5px 6px; color: #64748b;">${p.note || '—'}</td>
+                      <td style="padding: 5px 6px; text-align: right; font-weight: 700; color: #16a34a;">₹${Number(p.amount).toLocaleString('en-IN')}</td>
+                    </tr>
+                  `;
+                })
+                .join('')}
+            </tbody>
+          </table>
+          `
+            : `
+          <div style="font-size: 0.8rem; color: #64748b; padding: 4px 0 8px 0;">
+            No advance or installment payments recorded yet.
+          </div>
+          `
+        }
+
+        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 6px; border-top: 1px dashed #cbd5e1;">
           <div style="font-size: 0.85rem;">
             <span style="color: #475569;">Total Paid so far: </span>
             <strong style="color: #16a34a;">₹${paymentsForThis.toLocaleString('en-IN')}</strong>
@@ -229,8 +269,8 @@ export async function generateInvoicePdfBlob(
           <div>Account No: <strong>${state.settings.account_number || '9876-5432-1000'}</strong> &bull; IFSC: <strong>${state.settings.ifsc_code || 'FDRL0001234'}</strong></div>
           <div>UPI ID: <strong>${state.settings.upi_id || 'ippas@upi'}</strong></div>
           ${
-            state.settings.payment_terms
-              ? `<div style="margin-top: 4px; color: #64748b; font-size: 0.72rem;">Terms: ${state.settings.payment_terms}</div>`
+            (evt?.payment_terms || state.settings.payment_terms)
+              ? `<div style="margin-top: 4px; color: #64748b; font-size: 0.72rem;"><strong>Payment Terms:</strong> ${evt?.payment_terms || state.settings.payment_terms}</div>`
               : ''
           }
         </div>

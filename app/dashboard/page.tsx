@@ -1205,24 +1205,12 @@ export default function DashboardPage() {
           </div>
           <h1 className="page-title">Executive Overview &amp; Control</h1>
           <p className="page-subtitle">
-            Executive control and overview across events, sales, invoices, menus, staff, and live user/database audit tracking.
+            Executive control and overview across events, sales, invoices, menus, and staff operations.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <Link href="/events" className="btn btn-primary">
             + New Event Inquiry
-          </Link>
-          <Link
-            href="/activity"
-            className="btn btn-secondary"
-            style={{
-              background: unreadOwnerAlerts.length > 0 ? '#fff1f2' : undefined,
-              borderColor: unreadOwnerAlerts.length > 0 ? '#fda4af' : undefined,
-              color: unreadOwnerAlerts.length > 0 ? '#be123c' : undefined,
-              fontWeight: 700
-            }}
-          >
-            🕵️ Activity &amp; Audit {unreadOwnerAlerts.length > 0 ? `(${unreadOwnerAlerts.length} New)` : ''}
           </Link>
           <Link href="/invoices" className="btn btn-secondary">
             🧾 Invoices
@@ -1437,7 +1425,6 @@ export default function DashboardPage() {
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                         📍 {evt.venue || 'Venue TBD'}
                       </div>
-                      <OwnerAuditBadge role={role} entry={latestEvtAudit} prefixLabel="Updated by" />
                     </td>
                     <td>
                       <div>{client?.name}</div>

@@ -3173,6 +3173,95 @@ class DataStore {
     return newEvent;
   }
 
+  public ensureEventInvoice(eventId: string, discount: number = 0): Invoice {
+    const existing = this.state.invoices.find((i) => i.event_id === eventId);
+    if (existing) return existing;
+
+    const evt = this.state.events.find((e) => e.id === eventId);
+    const totals = this.getEventTotal(eventId);
+    const subtotal = totals.grandTotal > 0 ? totals.grandTotal : 0;
+    const netAmount = Math.max(0, subtotal - discount);
+
+    const newInv = this.addInvoice({
+      event_id: eventId,
+      kind: 'final',
+      subtotal,
+      discount,
+      amount: netAmount,
+      due_date: evt?.event_date || new Date().toISOString().split('T')[0],
+      status: 'draft',
+      notes: evt?.payment_terms || this.state.settings.payment_terms || 'Advance on booking, balance on event completion.'
+    });
+
+    return newInv;
+  }
+
+  public syncInvoiceWithEventTotal(eventId: string): Invoice | null {
+    const existing = this.state.invoices.find((i) => i.event_id === eventId);
+    if (!existing) return null;
+
+    const totals = this.getEventTotal(eventId);
+    const subtotal = totals.grandTotal;
+    const discount = existing.discount || 0;
+    const netAmount = Math.max(0, subtotal - discount);
+
+    this.updateInvoice(existing.id, {
+      subtotal,
+      discount,
+      amount: netAmount
+    });
+
+    return existing;
+  }
+
+  public deductStockForCompletedEvent(eventId: string): { success: boolean; deductedCount: number } {
+    const evt = this.state.events.find((e) => e.id === eventId);
+    if (!evt || evt.stock_deducted) {
+      return { success: false, deductedCount: 0 };
+    }
+
+    const est = this.getEventStockEstimation(eventId);
+    if (est.items.length === 0) {
+      evt.stock_deducted = true;
+      this.save();
+      return { success: true, deductedCount: 0 };
+    }
+
+    const updatedIngs: Ingredient[] = [];
+    est.items.forEach((item) => {
+      const ing = this.state.ingredients.find((i) => i.id === item.ingredientId);
+      if (ing) {
+        ing.stock_qty = Math.max(0, Number((ing.stock_qty - item.qtyNeeded).toFixed(2)));
+        updatedIngs.push(ing);
+      }
+    });
+
+    evt.stock_deducted = true;
+    this.logMutation({
+      entity_type: 'stock',
+      entity_id: eventId,
+      parent_event_id: eventId,
+      action: 'update',
+      summary: `Deducted kitchen ingredients for completed event "${evt.title}" (${evt.guest_count} guests)`
+    });
+    this.save();
+
+    const ops: SqlOperation[] = [];
+    for (const ing of updatedIngs.filter((x) => isValidUUID(x.id))) {
+      ops.push({
+        type: 'upsert',
+        table: 'ingredients',
+        values: this.toIngredientSqlRow(ing),
+        onConflict: 'id'
+      });
+    }
+    if (ops.length > 0) {
+      this.enqueueSqlOperations('Deduct Event Stock on Completion', ops);
+    }
+
+    return { success: true, deductedCount: updatedIngs.length };
+  }
+
   public updateEvent(id: string, updates: Partial<EventRecord>) {
     let updatedEvt: EventRecord | undefined;
     this.state.events = this.state.events.map((e) => {
@@ -3180,6 +3269,17 @@ class DataStore {
       updatedEvt = { ...e, ...updates };
       return updatedEvt;
     });
+
+    // Automatic actions based on event status transitions
+    if (updates.status === 'confirmed') {
+      const hasInvoice = this.state.invoices.some((i) => i.event_id === id);
+      if (!hasInvoice) {
+        this.ensureEventInvoice(id);
+      }
+    } else if (updates.status === 'completed' && !updatedEvt?.stock_deducted) {
+      this.deductStockForCompletedEvent(id);
+    }
+
     this.logMutation({
       entity_type: 'event',
       entity_id: id,
@@ -3750,15 +3850,34 @@ class DataStore {
     const updatedIngredients: Ingredient[] = [];
     if (updateWarehouseStock) {
       purchaseItems.forEach((pi) => {
+        let ing: Ingredient | undefined;
         if (pi.ingredient_id) {
-          const ing = this.state.ingredients.find((i) => i.id === pi.ingredient_id);
-          if (ing) {
-            ing.stock_qty = Number((ing.stock_qty + pi.quantity).toFixed(2));
-            if (pi.unit_price > 0) {
-              ing.cost_per_unit = pi.unit_price;
-            }
-            updatedIngredients.push(ing);
+          ing = this.state.ingredients.find((i) => i.id === pi.ingredient_id);
+        }
+        if (!ing && pi.item_name) {
+          const cleanName = pi.item_name.trim().toLowerCase();
+          ing = this.state.ingredients.find((i) => i.name.trim().toLowerCase() === cleanName);
+        }
+
+        if (ing) {
+          ing.stock_qty = Number((ing.stock_qty + pi.quantity).toFixed(2));
+          if (pi.unit_price > 0) {
+            ing.cost_per_unit = pi.unit_price;
           }
+          pi.ingredient_id = ing.id;
+          updatedIngredients.push(ing);
+        } else if (pi.item_name && pi.item_name.trim()) {
+          const newIng: Ingredient = {
+            id: generateUUID(),
+            name: pi.item_name.trim(),
+            unit: pi.unit || 'kg',
+            cost_per_unit: pi.unit_price || 0,
+            stock_qty: pi.quantity,
+            low_stock_level: 10
+          };
+          this.state.ingredients.push(newIng);
+          pi.ingredient_id = newIng.id;
+          updatedIngredients.push(newIng);
         }
       });
     }
