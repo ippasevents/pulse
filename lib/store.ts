@@ -802,6 +802,61 @@ class DataStore {
     return getSupabaseConfig();
   }
 
+  private async probeSupabaseOnce(): Promise<boolean> {
+    if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && !navigator.onLine) {
+      return false;
+    }
+
+    // Path 1: Server API (/api/db?mode=ping)
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 7000);
+      const res = await fetch('/api/db?mode=ping', {
+        cache: 'no-store',
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data?.configured && data?.online !== false) {
+          this.serverDbConfigured = true;
+          return true;
+        }
+      }
+    } catch {
+      // Continue to Path 2 (direct browser Supabase client)
+    }
+
+    // Path 2: Direct browser Supabase client (handles Shared App URL / Cloud Run / mobile WebViews where /api/db may be proxy-gated)
+    try {
+      const client = supabase || (await ensureSupabaseOnlineConnection());
+      if (client) {
+        const { error } = await client.from('business_settings').select('id').limit(1);
+        if (!error || !this.isTransientNetworkError(error)) {
+          return true;
+        }
+      }
+    } catch {
+      // Both paths failed
+    }
+
+    return false;
+  }
+
+  private async probeSupabaseOnline(): Promise<boolean> {
+    if (await this.probeSupabaseOnce()) {
+      return true;
+    }
+    if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && !navigator.onLine) {
+      return false;
+    }
+    // Single quick retry (1.2s) to prevent false-positive disconnect screens during mobile 4G/5G TLS warmup
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    return this.probeSupabaseOnce();
+  }
+
   public async checkOnlineHeartbeat(syncDataToo: boolean = false): Promise<boolean> {
     if (typeof window === 'undefined') return true;
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -812,48 +867,27 @@ class DataStore {
       return false;
     }
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch('/api/db?mode=ping', {
-        cache: 'no-store',
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-
-      if (!res.ok) {
-        this.isInternetConnected = false;
-        this.notify();
-        return false;
-      }
-
-      const data = await res.json();
-      if (!data?.configured || data?.online === false) {
-        this.isInternetConnected = false;
-        this.notify();
-        return false;
-      }
-
-      const wasDisconnected = !this.isInternetConnected || !this.hasInitialRemoteLoaded;
-      this.serverDbConfigured = true;
-      this.isInternetConnected = true;
-
-      if (!supabase || !isSupabaseConfigured) {
-        await ensureSupabaseOnlineConnection();
-      }
-      this.setupRealtimeSubscription(false);
-
-      if (wasDisconnected || syncDataToo) {
-        await this.syncFromSupabase(true);
-      } else {
-        this.notify();
-      }
-      return true;
-    } catch {
+    const reachable = await this.probeSupabaseOnline();
+    if (!reachable) {
       this.isInternetConnected = false;
       this.notify();
       return false;
     }
+
+    const wasDisconnected = !this.isInternetConnected || !this.hasInitialRemoteLoaded;
+    this.isInternetConnected = true;
+
+    if (!supabase || !isSupabaseConfigured) {
+      await ensureSupabaseOnlineConnection();
+    }
+    this.setupRealtimeSubscription(false);
+
+    if (wasDisconnected || syncDataToo) {
+      await this.syncFromSupabase(true);
+    } else {
+      this.notify();
+    }
+    return true;
   }
 
   public async connectLiveSupabase(url: string, anonKey: string): Promise<{ success: boolean; error?: string }> {
@@ -897,28 +931,21 @@ class DataStore {
     }
 
     try {
-      // 1. Verify live server + Supabase reachability first
-      const pingRes = await fetch('/api/db?mode=ping', { cache: 'no-store' });
-      if (!pingRes.ok) {
-        this.isInternetConnected = false;
-        this.notify();
-        return;
-      }
-      const pingData = await pingRes.json();
-      if (!pingData?.configured || pingData?.online === false) {
-        this.isInternetConnected = false;
-        this.notify();
-        return;
-      }
-
-      this.serverDbConfigured = true;
-      this.isInternetConnected = true;
-
-      // 2. Ensure browser Realtime Supabase client is initialized
+      // 1. Ensure browser Realtime Supabase client is initialized
       const client = await ensureSupabaseOnlineConnection();
       if (client) {
         this.serverDbConfigured = true;
       }
+
+      // 2. Verify live Supabase reachability (via server API or direct Supabase client)
+      const reachable = await this.probeSupabaseOnline();
+      if (!reachable) {
+        this.isInternetConnected = false;
+        this.notify();
+        return;
+      }
+
+      this.isInternetConnected = true;
 
       // 3. Setup Realtime WebSocket and pull fresh data directly from online Supabase
       this.clearDbError();
@@ -1106,6 +1133,16 @@ class DataStore {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ operations })
       });
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        // Proxy auth / HTML response on shared link: allow fallback to direct Supabase client
+        return {
+          configured: false,
+          success: false,
+          networkFailed: false,
+          error: `Server API returned HTTP ${res.status}`
+        };
+      }
       const data = await res.json();
       if (data?.configured) {
         this.serverDbConfigured = true;
@@ -1116,6 +1153,15 @@ class DataStore {
         error: data?.error
       };
     } catch (err: any) {
+      // If browser Supabase client is available, allow fallback before declaring network failure
+      if (isSupabaseConfigured && supabase) {
+        return {
+          configured: false,
+          success: false,
+          networkFailed: false,
+          error: err?.message || 'Server API unreachable'
+        };
+      }
       return {
         configured: this.serverDbConfigured,
         success: false,
@@ -1863,40 +1909,49 @@ class DataStore {
       let activityLogsRes: any;
 
       // Primary live read via server /api/db (uses SUPABASE_SERVICE_ROLE_KEY with no-store)
-      const apiRes = await fetch('/api/db', { cache: 'no-store' });
-      const apiJson = await apiRes.json();
-
-      if (!apiRes.ok && apiJson?.online === false) {
-        this.isInternetConnected = false;
-        this.isSyncingState = false;
-        this.notify();
-        return;
+      let loadedViaServerApi = false;
+      try {
+        const apiRes = await fetch('/api/db', { cache: 'no-store' });
+        const contentType = apiRes.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const apiJson = await apiRes.json();
+          if (!apiRes.ok && apiJson?.online === false && (!isSupabaseConfigured || !supabase)) {
+            this.isInternetConnected = false;
+            this.isSyncingState = false;
+            this.notify();
+            return;
+          }
+          if (apiJson?.configured && apiJson?.results) {
+            this.serverDbConfigured = true;
+            this.isInternetConnected = true;
+            loadedViaServerApi = true;
+            ({
+              settingsRes,
+              profilesRes,
+              clientsRes,
+              ingredientsRes,
+              menuItemsRes,
+              recipesRes,
+              eventsRes,
+              eventItemsRes,
+              eventExtrasRes,
+              staffRes,
+              shiftsRes,
+              salaryRecordsRes,
+              invoicesRes,
+              paymentsRes,
+              purchasesRes,
+              purchaseItemsRes,
+              purchasePaymentsRes,
+              activityLogsRes
+            } = apiJson.results);
+          }
+        }
+      } catch {
+        // Fall through to direct browser Supabase client if /api/db fails or is proxy-gated
       }
 
-      if (apiJson?.configured && apiJson?.results) {
-        this.serverDbConfigured = true;
-        this.isInternetConnected = true;
-        ({
-          settingsRes,
-          profilesRes,
-          clientsRes,
-          ingredientsRes,
-          menuItemsRes,
-          recipesRes,
-          eventsRes,
-          eventItemsRes,
-          eventExtrasRes,
-          staffRes,
-          shiftsRes,
-          salaryRecordsRes,
-          invoicesRes,
-          paymentsRes,
-          purchasesRes,
-          purchaseItemsRes,
-          purchasePaymentsRes,
-          activityLogsRes
-        } = apiJson.results);
-      } else if (isSupabaseConfigured && supabase) {
+      if (!loadedViaServerApi && isSupabaseConfigured && supabase) {
         [
           settingsRes,
           profilesRes,
@@ -1937,7 +1992,7 @@ class DataStore {
           supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(400)
         ]);
         this.isInternetConnected = true;
-      } else {
+      } else if (!loadedViaServerApi) {
         this.isInternetConnected = false;
         this.isSyncingState = false;
         this.notify();

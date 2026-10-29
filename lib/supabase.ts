@@ -93,15 +93,23 @@ export async function ensureSupabaseOnlineConnection(): Promise<SupabaseClient |
     return null;
   }
 
+  const existingClient = getSupabaseClient();
+  const currentCfg = getSupabaseConfig();
+
   if (typeof window !== 'undefined') {
     try {
       const res = await fetch('/api/db/config', { cache: 'no-store' });
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
         if (data?.configured && data?.url && data?.anonKey) {
           const cleanServerUrl = cleanUrl(data.url);
           const cleanServerKey = String(data.anonKey).trim();
-          if (!supabase || runtimeUrl !== cleanServerUrl || runtimeAnonKey !== cleanServerKey) {
+          if (
+            !supabase ||
+            currentCfg.url !== cleanServerUrl ||
+            currentCfg.anonKey !== cleanServerKey
+          ) {
             const resSetup = setLiveSupabaseCredentials(cleanServerUrl, cleanServerKey);
             if (resSetup.success && resSetup.client) {
               return resSetup.client;
@@ -111,11 +119,11 @@ export async function ensureSupabaseOnlineConnection(): Promise<SupabaseClient |
         }
       }
     } catch {
-      return null;
+      // Fall back to built-in NEXT_PUBLIC_SUPABASE client if /api/db/config is unreachable or proxy-blocked
     }
   }
 
-  return getSupabaseClient();
+  return existingClient;
 }
 
 export function setLiveSupabaseCredentials(
