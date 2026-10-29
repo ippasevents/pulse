@@ -2885,42 +2885,176 @@ class DataStore {
     return { success: true };
   }
 
-  public resetToDefault() {
+  /**
+   * Strictly verify if the current user is an Owner and that the provided
+   * password matches their active account password.
+   */
+  public verifyOwnerPassword(password: string): { success: boolean; error?: string } {
+    // 1. Strict check: Current role must be 'owner'
+    if (this.state.currentRole !== 'owner') {
+      return {
+        success: false,
+        error: 'അനുമതിയില്ല: ഡാറ്റാബേസ് റീസെറ്റ് ചെയ്യാനുള്ള പൂർണ്ണ അധികാരം ഓണർക്ക് (Owner) മാത്രമാണ് ഉള്ളത്. മാനേജർമാർക്കോ മറ്റ് സ്റ്റാഫുകൾക്കോ ഇതിന് അനുമതിയില്ല. (Permission denied: Only the Owner can reset or clear the database.)'
+      };
+    }
+
+    // 2. Find the active owner profile
+    const ownerProfile =
+      this.state.profiles.find((p) => p.id === this.state.currentUserId && p.role === 'owner') ||
+      this.state.profiles.find((p) => p.role === 'owner') ||
+      this.state.profiles[0];
+
+    if (!ownerProfile || ownerProfile.role !== 'owner') {
+      return {
+        success: false,
+        error: 'സിസ്റ്റത്തിൽ ഓണർ പ്രൊഫൈൽ കണ്ടെത്താനായില്ല. (Owner profile could not be located.)'
+      };
+    }
+
+    const trimmedEntered = (password || '').trim();
+    if (!trimmedEntered) {
+      return {
+        success: false,
+        error: 'സ്ഥിരീകരണത്തിനായി നിങ്ങളുടെ ഓണർ പാസ്‌വേഡ് നൽകുക. (Please enter Owner password.)'
+      };
+    }
+
+    const expectedPassword = (ownerProfile.password || 'owner123').trim();
+    if (trimmedEntered !== expectedPassword) {
+      return {
+        success: false,
+        error: 'നൽകിയ ഓണർ പാസ്‌വേഡ് തെറ്റാണ്! ഡാറ്റാബേസ് റീസെറ്റ് റദ്ദാക്കി. (Incorrect Owner password. Database reset aborted.)'
+      };
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Secure database reset / clear requiring Owner role and current Owner password.
+   * Supports 'restore_defaults' (seeded sample state) or 'clear_all_data' (wipes transactions, keeping core config).
+   */
+  public resetDatabaseSecure(options: {
+    password: string;
+    mode?: 'restore_defaults' | 'clear_all_data';
+  }): { success: boolean; error?: string } {
+    const verification = this.verifyOwnerPassword(options.password);
+    if (!verification.success) {
+      return verification;
+    }
+
     const keepAuth = this.state.isAuthenticated;
-    const keepRole = this.state.currentRole;
     const keepUserId = this.state.currentUserId;
+    const activeOwner =
+      this.state.profiles.find((p) => p.id === keepUserId && p.role === 'owner') ||
+      this.state.profiles.find((p) => p.role === 'owner') ||
+      this.state.profiles[0];
+
+    const mode = options.mode || 'restore_defaults';
 
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORAGE_KEY);
     }
 
-    this.state = {
-      settings: INITIAL_SETTINGS,
-      profiles: INITIAL_PROFILES,
-      currentRole: keepAuth ? keepRole : 'owner',
-      currentUserId: keepAuth ? keepUserId : INITIAL_PROFILES[0].id,
-      isAuthenticated: keepAuth,
-      clients: INITIAL_CLIENTS,
-      ingredients: INITIAL_INGREDIENTS,
-      menuItems: INITIAL_MENU_ITEMS,
-      recipes: INITIAL_RECIPES,
-      events: INITIAL_EVENTS,
-      eventItems: INITIAL_EVENT_ITEMS,
-      eventExtras: INITIAL_EVENT_EXTRAS,
-      staff: INITIAL_STAFF,
-      shifts: INITIAL_SHIFTS,
-      staffSalaryRecords: INITIAL_STAFF_SALARY_RECORDS,
-      invoices: INITIAL_INVOICES,
-      payments: INITIAL_PAYMENTS,
-      stockPurchases: INITIAL_STOCK_PURCHASES,
-      stockPurchasePayments: INITIAL_STOCK_PURCHASE_PAYMENTS,
-      auditLogs: INITIAL_AUDIT_LOGS
-    };
+    // Preserve updated owner credentials so the owner does not lose access or custom password
+    const preservedProfiles = INITIAL_PROFILES.map((p) => {
+      if (p.role === 'owner' && activeOwner) {
+        return {
+          ...p,
+          id: activeOwner.id || p.id,
+          username: activeOwner.username || p.username,
+          password: activeOwner.password || p.password,
+          full_name: activeOwner.full_name || p.full_name,
+          phone: activeOwner.phone || p.phone
+        };
+      }
+      return p;
+    });
+
+    if (mode === 'clear_all_data') {
+      // Clear all transactional and event records, keep basic configuration intact
+      this.state = {
+        settings: this.state.settings || INITIAL_SETTINGS,
+        profiles: preservedProfiles,
+        currentRole: 'owner',
+        currentUserId: activeOwner?.id || preservedProfiles[0].id,
+        isAuthenticated: keepAuth,
+        clients: [],
+        ingredients: INITIAL_INGREDIENTS,
+        menuItems: INITIAL_MENU_ITEMS,
+        recipes: INITIAL_RECIPES,
+        events: [],
+        eventItems: [],
+        eventExtras: [],
+        staff: INITIAL_STAFF,
+        shifts: [],
+        staffSalaryRecords: [],
+        invoices: [],
+        payments: [],
+        stockPurchases: [],
+        stockPurchasePayments: [],
+        auditLogs: []
+      };
+    } else {
+      // Restore initial clean defaults (sample events, menu, clients)
+      this.state = {
+        settings: INITIAL_SETTINGS,
+        profiles: preservedProfiles,
+        currentRole: 'owner',
+        currentUserId: activeOwner?.id || preservedProfiles[0].id,
+        isAuthenticated: keepAuth,
+        clients: INITIAL_CLIENTS,
+        ingredients: INITIAL_INGREDIENTS,
+        menuItems: INITIAL_MENU_ITEMS,
+        recipes: INITIAL_RECIPES,
+        events: INITIAL_EVENTS,
+        eventItems: INITIAL_EVENT_ITEMS,
+        eventExtras: INITIAL_EVENT_EXTRAS,
+        staff: INITIAL_STAFF,
+        shifts: INITIAL_SHIFTS,
+        staffSalaryRecords: INITIAL_STAFF_SALARY_RECORDS,
+        invoices: INITIAL_INVOICES,
+        payments: INITIAL_PAYMENTS,
+        stockPurchases: INITIAL_STOCK_PURCHASES,
+        stockPurchasePayments: INITIAL_STOCK_PURCHASE_PAYMENTS,
+        auditLogs: INITIAL_AUDIT_LOGS
+      };
+    }
+
+    this.logMutation({
+      entity_type: 'settings',
+      entity_id: mode === 'clear_all_data' ? 'db-clear' : 'db-reset',
+      action: 'delete',
+      summary:
+        mode === 'clear_all_data'
+          ? 'Owner re-authenticated with password and wiped all transactional records'
+          : 'Owner re-authenticated with password and reset database to clean default state',
+      details: `Action authorized by Owner (${activeOwner?.username || 'owner'}). Password re-authentication verified.`
+    });
+
     this.save();
 
     if (this.isSqlConnected()) {
       this.pushAllToSupabase();
     }
+
+    return { success: true };
+  }
+
+  public resetToDefault(ownerPassword?: string): { success: boolean; error?: string } {
+    if (this.state.currentRole !== 'owner') {
+      return {
+        success: false,
+        error: 'അനുമതിയില്ല: ഡാറ്റാബേസ് റീസെറ്റ് ചെയ്യാനുള്ള അനുമതി ഓണർക്ക് (Owner) മാത്രമാണ് ഉള്ളത്.'
+      };
+    }
+    if (ownerPassword) {
+      return this.resetDatabaseSecure({ password: ownerPassword, mode: 'restore_defaults' });
+    }
+    return {
+      success: false,
+      error: 'ഡാറ്റാബേസ് റീസെറ്റ് ചെയ്യുന്നതിനായി ഓണറുടെ പാസ്‌വേഡ് നിർബന്ധമാണ്. (Owner password is required to reset database.)'
+    };
   }
 
   // Clients

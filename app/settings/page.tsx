@@ -7,6 +7,7 @@ import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import OwnerDatabaseExportCard from '@/components/OwnerDatabaseExportCard';
 import { PWAInstallButton } from '@/components/PWAInstallButton';
 import ChangePasswordModal from '@/components/ChangePasswordModal';
+import OwnerDatabaseResetCard from '@/components/OwnerDatabaseResetCard';
 
 export default function SettingsPage() {
   const [state, setState] = useState(store.getState());
@@ -35,13 +36,6 @@ export default function SettingsPage() {
     store.updateSettings(form);
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 3000);
-  };
-
-  const handleReset = () => {
-    if (confirm('Reset all demo state to original seeded database state? Any modifications will be restored to initial sample records.')) {
-      store.resetToDefault();
-      setForm(store.getState().settings);
-    }
   };
 
   const handlePushAllToSql = async () => {
@@ -428,16 +422,11 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Reset Demo Data */}
-          <div className="card">
-            <h2 className="card-title">Demo State Controls</h2>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-              Reset sample events, client records, inventory pantry counts, and staff rosters back to default initial values.
-            </p>
-            <button type="button" className="btn btn-secondary" onClick={handleReset}>
-              ↺ Reset Sample Database
-            </button>
-          </div>
+          {/* Owner-Only Database Reset & Clear Data Controls */}
+          <OwnerDatabaseResetCard
+            role={role}
+            onResetComplete={() => setForm(store.getState().settings)}
+          />
         </div>
       </div>
 
