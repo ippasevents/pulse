@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { store } from '@/lib/store';
-import { isSupabaseConfigured } from '@/lib/supabase';
+import { isSupabaseConfigured, getSupabaseConfig, testSupabaseLiveConnection } from '@/lib/supabase';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import OwnerDatabaseExportCard from '@/components/OwnerDatabaseExportCard';
 import { PWAInstallButton } from '@/components/PWAInstallButton';
@@ -17,6 +17,15 @@ export default function SettingsPage() {
   const [isPushingSql, setIsPushingSql] = useState(false);
   const [pushFeedback, setPushFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+
+  // Live Supabase Connection State
+  const initialSupabaseConfig = getSupabaseConfig();
+  const [supabaseUrlInput, setSupabaseUrlInput] = useState(initialSupabaseConfig.url || '');
+  const [supabaseKeyInput, setSupabaseKeyInput] = useState(initialSupabaseConfig.anonKey || '');
+  const [isConnectingSupabase, setIsConnectingSupabase] = useState(false);
+  const [isTestingSupabase, setIsTestingSupabase] = useState(false);
+  const [connectFeedback, setConnectFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [copiedSchemaNotice, setCopiedSchemaNotice] = useState(false);
 
   useEffect(() => {
     const unsub = store.subscribe(() => {
@@ -54,6 +63,67 @@ export default function SettingsPage() {
         type: 'error',
         message: res.error || 'Could not push records to SQL database.'
       });
+    }
+  };
+
+  const handleConnectSupabase = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabaseUrlInput.trim() || !supabaseKeyInput.trim()) {
+      setConnectFeedback({ type: 'error', message: 'Please provide both Supabase Project URL and Anon/Public API Key.' });
+      return;
+    }
+    setIsConnectingSupabase(true);
+    setConnectFeedback(null);
+    const res = await store.connectLiveSupabase(supabaseUrlInput.trim(), supabaseKeyInput.trim());
+    setIsConnectingSupabase(false);
+    if (res.success) {
+      setConnectFeedback({
+        type: 'success',
+        message: '🟢 Successfully connected live to Supabase! Realtime synchronization is now active.'
+      });
+      setTimeout(() => setConnectFeedback(null), 6000);
+    } else {
+      setConnectFeedback({
+        type: 'error',
+        message: res.error || 'Failed to connect to Supabase.'
+      });
+    }
+  };
+
+  const handleTestSupabase = async () => {
+    if (!supabaseUrlInput.trim() || !supabaseKeyInput.trim()) {
+      setConnectFeedback({ type: 'error', message: 'Enter your Project URL and Anon Key first to test the connection.' });
+      return;
+    }
+    setIsTestingSupabase(true);
+    setConnectFeedback(null);
+    const res = await testSupabaseLiveConnection(supabaseUrlInput.trim(), supabaseKeyInput.trim());
+    setIsTestingSupabase(false);
+    setConnectFeedback({
+      type: res.success ? 'success' : 'error',
+      message: res.message
+    });
+  };
+
+  const handleDisconnectSupabase = async () => {
+    if (confirm('Disconnect live Supabase database? Local offline changes will remain safely in browser storage.')) {
+      await store.disconnectLiveSupabase();
+      setSupabaseUrlInput('');
+      setSupabaseKeyInput('');
+      setConnectFeedback({ type: 'info', message: 'Disconnected from Supabase database. App is running in offline local mode.' });
+      setTimeout(() => setConnectFeedback(null), 4000);
+    }
+  };
+
+  const handleCopySchemaSql = async () => {
+    try {
+      const res = await fetch('/schema.sql');
+      const text = await res.text();
+      await navigator.clipboard.writeText(text);
+      setCopiedSchemaNotice(true);
+      setTimeout(() => setCopiedSchemaNotice(false), 3000);
+    } catch {
+      alert('Could not copy schema.sql. Please open schema.sql from the project files.');
     }
   };
 
@@ -292,57 +362,187 @@ export default function SettingsPage() {
           {/* Owner-Only Full Database Download (Excel / CSV) */}
           <OwnerDatabaseExportCard role={role} />
 
-          {/* Connection & Architecture Card */}
-          <div className="card" style={{ marginBottom: '1.25rem' }}>
-            <h2 className="card-title">Database &amp; Supabase SQL Integration</h2>
-            <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span
-                    style={{
-                      display: 'inline-block',
-                      width: '10px',
-                      height: '10px',
-                      borderRadius: '50%',
-                      background: syncStatus.error ? '#ef4444' : isSqlActive ? 'var(--success)' : '#f59e0b'
-                    }}
-                  />
-                  <strong>
-                    {isSqlActive
-                      ? syncStatus.isWriting
-                        ? `Updating SQL Database (${syncStatus.pendingCount} queued)...`
-                        : syncStatus.isSyncing
-                        ? 'Syncing with Supabase SQL Database...'
-                        : syncStatus.error
-                        ? 'Supabase SQL Schema / Policy Error'
-                        : 'Live Connected — Auto-Updating SQL on Every Change'
-                      : 'Active Local Mode (Connect Supabase Env Vars for SQL Sync)'}
-                  </strong>
-                </div>
+          {/* Live Supabase Database Connection & Architecture Card */}
+          <div className="card" style={{ marginBottom: '1.25rem', borderLeft: isSqlActive ? '4px solid #10b981' : '4px solid #f59e0b' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: '10px',
+                    height: '10px',
+                    borderRadius: '50%',
+                    background: syncStatus.error ? '#ef4444' : isSqlActive ? 'var(--success)' : '#f59e0b'
+                  }}
+                />
+                <h2 className="card-title" style={{ margin: 0 }}>
+                  {isSqlActive ? '🟢 Live Connected to Supabase' : '⚡ Connect Live Supabase Database'}
+                </h2>
+              </div>
 
-                {isSqlActive && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+              {isSqlActive && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={syncStatus.isSyncing || isPushingSql}
+                    onClick={() => store.syncFromSupabase()}
+                  >
+                    {syncStatus.isSyncing ? 'Syncing...' : '↻ Pull from SQL'}
+                  </button>
+                  {isOwner && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={isPushingSql || syncStatus.isWriting}
+                      onClick={handlePushAllToSql}
+                    >
+                      {isPushingSql ? 'Pushing to SQL...' : '⬆️ Push All Data to SQL'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.6 }}>
+              {/* Active Connection Info Banner */}
+              {isSqlActive ? (
+                <div
+                  style={{
+                    background: '#f0fdf4',
+                    border: '1px solid #bbf7d0',
+                    borderRadius: '8px',
+                    padding: '0.75rem 0.9rem',
+                    marginBottom: '1rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#166534', fontSize: '0.88rem' }}>
+                      ✓ Real-time PostgreSQL Sync Active
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#15803d', marginTop: '0.15rem' }}>
+                      URL: {supabaseUrlInput ? supabaseUrlInput.replace(/https?:\/\//, '') : 'Configured via Environment'} &bull; Realtime updates enabled
+                    </div>
+                  </div>
+                  {isOwner && (
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
-                      disabled={syncStatus.isSyncing || isPushingSql}
-                      onClick={() => store.syncFromSupabase()}
+                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', color: '#dc2626', borderColor: '#fca5a5' }}
+                      onClick={handleDisconnectSupabase}
                     >
-                      {syncStatus.isSyncing ? 'Syncing...' : '↻ Pull from SQL'}
+                      Disconnect / Reconfigure
                     </button>
-                    {isOwner && (
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        disabled={isPushingSql || syncStatus.isWriting}
-                        onClick={handlePushAllToSql}
-                      >
-                        {isPushingSql ? 'Pushing to SQL...' : '⬆️ Push All Data to SQL'}
-                      </button>
-                    )}
+                  )}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    background: '#fffbeb',
+                    border: '1px solid #fef3c7',
+                    borderRadius: '8px',
+                    padding: '0.75rem 0.9rem',
+                    marginBottom: '1rem',
+                    color: '#92400e'
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>
+                    Connect your Supabase project live
                   </div>
-                )}
-              </div>
+                  <div style={{ fontSize: '0.78rem', marginTop: '0.2rem' }}>
+                    Enter your Supabase Project URL and Anon/Public API Key below to activate instant two-way database synchronization.
+                  </div>
+                </div>
+              )}
+
+              {/* Live Connection Form for Owner */}
+              {isOwner && (!isSqlActive || connectFeedback) && (
+                <form
+                  onSubmit={handleConnectSupabase}
+                  style={{
+                    background: '#f8fafc',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    padding: '1rem',
+                    marginBottom: '1rem'
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a', marginBottom: '0.75rem' }}>
+                    🔑 Live Supabase Credentials
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.78rem' }}>
+                      Supabase Project URL *
+                    </label>
+                    <input
+                      type="url"
+                      className="form-control"
+                      placeholder="https://xyzcompany.supabase.co"
+                      value={supabaseUrlInput}
+                      onChange={(e) => setSupabaseUrlInput(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+                    <label className="form-label" style={{ fontSize: '0.78rem' }}>
+                      Supabase Anon / Public API Key *
+                    </label>
+                    <input
+                      type="password"
+                      className="form-control"
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      value={supabaseKeyInput}
+                      onChange={(e) => setSupabaseKeyInput(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="submit"
+                      disabled={isConnectingSupabase || isTestingSupabase}
+                      className="btn btn-primary btn-sm"
+                      style={{ fontWeight: 700 }}
+                    >
+                      {isConnectingSupabase ? 'Connecting...' : '⚡ Connect Live to Supabase'}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isConnectingSupabase || isTestingSupabase}
+                      onClick={handleTestSupabase}
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontWeight: 600 }}
+                    >
+                      {isTestingSupabase ? 'Testing...' : '🧪 Test Connection'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {connectFeedback && (
+                <div
+                  style={{
+                    background: connectFeedback.type === 'success' ? '#dcfce7' : connectFeedback.type === 'info' ? '#eff6ff' : '#fee2e2',
+                    border: `1px solid ${connectFeedback.type === 'success' ? '#86efac' : connectFeedback.type === 'info' ? '#93c5fd' : '#fca5a5'}`,
+                    color: connectFeedback.type === 'success' ? '#15803d' : connectFeedback.type === 'info' ? '#1e40af' : '#991b1b',
+                    padding: '0.65rem 0.8rem',
+                    borderRadius: '6px',
+                    fontSize: '0.8rem',
+                    marginBottom: '0.85rem',
+                    fontWeight: 600
+                  }}
+                >
+                  {connectFeedback.message}
+                </div>
+              )}
 
               {pushFeedback && (
                 <div
@@ -375,7 +575,7 @@ export default function SettingsPage() {
                 >
                   <strong>Database Error:</strong> {syncStatus.error}
                   <div style={{ marginTop: '0.25rem' }}>
-                    Please run the updated <code>schema.sql</code> (or <code>migration_06.sql</code> + <code>migration_07.sql</code>) in your Supabase SQL Editor so all tables, cascade keys, and write policies are active.
+                    Please run the updated <code>schema.sql</code> in your Supabase SQL Editor so all tables, cascade keys, and write policies are active.
                   </div>
                 </div>
               )}
@@ -384,12 +584,24 @@ export default function SettingsPage() {
                 Every create, edit, stock adjustment, recipe change, quotation update, shift assignment, salary entry, invoice, payment, and deletion automatically writes to your PostgreSQL (Supabase) tables in strict foreign-key order with offline retry protection.
               </p>
 
-              <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                <div style={{ fontWeight: 600, fontSize: '0.8rem', color: '#0f172a' }}>Supabase SQL &amp; Vercel Setup Checklist:</div>
-                <ol style={{ paddingLeft: '1.25rem', marginTop: '0.35rem', fontSize: '0.75rem' }}>
-                  <li>Run <code>schema.sql</code> in your Supabase SQL Editor (idempotent — configures all 18 tables, RLS write policies, Realtime, and <code>activity_logs</code> triggers in one run)</li>
-                  <li>Set <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> (and optional <code>SUPABASE_SERVICE_ROLE_KEY</code>) in Environment Variables</li>
-                  <li>Set <code>SMTP_HOST=smtp.gmail.com</code>, <code>SMTP_PORT=465</code>, <code>SMTP_USER=ippassales@gmail.com</code>, <code>SMTP_PASS</code>, and <code>INVOICE_NOTIFICATION_EMAIL=ippasevents@gmail.com</code> in Vercel Environment Variables for automatic background invoice delivery</li>
+              <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.82rem', color: '#0f172a' }}>
+                    📋 Supabase SQL Setup Checklist:
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopySchemaSql}
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                  >
+                    {copiedSchemaNotice ? '✓ Copied schema.sql!' : '📋 Copy schema.sql'}
+                  </button>
+                </div>
+                <ol style={{ paddingLeft: '1.25rem', margin: 0, fontSize: '0.78rem', lineHeight: 1.6 }}>
+                  <li>Run <code>schema.sql</code> in your Supabase SQL Editor (idempotent — configures all 18 tables, RLS write policies, Realtime, and audit triggers in one run)</li>
+                  <li>Enter your Project URL and Anon Key above and click <strong>"Connect Live to Supabase"</strong></li>
+                  <li>Optional: Set <code>SMTP_HOST=smtp.gmail.com</code>, <code>SMTP_PORT=465</code>, <code>SMTP_USER</code>, and <code>SMTP_PASS</code> in Vercel for automatic background invoice delivery</li>
                 </ol>
               </div>
             </div>
@@ -397,7 +609,7 @@ export default function SettingsPage() {
 
           {/* Account Security & Password */}
           <div className="card" style={{ borderLeft: '4px solid #0f172a' }}>
-            <h2 className="card-title">🔐 Account Password &amp; Security (പാസ്‌വേഡ് മാറ്റുക)</h2>
+            <h2 className="card-title">🔐 Account Password &amp; Security</h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
               Change the login password for your currently signed-in account. All users can independently update their own passwords.
             </p>
@@ -407,13 +619,13 @@ export default function SettingsPage() {
               className="btn btn-secondary"
               style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
             >
-              🔑 Change Login Password (പാസ്‌വേഡ് മാറ്റുക)
+              🔑 Change Login Password
             </button>
           </div>
 
           {/* Progressive Web App Installation */}
           <div className="card" style={{ borderLeft: '4px solid #e11d48' }}>
-            <h2 className="card-title">📱 App Installation (ആപ്പ് ഇൻസ്റ്റാൾ ചെയ്യുക)</h2>
+            <h2 className="card-title">📱 App Installation</h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
               Install IPPAS Pulse as a standalone application on your Android phone, iPhone / iPad, or Windows / Mac laptop for instant full-screen access, fast loading, and app-like experience.
             </p>
@@ -428,7 +640,7 @@ export default function SettingsPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span style={{ fontSize: '1.25rem' }}>💬</span>
                 <h2 className="card-title" style={{ margin: 0, color: '#15803d' }}>
-                  WhatsApp &amp; Client PDF Sharing (വാട്സാപ്പ് സെറ്റിംഗ്സ്)
+                  WhatsApp &amp; Client PDF Sharing
                 </h2>
               </div>
               <span
@@ -446,14 +658,14 @@ export default function SettingsPage() {
             </div>
 
             <p style={{ fontSize: '0.85rem', color: '#475569', marginBottom: '0.85rem', lineHeight: 1.6 }}>
-              ഇൻവോയ്സ് പേജിൽ നിന്നും ഇവന്റ് ഡീറ്റെയിൽസ് പേജിൽ നിന്നും <strong>&ldquo;💬 WA PDF&rdquo;</strong> ബട്ടൺ ക്ലിക്ക് ചെയ്യുമ്പോൾ ഓരോ ക്ലയന്റിന്റെയും ഇൻവോയ്സ് A4 PDF ഫോർമാറ്റിൽ ഓട്ടോമാറ്റിക്കായി തയ്യാറാക്കപ്പെടുന്നു.
+              When clicking the <strong>&ldquo;💬 WA PDF&rdquo;</strong> button from the invoices or event details page, a standard A4 PDF invoice is generated automatically for each client.
             </p>
 
             <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '0.75rem 0.95rem', fontSize: '0.8rem', color: '#166534', lineHeight: 1.5 }}>
-              <div style={{ fontWeight: 700, marginBottom: '0.25rem' }}>📱 പ്രവർത്തനം (How it Works):</div>
+              <div style={{ fontWeight: 700, marginBottom: '0.25rem' }}>📱 How it Works:</div>
               <ul style={{ paddingLeft: '1.2rem', margin: 0 }}>
-                <li><strong>സ്മാർട്ട്ഫോണുകളിൽ (Android / iPhone)</strong>: വെബ് ഷെയർ (Web Share API) വഴി വാട്സാപ്പിലേക്ക് ക്ലിക്ക് ചെയ്യുമ്പോൾ ഇൻവോയ്സ് PDF ഫയൽ ഓട്ടോമാറ്റിക് ആയി ചാറ്റിൽ അറ്റാച്ച് ആകുന്നു.</li>
-                <li><strong>കമ്പ്യൂട്ടർ / ലാപ്ടോപ്പിൽ</strong>: ഫയൽ സിസ്റ്റത്തിൽ ഉടൻ ഡൗൺലോഡ് ആവുകയും വാട്സാപ്പ് വെബ് ചാറ്റ് തുറക്കുകയും ചെയ്യുന്നു (ചാറ്റിലെ 📎 Attachment ബട്ടൺ വഴി സെൻഡ് ചെയ്യാം).</li>
+                <li><strong>Mobile Devices (Android / iPhone)</strong>: The invoice PDF is attached directly into your WhatsApp chat via the Web Share API.</li>
+                <li><strong>Desktop / Laptop</strong>: The file downloads to your computer and opens WhatsApp Web (you can attach the file via the chat's 📎 button).</li>
               </ul>
             </div>
           </div>

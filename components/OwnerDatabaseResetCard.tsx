@@ -31,7 +31,7 @@ export default function OwnerDatabaseResetCard({
           <span style={{ fontSize: '1.25rem' }}>🔒</span>
           <div>
             <h2 style={{ fontSize: '1rem', fontWeight: 700, color: '#991b1b', margin: 0 }}>
-              ഡാറ്റാബേസ് റീസെറ്റ് നിയന്ത്രണം (Database Reset Restricted)
+              Database Reset Restricted
             </h2>
             <div style={{ fontSize: '0.75rem', color: '#b91c1c', marginTop: '0.1rem' }}>
               Access strictly limited to Owner Profile
@@ -39,7 +39,7 @@ export default function OwnerDatabaseResetCard({
           </div>
         </div>
         <p style={{ fontSize: '0.82rem', color: '#7f1d1d', margin: 0, lineHeight: 1.5 }}>
-          ഡാറ്റാബേസിലെ വിവരങ്ങൾ റീസെറ്റ് ചെയ്യാനോ ക്ലിയർ ചെയ്യാനോ ഉള്ള പൂർണ്ണ അധികാരം സ്ഥാപനത്തിന്റെ <strong>ഓണർക്ക് (Owner)</strong> മാത്രമായി പരിമിതപ്പെടുത്തിയിരിക്കുന്നു. മാനേജർമാർക്കോ അക്കൗണ്ടന്റുകൾക്കോ മറ്റ് സ്റ്റാഫുകൾക്കോ ഡാറ്റാബേസ് ക്ലിയർ ചെയ്യാൻ അനുമതിയില്ല.
+          Permission to reset or clear database records is restricted exclusively to the <strong>Owner</strong>. Managers, accountants, and staff members are not authorized to reset the database.
         </p>
       </div>
     );
@@ -60,7 +60,7 @@ export default function OwnerDatabaseResetCard({
             <span style={{ fontSize: '1.3rem' }}>⚠️</span>
             <div>
               <h2 className="card-title" style={{ margin: 0, color: '#991b1b' }}>
-                ഡാറ്റാബേസ് റീസെറ്റ് &amp; ക്ലിയറിംഗ് (Owner Re-Authentication)
+                Database Reset &amp; Clearing (Owner Re-Authentication)
               </h2>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
                 Requires Owner current login password to execute
@@ -83,7 +83,7 @@ export default function OwnerDatabaseResetCard({
         </div>
 
         <p style={{ fontSize: '0.85rem', color: '#475569', marginBottom: '1.25rem', lineHeight: 1.6 }}>
-          ഡാറ്റാബേസ് റീസെറ്റ് ചെയ്യുന്നതിനോ അല്ലെങ്കിൽ ഓർഡറുകളും ഇൻവോയ്‌സുകളും ക്ലിയർ ചെയ്യുന്നതിനോ നിങ്ങളുടെ <strong>ഓണർ ലോഗിൻ പാസ്‌വേഡ് (Owner Password)</strong> നൽകി റീ-ഓതന്റിക്കേഷൻ പൂർത്തിയാക്കേണ്ടതുണ്ട്. പാസ്‌വേഡ് പരിശോധന കൂടാതെ ഡാറ്റ മാറ്റാൻ സാധിക്കില്ല.
+          To reset the database or wipe existing transactions and orders, you must enter your <strong>Owner login password</strong> for security re-authentication. No data changes can occur without verifying your identity.
         </p>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -102,7 +102,7 @@ export default function OwnerDatabaseResetCard({
             }}
           >
             <span>🔐</span>
-            <span>പാസ്‌വേഡ് നൽകി റീസെറ്റ് ചെയ്യുക (Reset Database with Password)</span>
+            <span>Reset Database with Password</span>
           </button>
         </div>
       </div>

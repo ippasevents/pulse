@@ -198,7 +198,7 @@ export async function generateInvoicePdfBlob(
       <div style="margin-bottom: 22px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px 14px; background: #f8fafc;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px;">
           <span style="font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.5px; color: #0f172a;">
-            💳 Payment History & Advance Details (ആദ്യം മുതലുള്ള പേയ്മെന്റുകൾ)
+            💳 Payment History &amp; Advance Details
           </span>
           <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">
             ${invPayments.length} installment${invPayments.length === 1 ? '' : 's'} recorded
@@ -355,23 +355,22 @@ export function formatWhatsAppInvoiceMessage(
   return `🧾 *${businessName}*
 *INVOICE: ${invoice.invoice_number}*
 
-പ്രിയപ്പെട്ട ${client?.name || 'Client'},
-നിങ്ങളുടെ ഇവന്റിനായുള്ള (${evt?.title || 'Catering Event'}) ഔദ്യോഗിക ഇൻവോയ്സ് PDF ഇതിനോടൊപ്പം നൽകുന്നു.
+Dear ${client?.name || 'Valued Client'},
+Please find attached the official invoice copy for your catering event (${evt?.title || 'Catering Event'}).
 
-💰 *ആകെ തുക (Total):* ₹${invoice.amount.toLocaleString('en-IN')}
-✅ *നൽകിയത് (Paid):* ₹${paymentsForThis.toLocaleString('en-IN')}
-⏳ *ബാക്കി തുക (Balance Due):* ₹${balanceDue.toLocaleString('en-IN')}
+💰 *Total Amount:* ₹${invoice.amount.toLocaleString('en-IN')}
+✅ *Paid Amount:* ₹${paymentsForThis.toLocaleString('en-IN')}
+⏳ *Balance Due:* ₹${balanceDue.toLocaleString('en-IN')}
 📅 *Due Date:* ${invoice.due_date || 'On Receipt'}
 
-🏦 *ബാങ്ക് വിവരങ്ങൾ (Payment Details):*
+🏦 *Payment / Bank Transfer Details:*
 • Bank: ${state.settings.bank_name || 'Federal Bank'}
 • A/c Name: ${state.settings.account_name || businessName}
 • A/c No: ${state.settings.account_number || ''}
 • IFSC: ${state.settings.ifsc_code || ''}
 • UPI ID: ${state.settings.upi_id || ''}
 
-നന്ദി! 
-${businessName}
+Thank you for choosing ${businessName}!
 📞 ${state.settings.phone || '+91 98470 11111'}`;
 }
 

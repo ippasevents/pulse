@@ -46,24 +46,24 @@ export default function WhatsAppShareModal({
         if (res.sharedDirectlyWithFile) {
           setFeedback({
             type: 'success',
-            message: '✓ വാട്സാപ്പ് ഓപ്പൺ ആയി PDF ഡോക്യുമെന്റ് നേരിട്ട് അറ്റാച്ച് ചെയ്തിരിക്കുന്നു! (PDF attached directly via WhatsApp)'
+            message: '✓ WhatsApp opened with invoice PDF attached directly!'
           });
         } else {
           setFeedback({
             type: 'info',
-            message: '✓ ഇൻവോയ്സ് PDF കമ്പ്യൂട്ടറിൽ ഡൗൺലോഡ് ചെയ്യുകയും വാട്സാപ്പ് ഓപ്പൺ ആവുകയും ചെയ്തിട്ടുണ്ട്! ചാറ്റിൽ 📎 (Attach Document) ക്ലിക്ക് ചെയ്ത് അയക്കുക.'
+            message: '✓ Invoice PDF downloaded and WhatsApp opened. Click 📎 (Attach Document) in the chat to send the file.'
           });
         }
       } else {
         setFeedback({
           type: 'error',
-          message: res.error || 'വാട്സാപ്പിലേക്ക് ഷെയർ ചെയ്യാൻ കഴിഞ്ഞില്ല.'
+          message: res.error || 'Unable to share directly to WhatsApp.'
         });
       }
     } catch (err: any) {
       setFeedback({
         type: 'error',
-        message: err?.message || 'അപ്രതീക്ഷിത തകരാറുണ്ടായി.'
+        message: err?.message || 'An unexpected error occurred.'
       });
     } finally {
       setIsGenerating(false);
@@ -86,13 +86,13 @@ export default function WhatsAppShareModal({
         URL.revokeObjectURL(url);
         setFeedback({
           type: 'success',
-          message: `✓ ഇൻവോയ്സ് PDF (${invoice.invoice_number}.pdf) വിജയകരമായി ഡൗൺലോഡ് ചെയ്തു!`
+          message: `✓ Invoice PDF (${invoice.invoice_number}.pdf) downloaded successfully!`
         });
       }
     } catch {
       setFeedback({
         type: 'error',
-        message: 'PDF ഡൗൺലോഡ് ചെയ്യാൻ സാധിച്ചില്ല.'
+        message: 'Unable to download PDF file.'
       });
     } finally {
       setIsGenerating(false);
@@ -157,7 +157,7 @@ export default function WhatsAppShareModal({
             </div>
             <div>
               <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>
-                വാട്സാപ്പ് ഇൻവോയ്സ് PDF ഷെയർ
+                Share Invoice on WhatsApp
               </h2>
               <div style={{ fontSize: '0.75rem', color: '#bbf7d0', marginTop: '0.15rem' }}>
                 WhatsApp PDF Document Sharing &bull; #{invoice.invoice_number}
@@ -196,7 +196,7 @@ export default function WhatsAppShareModal({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
               <div>
                 <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600 }}>
-                  ക്ലയന്റ് (Client):
+                  Client:
                 </div>
                 <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#0f172a' }}>
                   {client?.name || 'Valued Client'}
@@ -208,13 +208,13 @@ export default function WhatsAppShareModal({
 
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600 }}>
-                  ഇൻവോയ്സ് തുക:
+                  Invoice Total:
                 </div>
                 <div style={{ fontWeight: 800, fontSize: '1.1rem', color: '#15803d' }}>
                   ₹{invoice.amount.toLocaleString('en-IN')}
                 </div>
                 <div style={{ fontSize: '0.75rem', color: balanceDue > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
-                  {balanceDue > 0 ? `ബാക്കി: ₹${balanceDue.toLocaleString('en-IN')}` : '✓ Fully Paid'}
+                  {balanceDue > 0 ? `Balance Due: ₹${balanceDue.toLocaleString('en-IN')}` : '✓ Fully Paid'}
                 </div>
               </div>
             </div>
@@ -232,10 +232,10 @@ export default function WhatsAppShareModal({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: '#15803d', fontWeight: 700, fontSize: '0.85rem' }}>
               <span>📎</span>
-              <span>ഓട്ടോമാറ്റിക് PDF അറ്റാച്ച്‌മെന്റ് സൗകര്യം</span>
+              <span>Automatic PDF Attachment</span>
             </div>
             <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.8rem', color: '#166534', lineHeight: 1.5 }}>
-              സ്മാർട്ട്ഫോണുകളിൽ (Android / iPhone) താഴെയുള്ള <strong>&ldquo;വാട്സാപ്പിൽ PDF അയക്കുക&rdquo;</strong> ബട്ടൺ ക്ലിക്ക് ചെയ്യുമ്പോൾ ഇൻവോയ്സ് PDF ഫയൽ ഓട്ടോമാറ്റിക് ആയി വാട്സാപ്പിൽ അറ്റാച്ച് ആകും. കമ്പ്യൂട്ടറുകളിൽ ഫയൽ ഉടൻ ഡൗൺലോഡ് ആവുകയും വാട്സാപ്പ് തുറക്കുകയും ചെയ്യും.
+              On mobile phones (Android / iPhone), clicking <strong>&ldquo;Share PDF to WhatsApp&rdquo;</strong> will automatically attach the invoice PDF directly into your WhatsApp chat. On computers, the file will download automatically and open WhatsApp Web.
             </p>
           </div>
 
@@ -284,7 +284,7 @@ export default function WhatsAppShareModal({
             >
               <span style={{ fontSize: '1.2rem' }}>{isGenerating ? '⏳' : '📲'}</span>
               <span>
-                {isGenerating ? 'PDF തയ്യാറാക്കുന്നു...' : 'വാട്സാപ്പിൽ PDF അയക്കുക (Share PDF to WhatsApp)'}
+                {isGenerating ? 'Generating PDF...' : 'Share PDF to WhatsApp'}
               </span>
             </button>
 
@@ -338,7 +338,7 @@ export default function WhatsAppShareModal({
               }}
             >
               <span>{copied ? '✓' : '📋'}</span>
-              <span>{copied ? 'കോപ്പി ചെയ്തു! (Copied)' : 'Copy WhatsApp Message Text'}</span>
+              <span>{copied ? 'Copied Message!' : 'Copy WhatsApp Message Text'}</span>
             </button>
           </div>
         </div>

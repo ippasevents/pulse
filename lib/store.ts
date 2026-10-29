@@ -1,6 +1,13 @@
 'use client';
 
-import { supabase, isSupabaseConfigured } from './supabase';
+import {
+  supabase,
+  isSupabaseConfigured,
+  setLiveSupabaseCredentials,
+  clearLiveSupabaseCredentials,
+  onSupabaseConfigChange,
+  getSupabaseConfig
+} from './supabase';
 import {
   Client,
   EventRecord,
@@ -733,11 +740,60 @@ class DataStore {
       });
 
       this.initializeSqlSync();
+
+      onSupabaseConfigChange(async () => {
+        this.serverDbConfigured = Boolean(isSupabaseConfigured);
+        if (isSupabaseConfigured && supabase) {
+          this.setupRealtimeSubscription();
+          await this.flushPendingSqlWrites();
+          await this.syncFromSupabase();
+        }
+        this.notify();
+      });
     }
   }
 
   public isSqlConnected(): boolean {
     return Boolean(isSupabaseConfigured || this.serverDbConfigured);
+  }
+
+  public getLiveSupabaseConfig() {
+    return getSupabaseConfig();
+  }
+
+  public async connectLiveSupabase(url: string, anonKey: string): Promise<{ success: boolean; error?: string }> {
+    const res = setLiveSupabaseCredentials(url, anonKey);
+    if (!res.success) {
+      return { success: false, error: res.error };
+    }
+
+    try {
+      await fetch('/api/db/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, anonKey })
+      });
+    } catch {
+      // Continue even if local network error
+    }
+
+    this.serverDbConfigured = true;
+    this.setupRealtimeSubscription();
+    await this.flushPendingSqlWrites();
+    await this.syncFromSupabase();
+    this.notify();
+    return { success: true };
+  }
+
+  public async disconnectLiveSupabase(): Promise<void> {
+    clearLiveSupabaseCredentials();
+    try {
+      await fetch('/api/db/config', { method: 'DELETE' });
+    } catch {
+      // ignore
+    }
+    this.serverDbConfigured = false;
+    this.notify();
   }
 
   private async initializeSqlSync() {
@@ -2961,7 +3017,7 @@ class DataStore {
     if (!isSuper && !isOwner) {
       return {
         success: false,
-        error: 'അനുമതിയില്ല: ഡാറ്റാബേസ് റീസെറ്റ് ചെയ്യാനുള്ള പൂർണ്ണ അധികാരം ഓണർക്കും സൂപ്പർ അഡ്മിനും മാത്രമാണ് ഉള്ളത്. (Permission denied: Only Owner / Super Admin can reset or clear the database.)'
+        error: 'Permission denied: Only Owner / Super Admin can reset or clear the database.'
       };
     }
 
@@ -2969,7 +3025,7 @@ class DataStore {
     if (!currentProfile) {
       return {
         success: false,
-        error: 'സിസ്റ്റത്തിൽ പ്രൊഫൈൽ കണ്ടെത്താനായില്ല. (User profile could not be located.)'
+        error: 'User profile could not be located.'
       };
     }
 
@@ -2977,7 +3033,7 @@ class DataStore {
     if (!trimmedEntered) {
       return {
         success: false,
-        error: 'സ്ഥിരീകരണത്തിനായി നിങ്ങളുടെ പാസ്‌വേഡ് നൽകുക. (Please enter your account password.)'
+        error: 'Please enter your account password for verification.'
       };
     }
 
@@ -2985,7 +3041,7 @@ class DataStore {
     if (trimmedEntered !== expectedPassword) {
       return {
         success: false,
-        error: 'നൽകിയ പാസ്‌വേഡ് തെറ്റാണ്! ഡാറ്റാബേസ് റീസെറ്റ് റദ്ദാക്കി. (Incorrect password. Action aborted.)'
+        error: 'Incorrect password. Action aborted.'
       };
     }
 
@@ -3107,7 +3163,7 @@ class DataStore {
     if (this.state.currentRole !== 'owner') {
       return {
         success: false,
-        error: 'അനുമതിയില്ല: ഡാറ്റാബേസ് റീസെറ്റ് ചെയ്യാനുള്ള അനുമതി ഓണർക്ക് (Owner) മാത്രമാണ് ഉള്ളത്.'
+        error: 'Permission denied: Only Owner has authority to reset the database.'
       };
     }
     if (ownerPassword) {
@@ -3115,7 +3171,7 @@ class DataStore {
     }
     return {
       success: false,
-      error: 'ഡാറ്റാബേസ് റീസെറ്റ് ചെയ്യുന്നതിനായി ഓണറുടെ പാസ്‌വേഡ് നിർബന്ധമാണ്. (Owner password is required to reset database.)'
+      error: 'Owner password is required to reset database.'
     };
   }
 

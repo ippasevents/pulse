@@ -360,7 +360,7 @@ export default function EventsPage() {
                 ) : (
                   <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.85rem' }}>
                     <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a', marginBottom: '0.6rem' }}>
-                      ✨ New Client Details (ഓൺ-ദി-സ്പോട്ട് രജിസ്ട്രേഷൻ)
+                      ✨ New Client Details (Instant Registration)
                     </div>
                     <div className="grid-2">
                       <div className="form-group">
@@ -480,7 +480,7 @@ export default function EventsPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Payment Terms (പേയ്മെന്റ് വ്യവസ്ഥകൾ)</label>
+                <label className="form-label">Payment Terms</label>
                 <input
                   type="text"
                   className="form-control"

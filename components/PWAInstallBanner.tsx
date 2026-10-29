@@ -86,7 +86,7 @@ export function PWAInstallBanner() {
             </span>
           </div>
           <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: '0.2rem 0 0 0', lineHeight: 1.4 }}>
-            ഫോണിൽ ആപ്പ് ആയി ഇൻസ്റ്റാൾ ചെയ്ത് ഒറ്റ ടാപ്പിൽ കാറ്ററിംഗ് ഇവന്റുകൾ, കൊട്ടേഷൻ, ബില്ലുകൾ എന്നിവ കൈകാര്യം ചെയ്യാം.
+            Install on your phone or computer for fast, one-tap access to catering events, quotes, and bills.
           </p>
         </div>
       </div>

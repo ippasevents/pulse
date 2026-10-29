@@ -215,12 +215,12 @@ export default function EventDetailPage() {
     if (updatedStockEst.totalShortageCount > 0) {
       setStatusBanner({
         type: 'info',
-        message: `✓ ക്വട്ടേഷൻ കൺഫേം ആയി! ഏകീകൃത മാസ്റ്റർ ഇൻവോയിസ് #${masterInv.invoice_number} ജനറേറ്റ് ചെയ്തു. ⚠️ ഈ മെനു ഉണ്ടാക്കാൻ ആവശ്യമായ ${updatedStockEst.totalShortageCount} സാധനങ്ങൾ വെയർഹൗസ് സ്റ്റോക്കിൽ കുറവാണ്. ദയവായി താഴെ നിന്ന് ഓർഡർ പ്ലേസ് ചെയ്യുക.`
+        message: `✓ Quotation confirmed! Unified Master Invoice #${masterInv.invoice_number} generated. ⚠️ ${updatedStockEst.totalShortageCount} raw materials required for this menu are low in warehouse stock. Please place an order below.`
       });
     } else {
       setStatusBanner({
         type: 'success',
-        message: `✓ ക്വട്ടേഷൻ കൺഫേം ആയി! ഏകീകൃത മാസ്റ്റർ ഇൻവോയിസ് #${masterInv.invoice_number} ജനറേറ്റ് ചെയ്തു. ആവശ്യമായ എല്ലാ ചേരുവകളും വെയർഹൗസിൽ ലഭ്യമാണ്.`
+        message: `✓ Quotation confirmed! Unified Master Invoice #${masterInv.invoice_number} generated. All required ingredients are available in warehouse.`
       });
     }
   };
@@ -228,14 +228,14 @@ export default function EventDetailPage() {
   // Mark Event Completed: triggers automatic deduction of recipe ingredients from warehouse inventory
   const handleCompleteEvent = () => {
     const proceed = confirm(
-      'ഈ ഇവന്റ് കംപ്ലീറ്റ് ആയി രേഖപ്പെടുത്തണോ? ഇവന്റിന്റെ മെനു ഉണ്ടാക്കാൻ എടുത്ത എല്ലാ ചേരുവകളുടെയും ക്വാണ്ടിറ്റി വെയർഹൗസ് ഇൻവെന്ററിയിൽ നിന്ന് ഓട്ടോമാറ്റിക്കായി കുറവു വരുത്തുന്നതാണ്.'
+      'Mark this event as completed? The quantities for all ingredients in this event menu will be automatically deducted from warehouse inventory.'
     );
     if (!proceed) return;
 
     store.updateEvent(event.id, { status: 'completed' });
     setStatusBanner({
       type: 'success',
-      message: '🎉 ഇവന്റ് വിജയകരമായി പൂർത്തിയായി! മെനു ചേരുവകൾ വെയർഹൗസ് സ്റ്റോക്കിൽ നിന്ന് ഓട്ടോമാറ്റിക്കായി കുറവു വരുത്തി.'
+      message: '🎉 Event completed successfully! Menu ingredients have been automatically deducted from warehouse stock.'
     });
   };
 
@@ -296,7 +296,7 @@ export default function EventDetailPage() {
     setIsShortageModalOpen(false);
     setStatusBanner({
       type: 'success',
-      message: `📦 സ്റ്റോക്ക് പർച്ചേസ് ഓർഡർ വിജയകരമായി പ്ലേസ് ചെയ്തു! പർച്ചേസ് ചെയ്ത സാധനങ്ങൾ വെയർഹൗസ് ഇൻവെന്ററിയിൽ ഓട്ടോമാറ്റിക്കായി ആഡ് ചെയ്യപ്പെട്ടു.`
+      message: `📦 Stock purchase order placed successfully! Purchased items have been automatically added to warehouse inventory.`
     });
   };
 
@@ -305,7 +305,7 @@ export default function EventDetailPage() {
     store.syncInvoiceWithEventTotal(event.id);
     setStatusBanner({
       type: 'success',
-      message: `ഏകീകൃത മാസ്റ്റർ ഇൻവോയിസ് ഏറ്റവും പുതിയ ഇവന്റ് തുകയുമായി (₹${grandTotal.toLocaleString('en-IN')}) സിങ്ക് ചെയ്തു.`
+      message: `Unified Master Invoice synced with the latest event total (₹${grandTotal.toLocaleString('en-IN')}).`
     });
   };
 
@@ -595,7 +595,7 @@ export default function EventDetailPage() {
                 style={{ background: '#16a34a', color: '#ffffff', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                 title="Confirm quotation and auto-generate Master Invoice"
               >
-                ✓ Confirm Quotation / കൺഫേം ചെയ്യുക
+                ✓ Confirm Quotation
               </button>
             )}
 
@@ -607,7 +607,7 @@ export default function EventDetailPage() {
                 style={{ background: '#2563eb', color: '#ffffff', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                 title="Mark event completed and automatically deduct raw materials from inventory"
               >
-                🏁 Mark Event Completed / പൂർത്തിയായി
+                🏁 Mark Event Completed
               </button>
             )}
 
@@ -653,13 +653,13 @@ export default function EventDetailPage() {
         >
           <div>
             <div style={{ fontWeight: 700, color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <span>⚠️ സ്റ്റോക്ക് തികവില്ല (Raw Material Shortage Detected)</span>
+              <span>⚠️ Raw Material Shortage Detected</span>
               <span className="badge" style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700 }}>
                 {stockEst.totalShortageCount} Raw Material Items Insufficient
               </span>
             </div>
             <div style={{ fontSize: '0.84rem', color: '#7f1d1d', marginTop: '0.25rem' }}>
-              ഈ മെനു തയ്യാറാക്കാൻ ആവശ്യമായ ചേരുവകൾ വെയർഹൗസ് ഇൻവെന്ററിയിൽ കുറവാണ്. എസ്റ്റിമേറ്റ് പർച്ചേസ് ചെലവ്: <strong>₹{stockEst.totalEstimatedCost.toLocaleString('en-IN')}</strong>.
+              Ingredients required to prepare this menu are low in warehouse inventory. Estimated purchase cost: <strong>₹{stockEst.totalEstimatedCost.toLocaleString('en-IN')}</strong>.
             </div>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -669,7 +669,7 @@ export default function EventDetailPage() {
               style={{ background: '#dc2626', color: '#ffffff', fontWeight: 700, padding: '0.4rem 0.8rem' }}
               onClick={handleOpenShortageOrderModal}
             >
-              📦 ഓർഡർ പ്ലേസ് ചെയ്യുക (Place Stock Purchase Order)
+              📦 Place Stock Purchase Order
             </button>
             <button
               type="button"
@@ -700,12 +700,12 @@ export default function EventDetailPage() {
           }}
         >
           <div style={{ color: '#166534', fontWeight: 600 }}>
-            ✓ വെയർഹൗസ് സ്റ്റോക്ക് പൂർണ്ണമാണ് (All {stockEst.items.length} recipe raw materials are available in warehouse inventory).
+            ✓ Warehouse stock is sufficient (All {stockEst.items.length} recipe raw materials are available in warehouse inventory).
           </div>
           <div style={{ fontSize: '0.78rem', color: '#15803d' }}>
             {event.stock_deducted
-              ? '✓ ഈ ഇവന്റിനുള്ള സ്റ്റോക്ക് ഓട്ടോമാറ്റിക്കായി കുറവു ചെയ്തു കഴിഞ്ഞു.'
-              : 'ഇവന്റ് കംപ്ലീറ്റ് ചെയ്യുമ്പോൾ ഈ സ്റ്റോക്ക് ഓട്ടോമാറ്റിക്കായി കുറവു ചെയ്യപ്പെടും.'}
+              ? '✓ Ingredients for this event have already been deducted from inventory.'
+              : 'Ingredients will be automatically deducted from inventory upon event completion.'}
           </div>
         </div>
       )}
@@ -1097,7 +1097,7 @@ export default function EventDetailPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
               <div>
                 <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>
-                  📜 Quotation Payment Terms (പേയ്‌മെന്റ് നിബന്ധനകൾ)
+                  📜 Quotation Payment Terms
                 </h3>
                 <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
                   Specify the advance deposit and milestone payment terms to print directly on this quotation and master invoice.
@@ -1111,7 +1111,7 @@ export default function EventDetailPage() {
                   className="btn btn-sm"
                   style={{ background: '#16a34a', color: '#ffffff', fontWeight: 700, padding: '0.45rem 0.9rem' }}
                 >
-                  ✓ Confirm Quotation / കൺഫേം ചെയ്യുക
+                  ✓ Confirm Quotation
                 </button>
               )}
             </div>
@@ -1212,7 +1212,7 @@ export default function EventDetailPage() {
                     style={{ background: '#dc2626', color: '#ffffff', fontWeight: 700 }}
                     onClick={handleOpenShortageOrderModal}
                   >
-                    📦 ഓർഡർ പ്ലേസ് ചെയ്യുക (Place Purchase Order)
+                    📦 Place Purchase Order
                   </button>
                 )}
                 <button
@@ -1561,7 +1561,7 @@ export default function EventDetailPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
                 <div>
                   <h2 className="card-title" style={{ margin: 0 }}>
-                    Unified Master Invoice &amp; Settlement Bill (ഏകീകൃത ഇൻവോയിസ്)
+                    Unified Master Invoice &amp; Settlement Bill
                   </h2>
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
                     Single invoice lifecycle: covers initial advance deposit through final settlement with complete payment history.
@@ -2020,7 +2020,7 @@ export default function EventDetailPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Quotation Payment Terms (പേയ്‌മെന്റ് നിബന്ധനകൾ)</label>
+                <label className="form-label">Quotation Payment Terms</label>
                 <input
                   type="text"
                   className="form-control"
@@ -3031,7 +3031,7 @@ export default function EventDetailPage() {
             <div className="modal-header">
               <div>
                 <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
-                  📦 Place Stock Purchase Order (ഷോർട്ടേജ് പർച്ചേസ് ഓർഡർ)
+                  📦 Place Stock Purchase Order
                 </h2>
                 <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
                   Auto-populated missing raw materials needed for <strong>{event.title}</strong>. Purchasing will automatically add these items into warehouse inventory.

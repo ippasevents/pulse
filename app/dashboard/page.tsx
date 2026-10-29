@@ -170,7 +170,7 @@ export default function DashboardPage() {
                 padding: '0.45rem 0.85rem'
               }}
             >
-              🔑 പാസ്‌വേഡ് മാറ്റുക (Change Password)
+              🔑 Change Password
             </button>
           </div>
         </div>

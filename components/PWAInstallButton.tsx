@@ -91,7 +91,7 @@ export function PWAInstallButton({
           }}
         >
           <span>📲</span>
-          <span>ആപ്പ് ഇൻസ്റ്റാൾ ചെയ്യുക (Install App)</span>
+          <span>Install App</span>
         </button>
       );
     }
@@ -146,7 +146,7 @@ export function PWAInstallButton({
                     Install IPPAS Pulse
                   </h3>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-                    ഫോണിലും കമ്പ്യൂട്ടറിലും ആപ്പ് ആയി ഇൻസ്റ്റാൾ ചെയ്യാം
+                    Install directly on your phone, tablet, or desktop
                   </p>
                 </div>
               </div>
@@ -189,17 +189,17 @@ export function PWAInstallButton({
               >
                 <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   <span>🤖</span>
-                  <span>Android ഫോണുകളിൽ (Google Chrome):</span>
+                  <span>Android Devices (Google Chrome):</span>
                 </div>
                 <ol style={{ paddingLeft: '1.25rem', margin: 0, fontSize: '0.8rem' }}>
                   <li style={{ marginBottom: '0.3rem' }}>
-                    മുകളിൽ വലതുവശത്തുള്ള <strong>മൂന്ന് കുത്തുകൾ (⋮)</strong> അമർത്തുക.
+                    Tap the <strong>three vertical dots (⋮)</strong> at the top right corner.
                   </li>
                   <li style={{ marginBottom: '0.3rem' }}>
-                    <strong>"Install app"</strong> അല്ലെങ്കിൽ <strong>"Add to Home screen"</strong> തിരഞ്ഞെടുക്കുക.
+                    Select <strong>"Install app"</strong> or <strong>"Add to Home screen"</strong>.
                   </li>
                   <li>
-                    <strong>"Install"</strong> അമർത്തുക. നിങ്ങളുടെ ഫോൺ സ്ക്രീനിൽ ആപ്പ് ഐക്കൺ വരുന്നതാണ്.
+                    Tap <strong>"Install"</strong>. The app icon will appear on your home screen.
                   </li>
                 </ol>
               </div>
@@ -220,13 +220,13 @@ export function PWAInstallButton({
                 </div>
                 <ol style={{ paddingLeft: '1.25rem', margin: 0, fontSize: '0.8rem' }}>
                   <li style={{ marginBottom: '0.3rem' }}>
-                    സഫാരി ബ്രൗസറിന്റെ താഴെയുള്ള <strong>Share ബട്ടൺ</strong> (ചതുരത്തിൽ മുകളിലേക്ക് അമ്പടയാളം ഉള്ളത്) അമർത്തുക.
+                    Tap the <strong>Share button</strong> (square with an upward arrow) at the bottom.
                   </li>
                   <li style={{ marginBottom: '0.3rem' }}>
-                    താഴേക്ക് സ്ക്രോൾ ചെയ്ത് <strong>"Add to Home Screen"</strong> തിരഞ്ഞെടുക്കുക.
+                    Scroll down and tap <strong>"Add to Home Screen"</strong>.
                   </li>
                   <li>
-                    മുകളിൽ വലതുവശത്തുള്ള <strong>"Add"</strong> അമർത്തുക.
+                    Tap <strong>"Add"</strong> in the top right corner.
                   </li>
                 </ol>
               </div>
@@ -246,7 +246,7 @@ export function PWAInstallButton({
                   <span>Laptop / Desktop (Chrome / Edge):</span>
                 </div>
                 <p style={{ margin: 0, fontSize: '0.8rem' }}>
-                  മുകളിൽ അഡ്രസ് ബാറിന്റെ (URL) വലതുവശത്തുള്ള <strong>Install ചിഹ്നം (⊕ അല്ലെങ്കിൽ 💻)</strong> ക്ലിക്ക് ചെയ്ത് <strong>"Install"</strong> കൊടുക്കുക.
+                  Click the <strong>Install icon (⊕ or computer icon)</strong> on the right side of the URL address bar and click <strong>"Install"</strong>.
                 </p>
               </div>
 
@@ -256,7 +256,7 @@ export function PWAInstallButton({
                 className="btn btn-secondary"
                 style={{ width: '100%' }}
               >
-                Got It / ശരി മനസ്സിലായി
+                Got It
               </button>
             </div>
           </div>

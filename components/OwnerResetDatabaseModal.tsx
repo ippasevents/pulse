@@ -44,17 +44,17 @@ export default function OwnerResetDatabaseModal({
     setSuccess('');
 
     if (!isOwner) {
-      setError('അനുമതിയില്ല: ഡാറ്റാബേസ് റീസെറ്റ് ചെയ്യാൻ ഓണർക്ക് (Owner) മാത്രമാണ് അധികാരമുള്ളത്.');
+      setError('Permission denied: Only Owner has authority to reset the database.');
       return;
     }
 
     if (!password.trim()) {
-      setError('സ്ഥിരീകരിക്കുന്നതിനായി നിങ്ങളുടെ നിലവിലെ ഓണർ പാസ്‌വേഡ് നൽകുക. (Please enter your Owner password)');
+      setError('Please enter your Owner login password to confirm.');
       return;
     }
 
     if (confirmWord.trim().toUpperCase() !== 'RESET') {
-      setError("സ്ഥിരീകരണത്തിനായി 'RESET' എന്ന് കൃത്യമായി ടൈപ്പ് ചെയ്യുക. (Type 'RESET' to confirm)");
+      setError("Type 'RESET' to confirm database reset.");
       return;
     }
 
@@ -69,8 +69,8 @@ export default function OwnerResetDatabaseModal({
       if (result.success) {
         setSuccess(
           mode === 'clear_all_data'
-            ? '✓ ഡാറ്റാബേസ് വിജയകരമായി ക്ലിയർ ചെയ്തു! പുതിയ ഇവന്റുകൾക്കായി റെഡിയാണ്. (All transactional data cleared successfully!)'
-            : '✓ ഡാറ്റാബേസ് വിജയകരമായി റീസെറ്റ് ചെയ്ത് ഡീഫോൾട്ട് സ്റ്റേറ്റിലേക്ക് മാറ്റി! (Database reset to defaults successfully!)'
+            ? '✓ All transactional data cleared successfully! Ready for fresh bookings.'
+            : '✓ Database reset to default state successfully!'
         );
         setPassword('');
         setConfirmWord('');
@@ -82,10 +82,10 @@ export default function OwnerResetDatabaseModal({
           onClose();
         }, 2200);
       } else {
-        setError(result.error || 'റീസെറ്റ് ചെയ്യാൻ സാധിച്ചില്ല. നൽകിയ പാസ്‌വേഡ് പരിശോധിക്കുക.');
+        setError(result.error || 'Failed to reset database. Please verify your password.');
       }
     } catch (err: any) {
-      setError(err?.message || 'അപ്രതീക്ഷിത തകരാറുണ്ടായി. വീണ്ടും ശ്രമിക്കുക.');
+      setError(err?.message || 'An unexpected error occurred. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -134,7 +134,7 @@ export default function OwnerResetDatabaseModal({
             </div>
             <div>
               <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>
-                ഡാറ്റാബേസ് റീസെറ്റ് — ഓണർ ഓതന്റിക്കേഷൻ
+                Database Reset — Owner Authentication
               </h2>
               <div style={{ fontSize: '0.78rem', color: '#fca5a5', marginTop: '0.15rem' }}>
                 Owner Security Verification Required
@@ -173,10 +173,10 @@ export default function OwnerResetDatabaseModal({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: '#991b1b', fontWeight: 700, fontSize: '0.88rem' }}>
               <span>⚠️</span>
-              <span>നിർബന്ധിത സുരക്ഷാ പരിശോധന (Security Guard)</span>
+              <span>Mandatory Security Guard</span>
             </div>
             <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.82rem', color: '#7f1d1d', lineHeight: 1.5 }}>
-              ഡാറ്റാബേസിലെ വിവരങ്ങൾ റീസെറ്റ് ചെയ്യാനോ ക്ലിയർ ചെയ്യാനോ ഉള്ള പൂർണ്ണ അധികാരം <strong>ഓണർക്ക് (Owner)</strong> മാത്രമാണ്. തെറ്റായ മാറ്റങ്ങൾ ഒഴിവാക്കാൻ നിങ്ങളുടെ നിലവിലെ ലോഗിൻ പാസ്‌വേഡ് അടിച്ച് റീ-ഓതന്റിക്കേറ്റ് ചെയ്യേണ്ടതുണ്ട്.
+              Permission to reset or clear database records belongs strictly to the <strong>Owner</strong>. To prevent accidental loss, please re-authenticate by entering your current login password below.
             </p>
           </div>
 
@@ -194,7 +194,7 @@ export default function OwnerResetDatabaseModal({
             }}
           >
             <div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>സ്ഥിരീകരിക്കുന്ന അക്കൗണ്ട് (Verifying Account):</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Verifying Account:</div>
               <div style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.9rem' }}>
                 {currentUser?.full_name || 'Fazil (Owner)'} ({currentUser?.username || 'owner'})
               </div>
@@ -217,7 +217,7 @@ export default function OwnerResetDatabaseModal({
           {/* Mode Selector */}
           <div style={{ marginBottom: '1.25rem' }}>
             <label className="form-label" style={{ fontWeight: 700, marginBottom: '0.5rem', display: 'block' }}>
-              റീസെറ്റ് രീതി തിരഞ്ഞെടുക്കുക (Select Action Type):
+              Select Action Type:
             </label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
               <label
@@ -241,10 +241,10 @@ export default function OwnerResetDatabaseModal({
                 />
                 <div>
                   <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#0f172a' }}>
-                    ↺ റീസെറ്റ് ചെയ്ത് ഡീഫോൾട്ട് സാമ്പിൾ ഡാറ്റ ആക്കുക (Restore Seeded Sample Database)
+                    ↺ Restore Seeded Sample Database
                   </div>
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                    ഇനിഷ്യൽ സാമ്പിൾ ഇവന്റുകളും റഫറൻസ് ഡാറ്റയും തിരികെ കൊണ്ടുവരുന്നു. ഓണർ ലോഗിൻ ക്രഡൻഷ്യലുകൾ നഷ്ടപ്പെടില്ല.
+                    Restores initial sample events, recipes, and reference records. Owner login credentials will be preserved.
                   </div>
                 </div>
               </label>
@@ -270,10 +270,10 @@ export default function OwnerResetDatabaseModal({
                 />
                 <div>
                   <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#0f172a' }}>
-                    🗑️ മുഴുവൻ ഇവന്റുകളും ഇൻവോയ്‌സുകളും ക്ലിയർ ചെയ്യുക (Wipe All Transactions - Clean Start)
+                    🗑️ Wipe All Transactions (Clean Start)
                   </div>
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                    പുതിയ ഓർഡറുകൾക്കായി ഇവന്റുകൾ, ഇൻവോയ്‌സുകൾ, പെയ്‌മെന്റുകൾ എന്നിവ ക്ലിയർ ചെയ്യുന്നു. കമ്പനി പ്രൊഫൈലും മെനുവും നിലനിൽക്കും.
+                    Clears all events, invoices, and payments for new orders. Company profile, staff roster, and menu catalogue will remain intact.
                   </div>
                 </div>
               </label>
@@ -283,13 +283,13 @@ export default function OwnerResetDatabaseModal({
           {/* Owner Password Input */}
           <div className="form-group" style={{ marginBottom: '1rem' }}>
             <label className="form-label" style={{ fontWeight: 700 }}>
-              ഓണർ ലോഗിൻ പാസ്‌വേഡ് നൽകുക (Enter Owner Current Password) <span style={{ color: '#ef4444' }}>*</span>
+              Enter Owner Password <span style={{ color: '#ef4444' }}>*</span>
             </label>
             <div style={{ position: 'relative' }}>
               <input
                 type={showPassword ? 'text' : 'password'}
                 className="form-control"
-                placeholder="നിങ്ങളുടെ നിലവിലെ ഓണർ പാസ്‌വേഡ്..."
+                placeholder="Enter your current owner password..."
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={isSubmitting}
@@ -317,14 +317,14 @@ export default function OwnerResetDatabaseModal({
               </button>
             </div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-              ഓണർ പ്രൊഫൈലിലെ യഥാർത്ഥ പാസ്‌വേഡ് അടിച്ച് റീ-ഓതന്റിക്കേറ്റ് ചെയ്യുക.
+              Re-authenticate using your owner profile password.
             </div>
           </div>
 
           {/* Typed Confirmation Box */}
           <div className="form-group" style={{ marginBottom: '1.25rem' }}>
             <label className="form-label" style={{ fontWeight: 700 }}>
-              സ്ഥിരീകരണത്തിനായി താഴെ <code style={{ color: '#ef4444', background: '#fee2e2', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>RESET</code> എന്ന് ടൈപ്പ് ചെയ്യുക:
+              Type <code style={{ color: '#ef4444', background: '#fee2e2', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>RESET</code> below to confirm:
             </label>
             <input
               type="text"
@@ -389,7 +389,7 @@ export default function OwnerResetDatabaseModal({
               onClick={handleClose}
               disabled={isSubmitting}
             >
-              റദ്ദാക്കുക (Cancel)
+              Cancel
             </button>
             <button
               type="submit"
@@ -408,7 +408,7 @@ export default function OwnerResetDatabaseModal({
                 gap: '0.45rem'
               }}
             >
-              {isSubmitting ? 'റീസെറ്റ് ചെയ്യുന്നു...' : '🔐 പാസ്‌വേഡ് സ്ഥിരീകരിച്ച് റീസെറ്റ് ചെയ്യുക'}
+              {isSubmitting ? 'Resetting Database...' : '🔐 Confirm Password & Reset'}
             </button>
           </div>
         </form>

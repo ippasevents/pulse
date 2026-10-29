@@ -40,22 +40,22 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
     setSuccess('');
 
     if (!currentPassword.trim()) {
-      setError('നിലവിലെ പാസ്‌വേഡ് നൽകുക (Please enter current password)');
+      setError('Please enter your current password');
       return;
     }
 
     if (!newPassword.trim()) {
-      setError('പുതിയ പാസ്‌വേഡ് നൽകുക (Please enter new password)');
+      setError('Please enter a new password');
       return;
     }
 
     if (newPassword.trim().length < 4) {
-      setError('പാസ്‌വേഡിൽ കുറഞ്ഞത് 4 അക്ഷരങ്ങളെങ്കിലും ഉണ്ടായിരിക്കണം (Password must be at least 4 characters)');
+      setError('Password must be at least 4 characters');
       return;
     }
 
     if (newPassword.trim() !== confirmPassword.trim()) {
-      setError('നൽകിയ പുതിയ പാസ്‌വേഡുകൾ പരസ്പരം ഒത്തുപോകുന്നില്ല (New password and confirmation do not match)');
+      setError('New password and confirmation do not match');
       return;
     }
 
@@ -64,7 +64,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
     try {
       const res = store.changePassword(currentPassword, newPassword);
       if (res.success) {
-        setSuccess('✓ പാസ്‌വേഡ് വിജയകരമായി അപ്‌ഡേറ്റ് ചെയ്തു! (Password changed successfully!)');
+        setSuccess('✓ Password changed successfully!');
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
@@ -73,10 +73,10 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
           onClose();
         }, 1800);
       } else {
-        setError(res.error || 'പാസ്‌വേഡ് മാറ്റാൻ കഴിഞ്ഞില്ല. ദയവായി വീണ്ടും ശ്രമിക്കുക.');
+        setError(res.error || 'Failed to update password. Please try again.');
       }
     } catch {
-      setError('ഒരു അപ്രതീക്ഷിത തകരാറുണ്ടായി. ദയവായി വീണ്ടും ശ്രമിക്കുക.');
+      setError('An unexpected error occurred. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -136,7 +136,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
                 Change Login Password
               </h2>
               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                ലോഗിൻ പാസ്‌വേഡ് മാറ്റുക
+                Update your account password
               </div>
             </div>
           </div>
@@ -229,7 +229,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
           {/* Current Password */}
           <div className="form-group" style={{ marginBottom: '1rem' }}>
             <label className="form-label" style={{ fontWeight: 600, fontSize: '0.82rem' }}>
-              Current Password (നിലവിലെ പാസ്‌വേഡ്) *
+              Current Password *
             </label>
             <div style={{ position: 'relative' }}>
               <input
@@ -272,7 +272,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
           {/* New Password */}
           <div className="form-group" style={{ marginBottom: '1rem' }}>
             <label className="form-label" style={{ fontWeight: 600, fontSize: '0.82rem' }}>
-              New Password (പുതിയ പാസ്‌വേഡ്) *
+              New Password *
             </label>
             <div style={{ position: 'relative' }}>
               <input
@@ -309,7 +309,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
           {/* Confirm New Password */}
           <div className="form-group" style={{ marginBottom: '1.25rem' }}>
             <label className="form-label" style={{ fontWeight: 600, fontSize: '0.82rem' }}>
-              Confirm New Password (പുതിയ പാസ്‌വേഡ് ഉറപ്പാക്കുക) *
+              Confirm New Password *
             </label>
             <div style={{ position: 'relative' }}>
               <input
@@ -351,7 +351,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
               disabled={isSubmitting}
               style={{ fontSize: '0.85rem' }}
             >
-              Cancel (റദ്ദാക്കുക)
+              Cancel
             </button>
             <button
               type="submit"
@@ -363,7 +363,7 @@ export default function ChangePasswordModal({ isOpen, onClose }: ChangePasswordM
                 padding: '0.6rem 1.25rem'
               }}
             >
-              {isSubmitting ? 'Updating...' : 'Save Password (സേവ് ചെയ്യുക)'}
+              {isSubmitting ? 'Updating...' : 'Save Password'}
             </button>
           </div>
         </form>

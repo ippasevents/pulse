@@ -198,7 +198,7 @@ export default function Navbar() {
                 alignItems: 'center',
                 gap: '0.3rem'
               }}
-              title="Change your login password (പാസ്‌വേഡ് മാറ്റുക)"
+              title="Change your login password"
             >
               🔑 Password
             </button>
@@ -322,7 +322,7 @@ export default function Navbar() {
               onClick={() => setIsChangePasswordOpen(true)}
               className="btn btn-secondary btn-sm"
               style={{ padding: '0.2rem 0.45rem', fontSize: '0.75rem' }}
-              title="Change Password (പാസ്‌വേഡ് മാറ്റുക)"
+              title="Change Password"
             >
               🔑
             </button>
