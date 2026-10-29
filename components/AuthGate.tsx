@@ -238,7 +238,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
             style={{ height: '50px', marginBottom: '1rem', objectFit: 'contain' }}
           />
           <div style={{ color: '#0f172a', fontWeight: 600, fontSize: '0.95rem' }}>
-            Connecting to Live Supabase Database...
+            Connecting Pulse
           </div>
           <div style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '0.3rem' }}>
             Syncing real-time online records
