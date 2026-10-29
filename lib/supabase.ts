@@ -90,6 +90,36 @@ export function getSupabaseClient(): SupabaseClient | null {
   return supabase;
 }
 
+export async function ensureSupabaseOnlineConnection(): Promise<SupabaseClient | null> {
+  if (supabase) {
+    return supabase;
+  }
+
+  const directClient = getSupabaseClient();
+  if (directClient) {
+    return directClient;
+  }
+
+  if (typeof window !== 'undefined' && (typeof navigator === 'undefined' || navigator.onLine)) {
+    try {
+      const res = await fetch('/api/db/config');
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.configured && data?.url && data?.anonKey) {
+          const resSetup = setLiveSupabaseCredentials(data.url, data.anonKey);
+          if (resSetup.success && resSetup.client) {
+            return resSetup.client;
+          }
+        }
+      }
+    } catch {
+      // Offline or network unreachable
+    }
+  }
+
+  return null;
+}
+
 export function setLiveSupabaseCredentials(
   rawUrl: string,
   rawKey: string

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { store } from '@/lib/store';
-import { isSupabaseConfigured, getSupabaseConfig, testSupabaseLiveConnection } from '@/lib/supabase';
+import { isSupabaseConfigured } from '@/lib/supabase';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import OwnerDatabaseExportCard from '@/components/OwnerDatabaseExportCard';
 import { PWAInstallButton } from '@/components/PWAInstallButton';
@@ -17,15 +17,6 @@ export default function SettingsPage() {
   const [isPushingSql, setIsPushingSql] = useState(false);
   const [pushFeedback, setPushFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
-
-  // Live Supabase Connection State
-  const initialSupabaseConfig = getSupabaseConfig();
-  const [supabaseUrlInput, setSupabaseUrlInput] = useState(initialSupabaseConfig.url || '');
-  const [supabaseKeyInput, setSupabaseKeyInput] = useState(initialSupabaseConfig.anonKey || '');
-  const [isConnectingSupabase, setIsConnectingSupabase] = useState(false);
-  const [isTestingSupabase, setIsTestingSupabase] = useState(false);
-  const [connectFeedback, setConnectFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
-  const [copiedSchemaNotice, setCopiedSchemaNotice] = useState(false);
 
   useEffect(() => {
     const unsub = store.subscribe(() => {
@@ -66,68 +57,7 @@ export default function SettingsPage() {
     }
   };
 
-  const handleConnectSupabase = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!supabaseUrlInput.trim() || !supabaseKeyInput.trim()) {
-      setConnectFeedback({ type: 'error', message: 'Please provide both Supabase Project URL and Anon/Public API Key.' });
-      return;
-    }
-    setIsConnectingSupabase(true);
-    setConnectFeedback(null);
-    const res = await store.connectLiveSupabase(supabaseUrlInput.trim(), supabaseKeyInput.trim());
-    setIsConnectingSupabase(false);
-    if (res.success) {
-      setConnectFeedback({
-        type: 'success',
-        message: '🟢 Successfully connected live to Supabase! Realtime synchronization is now active.'
-      });
-      setTimeout(() => setConnectFeedback(null), 6000);
-    } else {
-      setConnectFeedback({
-        type: 'error',
-        message: res.error || 'Failed to connect to Supabase.'
-      });
-    }
-  };
-
-  const handleTestSupabase = async () => {
-    if (!supabaseUrlInput.trim() || !supabaseKeyInput.trim()) {
-      setConnectFeedback({ type: 'error', message: 'Enter your Project URL and Anon Key first to test the connection.' });
-      return;
-    }
-    setIsTestingSupabase(true);
-    setConnectFeedback(null);
-    const res = await testSupabaseLiveConnection(supabaseUrlInput.trim(), supabaseKeyInput.trim());
-    setIsTestingSupabase(false);
-    setConnectFeedback({
-      type: res.success ? 'success' : 'error',
-      message: res.message
-    });
-  };
-
-  const handleDisconnectSupabase = async () => {
-    if (confirm('Disconnect live Supabase database? Local offline changes will remain safely in browser storage.')) {
-      await store.disconnectLiveSupabase();
-      setSupabaseUrlInput('');
-      setSupabaseKeyInput('');
-      setConnectFeedback({ type: 'info', message: 'Disconnected from Supabase database. App is running in offline local mode.' });
-      setTimeout(() => setConnectFeedback(null), 4000);
-    }
-  };
-
-  const handleCopySchemaSql = async () => {
-    try {
-      const res = await fetch('/schema.sql');
-      const text = await res.text();
-      await navigator.clipboard.writeText(text);
-      setCopiedSchemaNotice(true);
-      setTimeout(() => setCopiedSchemaNotice(false), 3000);
-    } catch {
-      alert('Could not copy schema.sql. Please open schema.sql from the project files.');
-    }
-  };
-
-  const isSqlActive = syncStatus.isConnected || isSupabaseConfigured;
+  const isSqlActive = syncStatus.isConnected || store.isSqlConnected();
 
   return (
     <div>
@@ -362,7 +292,7 @@ export default function SettingsPage() {
           {/* Owner-Only Full Database Download (Excel / CSV) */}
           <OwnerDatabaseExportCard role={role} />
 
-          {/* Live Supabase Database Connection & Architecture Card */}
+          {/* Automatic Cloud Database & Realtime Sync Card */}
           <div className="card" style={{ marginBottom: '1.25rem', borderLeft: isSqlActive ? '4px solid #10b981' : '4px solid #f59e0b' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -372,73 +302,70 @@ export default function SettingsPage() {
                     width: '10px',
                     height: '10px',
                     borderRadius: '50%',
-                    background: syncStatus.error ? '#ef4444' : isSqlActive ? 'var(--success)' : '#f59e0b'
+                    background: syncStatus.error ? '#ef4444' : isSqlActive ? '#10b981' : '#f59e0b',
+                    boxShadow: isSqlActive ? '0 0 8px #10b981' : undefined
                   }}
                 />
                 <h2 className="card-title" style={{ margin: 0 }}>
-                  {isSqlActive ? '🟢 Live Connected to Supabase' : '⚡ Connect Live Supabase Database'}
+                  {isSqlActive ? '☁️ Supabase Cloud Database' : '☁️ Cloud Database (Offline)'}
                 </h2>
               </div>
 
-              {isSqlActive && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={syncStatus.isSyncing || isPushingSql}
+                  onClick={() => store.syncFromSupabase()}
+                  title="Pull latest records from cloud database"
+                >
+                  {syncStatus.isSyncing ? 'Syncing...' : '↻ Sync Now'}
+                </button>
+                {isOwner && (
                   <button
                     type="button"
-                    className="btn btn-secondary btn-sm"
-                    disabled={syncStatus.isSyncing || isPushingSql}
-                    onClick={() => store.syncFromSupabase()}
+                    className="btn btn-primary btn-sm"
+                    disabled={isPushingSql || syncStatus.isWriting}
+                    onClick={handlePushAllToSql}
+                    title="Push all local records to Supabase tables"
                   >
-                    {syncStatus.isSyncing ? 'Syncing...' : '↻ Pull from SQL'}
+                    {isPushingSql ? 'Pushing to Cloud...' : '⬆️ Push All Data to Cloud'}
                   </button>
-                  {isOwner && (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      disabled={isPushingSql || syncStatus.isWriting}
-                      onClick={handlePushAllToSql}
-                    >
-                      {isPushingSql ? 'Pushing to SQL...' : '⬆️ Push All Data to SQL'}
-                    </button>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.6 }}>
-              {/* Active Connection Info Banner */}
               {isSqlActive ? (
                 <div
                   style={{
                     background: '#f0fdf4',
                     border: '1px solid #bbf7d0',
                     borderRadius: '8px',
-                    padding: '0.75rem 0.9rem',
-                    marginBottom: '1rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    flexWrap: 'wrap',
-                    gap: '0.5rem'
+                    padding: '0.75rem 0.95rem',
+                    marginBottom: '0.85rem'
                   }}
                 >
-                  <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.4rem' }}>
                     <div style={{ fontWeight: 700, color: '#166534', fontSize: '0.88rem' }}>
-                      ✓ Real-time PostgreSQL Sync Active
+                      ✓ Live Connected &bull; Realtime Two-Way Sync Active
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: '#15803d', marginTop: '0.15rem' }}>
-                      URL: {supabaseUrlInput ? supabaseUrlInput.replace(/https?:\/\//, '') : 'Configured via Environment'} &bull; Realtime updates enabled
-                    </div>
-                  </div>
-                  {isOwner && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', color: '#dc2626', borderColor: '#fca5a5' }}
-                      onClick={handleDisconnectSupabase}
+                    <span
+                      style={{
+                        background: '#dcfce7',
+                        color: '#15803d',
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: '9999px',
+                        fontSize: '0.72rem',
+                        fontWeight: 700
+                      }}
                     >
-                      Disconnect / Reconfigure
-                    </button>
-                  )}
+                      AUTOMATIC ONLINE SYNC
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#15803d', marginTop: '0.35rem' }}>
+                    Every event create, edit, invoice, quotation, stock purchase, and staff payment writes directly to your Supabase PostgreSQL cloud database in real time.
+                  </div>
                 </div>
               ) : (
                 <div
@@ -446,101 +373,27 @@ export default function SettingsPage() {
                     background: '#fffbeb',
                     border: '1px solid #fef3c7',
                     borderRadius: '8px',
-                    padding: '0.75rem 0.9rem',
-                    marginBottom: '1rem',
+                    padding: '0.75rem 0.95rem',
+                    marginBottom: '0.85rem',
                     color: '#92400e'
                   }}
                 >
-                  <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>
-                    Connect your Supabase project live
-                  </div>
-                  <div style={{ fontSize: '0.78rem', marginTop: '0.2rem' }}>
-                    Enter your Supabase Project URL and Anon/Public API Key below to activate instant two-way database synchronization.
-                  </div>
-                </div>
-              )}
-
-              {/* Live Connection Form for Owner */}
-              {isOwner && (!isSqlActive || connectFeedback) && (
-                <form
-                  onSubmit={handleConnectSupabase}
-                  style={{
-                    background: '#f8fafc',
-                    border: '1px solid var(--border)',
-                    borderRadius: '8px',
-                    padding: '1rem',
-                    marginBottom: '1rem'
-                  }}
-                >
-                  <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a', marginBottom: '0.75rem' }}>
-                    🔑 Live Supabase Credentials
-                  </div>
-
-                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
-                    <label className="form-label" style={{ fontSize: '0.78rem' }}>
-                      Supabase Project URL *
-                    </label>
-                    <input
-                      type="url"
-                      className="form-control"
-                      placeholder="https://xyzcompany.supabase.co"
-                      value={supabaseUrlInput}
-                      onChange={(e) => setSupabaseUrlInput(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="form-group" style={{ marginBottom: '0.85rem' }}>
-                    <label className="form-label" style={{ fontSize: '0.78rem' }}>
-                      Supabase Anon / Public API Key *
-                    </label>
-                    <input
-                      type="password"
-                      className="form-control"
-                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                      value={supabaseKeyInput}
-                      onChange={(e) => setSupabaseKeyInput(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <button
-                      type="submit"
-                      disabled={isConnectingSupabase || isTestingSupabase}
-                      className="btn btn-primary btn-sm"
-                      style={{ fontWeight: 700 }}
-                    >
-                      {isConnectingSupabase ? 'Connecting...' : '⚡ Connect Live to Supabase'}
-                    </button>
-
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>
+                      🟡 Offline Mode &bull; Safe Local Storage
+                    </div>
                     <button
                       type="button"
-                      disabled={isConnectingSupabase || isTestingSupabase}
-                      onClick={handleTestSupabase}
                       className="btn btn-secondary btn-sm"
-                      style={{ fontWeight: 600 }}
+                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}
+                      onClick={() => store.autoConnectSupabaseWhenOnline()}
                     >
-                      {isTestingSupabase ? 'Testing...' : '🧪 Test Connection'}
+                      🔄 Reconnect Cloud
                     </button>
                   </div>
-                </form>
-              )}
-
-              {connectFeedback && (
-                <div
-                  style={{
-                    background: connectFeedback.type === 'success' ? '#dcfce7' : connectFeedback.type === 'info' ? '#eff6ff' : '#fee2e2',
-                    border: `1px solid ${connectFeedback.type === 'success' ? '#86efac' : connectFeedback.type === 'info' ? '#93c5fd' : '#fca5a5'}`,
-                    color: connectFeedback.type === 'success' ? '#15803d' : connectFeedback.type === 'info' ? '#1e40af' : '#991b1b',
-                    padding: '0.65rem 0.8rem',
-                    borderRadius: '6px',
-                    fontSize: '0.8rem',
-                    marginBottom: '0.85rem',
-                    fontWeight: 600
-                  }}
-                >
-                  {connectFeedback.message}
+                  <div style={{ fontSize: '0.8rem', marginTop: '0.35rem' }}>
+                    You are currently offline. You can continue creating events, invoices, and logging payments without interruption. All changes are stored locally and will automatically connect and sync to Supabase once back online.
+                  </div>
                 </div>
               )}
 
@@ -573,37 +426,9 @@ export default function SettingsPage() {
                     marginBottom: '0.75rem'
                   }}
                 >
-                  <strong>Database Error:</strong> {syncStatus.error}
-                  <div style={{ marginTop: '0.25rem' }}>
-                    Please run the updated <code>schema.sql</code> in your Supabase SQL Editor so all tables, cascade keys, and write policies are active.
-                  </div>
+                  <strong>Cloud Database Notice:</strong> {syncStatus.error}
                 </div>
               )}
-
-              <p style={{ marginBottom: '0.75rem' }}>
-                Every create, edit, stock adjustment, recipe change, quotation update, shift assignment, salary entry, invoice, payment, and deletion automatically writes to your PostgreSQL (Supabase) tables in strict foreign-key order with offline retry protection.
-              </p>
-
-              <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  <div style={{ fontWeight: 700, fontSize: '0.82rem', color: '#0f172a' }}>
-                    📋 Supabase SQL Setup Checklist:
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleCopySchemaSql}
-                    className="btn btn-secondary btn-sm"
-                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
-                  >
-                    {copiedSchemaNotice ? '✓ Copied schema.sql!' : '📋 Copy schema.sql'}
-                  </button>
-                </div>
-                <ol style={{ paddingLeft: '1.25rem', margin: 0, fontSize: '0.78rem', lineHeight: 1.6 }}>
-                  <li>Run <code>schema.sql</code> in your Supabase SQL Editor (idempotent — configures all 18 tables, RLS write policies, Realtime, and audit triggers in one run)</li>
-                  <li>Enter your Project URL and Anon Key above and click <strong>"Connect Live to Supabase"</strong></li>
-                  <li>Optional: Set <code>SMTP_HOST=smtp.gmail.com</code>, <code>SMTP_PORT=465</code>, <code>SMTP_USER</code>, and <code>SMTP_PASS</code> in Vercel for automatic background invoice delivery</li>
-                </ol>
-              </div>
             </div>
           </div>
 

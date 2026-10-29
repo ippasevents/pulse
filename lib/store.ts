@@ -3,6 +3,7 @@
 import {
   supabase,
   isSupabaseConfigured,
+  ensureSupabaseOnlineConnection,
   setLiveSupabaseCredentials,
   clearLiveSupabaseCredentials,
   onSupabaseConfigChange,
@@ -713,17 +714,21 @@ class DataStore {
         }
       });
 
-      // Automatically flush any queued SQL updates as soon as network comes back online
+      // Connect Supabase automatically when online
       window.addEventListener('online', () => {
-        if (this.isSqlConnected()) {
-          this.flushPendingSqlWrites().then(() => this.scheduleSilentSync(200));
-        }
+        this.autoConnectSupabaseWhenOnline();
+      });
+
+      window.addEventListener('offline', () => {
+        this.isSyncingState = false;
+        this.isWritingState = false;
+        this.notify();
       });
 
       // Auto-refresh & flush pending SQL writes when returning to window/tab
       window.addEventListener('focus', () => {
-        if (this.isSqlConnected()) {
-          this.flushPendingSqlWrites().then(() => this.scheduleSilentSync(150));
+        if (typeof navigator === 'undefined' || navigator.onLine) {
+          this.autoConnectSupabaseWhenOnline();
         } else {
           this.notify();
         }
@@ -731,15 +736,15 @@ class DataStore {
 
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-          if (this.isSqlConnected()) {
-            this.flushPendingSqlWrites().then(() => this.scheduleSilentSync(150));
+          if (typeof navigator === 'undefined' || navigator.onLine) {
+            this.autoConnectSupabaseWhenOnline();
           } else {
             this.notify();
           }
         }
       });
 
-      this.initializeSqlSync();
+      this.autoConnectSupabaseWhenOnline();
 
       onSupabaseConfigChange(async () => {
         this.serverDbConfigured = Boolean(isSupabaseConfigured);
@@ -796,27 +801,48 @@ class DataStore {
     this.notify();
   }
 
-  private async initializeSqlSync() {
-    if (isSupabaseConfigured && supabase) {
-      await this.flushPendingSqlWrites();
-      await this.syncFromSupabase();
-      this.setupRealtimeSubscription();
+  public async autoConnectSupabaseWhenOnline(): Promise<void> {
+    if (typeof window === 'undefined') return;
+
+    const isOnline = typeof navigator === 'undefined' || navigator.onLine;
+    if (!isOnline) {
+      this.isSyncingState = false;
+      this.isWritingState = false;
+      this.notify();
       return;
     }
 
-    // Check if Supabase credentials are configured on the server (/api/db)
     try {
-      const res = await fetch('/api/db?mode=status');
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.configured) {
-          this.serverDbConfigured = true;
-          await this.flushPendingSqlWrites();
-          await this.syncFromSupabase();
-        }
+      // 1. Ensure client-side Supabase client is connected
+      const client = await ensureSupabaseOnlineConnection();
+      if (client) {
+        this.serverDbConfigured = true;
       }
-    } catch {
-      // Offline or server unavailable; local queue remains intact
+
+      // 2. Also check server endpoint
+      try {
+        const res = await fetch('/api/db?mode=status');
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.configured) {
+            this.serverDbConfigured = true;
+          }
+        }
+      } catch {
+        // offline or local network
+      }
+
+      // 3. If connected, setup Realtime, flush pending writes, and sync
+      if (this.isSqlConnected()) {
+        this.clearDbError();
+        this.setupRealtimeSubscription();
+        await this.flushPendingSqlWrites();
+        await this.syncFromSupabase();
+      }
+    } catch (err: any) {
+      console.warn('[Auto-Connect Supabase]', err);
+    } finally {
+      this.notify();
     }
   }
 

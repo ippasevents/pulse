@@ -19,7 +19,7 @@ export async function GET() {
   return NextResponse.json({
     configured: isConfigured,
     url: url || null,
-    maskedKey: key ? `${key.slice(0, 6)}...${key.slice(-4)}` : null
+    anonKey: key || null
   });
 }
 

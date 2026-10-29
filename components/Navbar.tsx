@@ -142,7 +142,7 @@ export default function Navbar() {
                   fontWeight: 600,
                   textDecoration: 'none'
                 }}
-                title="Running in local mode. Click to connect Supabase."
+                title="Running in local storage mode. Connects and syncs automatically to Supabase when online."
               >
                 <span
                   style={{
