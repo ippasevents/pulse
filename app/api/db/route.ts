@@ -7,6 +7,13 @@ import * as dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 dotenv.config();
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+const NO_STORE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+};
+
 export type DbOperation =
   | {
       type: 'upsert';
@@ -29,6 +36,10 @@ export type DbOperation =
       type: 'delete';
       table: string;
       match: Record<string, any>;
+    }
+  | {
+      type: 'delete_all';
+      table: string;
     };
 
 const ALLOWED_TABLES = new Set([
@@ -125,6 +136,11 @@ async function runSingleCloudSqlOperation(
   }
 
   try {
+    if (op.type === 'delete_all') {
+      await pool.query(`DELETE FROM "${op.table}"`);
+      return { error: null };
+    }
+
     if (op.type === 'delete') {
       const matchEntries = Object.entries(op.match || {});
       if (matchEntries.length === 0) return { error: null };
@@ -196,6 +212,25 @@ async function runSingleSupabaseOperation(
 ): Promise<{ error: any | null }> {
   if (!ALLOWED_TABLES.has(op.table)) {
     return { error: { message: `Disallowed table: ${op.table}` } };
+  }
+
+  if (op.type === 'delete_all') {
+    if (op.table === 'menu_item_ingredients') {
+      const { error } = await sb
+        .from(op.table)
+        .delete()
+        .neq('menu_item_id', '00000000-0000-0000-0000-000000000000');
+      return { error };
+    }
+    if (op.table === 'business_settings') {
+      const { error } = await sb.from(op.table).delete().neq('id', -1);
+      return { error };
+    }
+    const { error } = await sb
+      .from(op.table)
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+    return { error };
   }
 
   if (op.type === 'delete') {
@@ -309,14 +344,56 @@ export async function GET(req: NextRequest) {
 
   const mode = req.nextUrl.searchParams.get('mode');
   if (mode === 'status') {
-    return NextResponse.json({
-      configured: isConfigured,
-      engine: dbType
-    });
+    return NextResponse.json(
+      {
+        configured: isConfigured,
+        engine: dbType
+      },
+      { headers: NO_STORE_HEADERS }
+    );
+  }
+
+  if (mode === 'ping') {
+    if (!isConfigured) {
+      return NextResponse.json(
+        { configured: false, online: false, error: 'Supabase is not configured.' },
+        { status: 503, headers: NO_STORE_HEADERS }
+      );
+    }
+    if (sb) {
+      try {
+        const { error } = await sb.from('business_settings').select('id').limit(1);
+        if (
+          error &&
+          (String(error.message || '').toLowerCase().includes('fetch') ||
+            String(error.message || '').toLowerCase().includes('network') ||
+            String(error.message || '').toLowerCase().includes('enotfound') ||
+            String(error.message || '').toLowerCase().includes('econnrefused'))
+        ) {
+          return NextResponse.json(
+            { configured: true, online: false, error: error.message },
+            { status: 503, headers: NO_STORE_HEADERS }
+          );
+        }
+        return NextResponse.json(
+          { configured: true, online: true, engine: 'supabase' },
+          { headers: NO_STORE_HEADERS }
+        );
+      } catch (err: any) {
+        return NextResponse.json(
+          { configured: true, online: false, error: err?.message || 'Supabase unreachable' },
+          { status: 503, headers: NO_STORE_HEADERS }
+        );
+      }
+    }
+    return NextResponse.json(
+      { configured: true, online: true, engine: dbType },
+      { headers: NO_STORE_HEADERS }
+    );
   }
 
   if (!isConfigured) {
-    return NextResponse.json({ configured: false });
+    return NextResponse.json({ configured: false }, { headers: NO_STORE_HEADERS });
   }
 
   // Read via Cloud SQL (pg Pool)
@@ -442,42 +519,46 @@ export async function GET(req: NextRequest) {
         sb.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(400)
       ]);
 
-      return NextResponse.json({
-        configured: true,
-        engine: 'supabase',
-        results: {
-          settingsRes,
-          profilesRes,
-          clientsRes,
-          ingredientsRes,
-          menuItemsRes,
-          recipesRes,
-          eventsRes,
-          eventItemsRes,
-          eventExtrasRes,
-          staffRes,
-          shiftsRes,
-          salaryRecordsRes,
-          invoicesRes,
-          paymentsRes,
-          purchasesRes,
-          purchaseItemsRes,
-          purchasePaymentsRes,
-          activityLogsRes
-        }
-      });
+      return NextResponse.json(
+        {
+          configured: true,
+          engine: 'supabase',
+          results: {
+            settingsRes,
+            profilesRes,
+            clientsRes,
+            ingredientsRes,
+            menuItemsRes,
+            recipesRes,
+            eventsRes,
+            eventItemsRes,
+            eventExtrasRes,
+            staffRes,
+            shiftsRes,
+            salaryRecordsRes,
+            invoicesRes,
+            paymentsRes,
+            purchasesRes,
+            purchaseItemsRes,
+            purchasePaymentsRes,
+            activityLogsRes
+          }
+        },
+        { headers: NO_STORE_HEADERS }
+      );
     } catch (err: any) {
       return NextResponse.json(
         {
           configured: true,
-          error: err?.message || 'Failed to read from SQL database.'
+          online: false,
+          error: err?.message || 'Failed to read from Supabase database.'
         },
-        { status: 500 }
+        { status: 503, headers: NO_STORE_HEADERS }
       );
     }
   }
 
-  return NextResponse.json({ configured: false });
+  return NextResponse.json({ configured: false }, { headers: NO_STORE_HEADERS });
 }
 
 export async function POST(req: NextRequest) {

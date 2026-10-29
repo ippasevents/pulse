@@ -5,22 +5,32 @@ import { createClient } from '@supabase/supabase-js';
 
 const ENV_LOCAL_PATH = path.join(process.cwd(), '.env.local');
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
   const key = (
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
     ''
   ).trim();
 
   const isConfigured = Boolean(url && key && url.startsWith('http') && !url.includes('your-project'));
 
-  return NextResponse.json({
-    configured: isConfigured,
-    url: url || null,
-    anonKey: key || null
-  });
+  return NextResponse.json(
+    {
+      configured: isConfigured,
+      url: url || null,
+      anonKey: key || null
+    },
+    {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    }
+  );
 }
 
 export async function POST(req: NextRequest) {

@@ -648,6 +648,7 @@ export interface AppState {
 const STORAGE_KEY = 'ippas_catering_manager_state';
 const SESSION_KEY = 'ippas_catering_auth_session';
 const PENDING_SQL_OPS_KEY = 'ippas_catering_pending_sql_ops';
+const BOOTSTRAP_KEY = 'ippas_catering_sql_bootstrapped';
 
 type SqlOperation =
   | {
@@ -671,6 +672,10 @@ type SqlOperation =
       type: 'delete';
       table: string;
       match: Record<string, any>;
+    }
+  | {
+      type: 'delete_all';
+      table: string;
     };
 
 interface PendingSqlBatch {
@@ -686,84 +691,169 @@ class DataStore {
   private isSyncingState: boolean = false;
   private isWritingState: boolean = false;
   private serverDbConfigured: boolean = false;
+  private isInternetConnected: boolean = true;
+  private hasInitialRemoteLoaded: boolean = false;
   private pendingSqlBatches: PendingSqlBatch[] = [];
   private writeChain: Promise<void> = Promise.resolve();
   private realtimeSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private keepAliveInterval: ReturnType<typeof setInterval> | null = null;
+  private realtimeChannel: any = null;
+  private realtimeReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSilentSyncAt: number = 0;
   private recentLocalMutations: Map<string, number> = new Map();
 
   constructor() {
     this.state = this.loadInitial();
     if (typeof window !== 'undefined') {
-      this.loadPendingSqlBatches();
+      // Purge any legacy offline/local DB caches permanently
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(PENDING_SQL_OPS_KEY);
+        localStorage.removeItem(BOOTSTRAP_KEY);
+      } catch {
+        // ignore storage restrictions
+      }
 
-      // Cross-tab instant localStorage sync
+      this.isInternetConnected = typeof navigator === 'undefined' ? true : navigator.onLine;
+
+      // Cross-tab auth session sync only (no local DB data)
       window.addEventListener('storage', (e) => {
-        if (e.key === STORAGE_KEY && e.newValue) {
+        if (e.key === SESSION_KEY) {
           try {
-            const parsed = JSON.parse(e.newValue);
-            this.state = {
-              ...this.state,
-              ...parsed,
-              _version: (this.state._version || 0) + 1
-            };
-            this.listeners.forEach((cb) => cb());
+            const session = e.newValue ? JSON.parse(e.newValue) : null;
+            this.state.isAuthenticated = Boolean(session?.isAuthenticated);
+            if (session?.currentRole) this.state.currentRole = session.currentRole;
+            if (session?.currentUserId) this.state.currentUserId = session.currentUserId;
+            this.notify();
           } catch {
-            // ignore malformed storage payload
+            // ignore
           }
         }
       });
 
-      // Connect Supabase automatically when online
+      // Immediately reconnect & sync from live Supabase when internet returns
       window.addEventListener('online', () => {
         this.autoConnectSupabaseWhenOnline();
       });
 
+      // Immediately block all pages when internet disconnects
       window.addEventListener('offline', () => {
+        this.isInternetConnected = false;
         this.isSyncingState = false;
         this.isWritingState = false;
         this.notify();
       });
 
-      // Auto-refresh & flush pending SQL writes when returning to window/tab
       window.addEventListener('focus', () => {
-        if (typeof navigator === 'undefined' || navigator.onLine) {
-          this.autoConnectSupabaseWhenOnline();
-        } else {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          this.isInternetConnected = false;
           this.notify();
+        } else {
+          this.checkOnlineHeartbeat(true);
         }
       });
 
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-          if (typeof navigator === 'undefined' || navigator.onLine) {
-            this.autoConnectSupabaseWhenOnline();
-          } else {
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            this.isInternetConnected = false;
             this.notify();
+          } else {
+            this.checkOnlineHeartbeat(true);
           }
         }
       });
 
+      // Connect to Supabase immediately on every boot
       this.autoConnectSupabaseWhenOnline();
+
+      // Continuous keep-alive heartbeat every 12 seconds so connection never drops silently
+      this.keepAliveInterval = setInterval(() => {
+        this.checkOnlineHeartbeat(false);
+      }, 12000);
 
       onSupabaseConfigChange(async () => {
         this.serverDbConfigured = Boolean(isSupabaseConfigured);
         if (isSupabaseConfigured && supabase) {
-          this.setupRealtimeSubscription();
-          await this.flushPendingSqlWrites();
-          await this.syncFromSupabase();
+          this.setupRealtimeSubscription(true);
+          await this.syncFromSupabase(true);
         }
         this.notify();
       });
     }
   }
 
+  public isOnline(): boolean {
+    if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && !navigator.onLine) {
+      return false;
+    }
+    return this.isInternetConnected;
+  }
+
+  public isInitialSyncDone(): boolean {
+    return this.hasInitialRemoteLoaded;
+  }
+
   public isSqlConnected(): boolean {
-    return Boolean(isSupabaseConfigured || this.serverDbConfigured);
+    return this.isOnline() && Boolean(isSupabaseConfigured || this.serverDbConfigured);
   }
 
   public getLiveSupabaseConfig() {
     return getSupabaseConfig();
+  }
+
+  public async checkOnlineHeartbeat(syncDataToo: boolean = false): Promise<boolean> {
+    if (typeof window === 'undefined') return true;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (this.isInternetConnected) {
+        this.isInternetConnected = false;
+        this.notify();
+      }
+      return false;
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch('/api/db?mode=ping', {
+        cache: 'no-store',
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        this.isInternetConnected = false;
+        this.notify();
+        return false;
+      }
+
+      const data = await res.json();
+      if (!data?.configured || data?.online === false) {
+        this.isInternetConnected = false;
+        this.notify();
+        return false;
+      }
+
+      const wasDisconnected = !this.isInternetConnected || !this.hasInitialRemoteLoaded;
+      this.serverDbConfigured = true;
+      this.isInternetConnected = true;
+
+      if (!supabase || !isSupabaseConfigured) {
+        await ensureSupabaseOnlineConnection();
+      }
+      this.setupRealtimeSubscription(false);
+
+      if (wasDisconnected || syncDataToo) {
+        await this.syncFromSupabase(true);
+      } else {
+        this.notify();
+      }
+      return true;
+    } catch {
+      this.isInternetConnected = false;
+      this.notify();
+      return false;
+    }
   }
 
   public async connectLiveSupabase(url: string, anonKey: string): Promise<{ success: boolean; error?: string }> {
@@ -779,33 +869,27 @@ class DataStore {
         body: JSON.stringify({ url, anonKey })
       });
     } catch {
-      // Continue even if local network error
+      return { success: false, error: 'Internet disconnected while saving Supabase configuration.' };
     }
 
     this.serverDbConfigured = true;
-    this.setupRealtimeSubscription();
-    await this.flushPendingSqlWrites();
-    await this.syncFromSupabase();
+    this.isInternetConnected = true;
+    this.setupRealtimeSubscription(true);
+    await this.syncFromSupabase(false);
     this.notify();
     return { success: true };
   }
 
   public async disconnectLiveSupabase(): Promise<void> {
     clearLiveSupabaseCredentials();
-    try {
-      await fetch('/api/db/config', { method: 'DELETE' });
-    } catch {
-      // ignore
-    }
-    this.serverDbConfigured = false;
     this.notify();
   }
 
   public async autoConnectSupabaseWhenOnline(): Promise<void> {
     if (typeof window === 'undefined') return;
 
-    const isOnline = typeof navigator === 'undefined' || navigator.onLine;
-    if (!isOnline) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      this.isInternetConnected = false;
       this.isSyncingState = false;
       this.isWritingState = false;
       this.notify();
@@ -813,65 +897,43 @@ class DataStore {
     }
 
     try {
-      // 1. Ensure client-side Supabase client is connected
+      // 1. Verify live server + Supabase reachability first
+      const pingRes = await fetch('/api/db?mode=ping', { cache: 'no-store' });
+      if (!pingRes.ok) {
+        this.isInternetConnected = false;
+        this.notify();
+        return;
+      }
+      const pingData = await pingRes.json();
+      if (!pingData?.configured || pingData?.online === false) {
+        this.isInternetConnected = false;
+        this.notify();
+        return;
+      }
+
+      this.serverDbConfigured = true;
+      this.isInternetConnected = true;
+
+      // 2. Ensure browser Realtime Supabase client is initialized
       const client = await ensureSupabaseOnlineConnection();
       if (client) {
         this.serverDbConfigured = true;
       }
 
-      // 2. Also check server endpoint
-      try {
-        const res = await fetch('/api/db?mode=status');
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.configured) {
-            this.serverDbConfigured = true;
-          }
-        }
-      } catch {
-        // offline or local network
-      }
-
-      // 3. If connected, setup Realtime, flush pending writes, and sync
-      if (this.isSqlConnected()) {
-        this.clearDbError();
-        this.setupRealtimeSubscription();
-        await this.flushPendingSqlWrites();
-        await this.syncFromSupabase();
-      }
+      // 3. Setup Realtime WebSocket and pull fresh data directly from online Supabase
+      this.clearDbError();
+      this.setupRealtimeSubscription(false);
+      await this.syncFromSupabase(!this.hasInitialRemoteLoaded ? false : true);
     } catch (err: any) {
       console.warn('[Auto-Connect Supabase]', err);
+      this.isInternetConnected = false;
     } finally {
       this.notify();
     }
   }
 
-  private loadPendingSqlBatches() {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = localStorage.getItem(PENDING_SQL_OPS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          this.pendingSqlBatches = parsed;
-        }
-      }
-    } catch {
-      this.pendingSqlBatches = [];
-    }
-  }
-
   private savePendingSqlBatches() {
-    if (typeof window === 'undefined') return;
-    try {
-      if (this.pendingSqlBatches.length === 0) {
-        localStorage.removeItem(PENDING_SQL_OPS_KEY);
-      } else {
-        localStorage.setItem(PENDING_SQL_OPS_KEY, JSON.stringify(this.pendingSqlBatches));
-      }
-    } catch {
-      // ignore storage quota errors
-    }
+    // Offline queue persistence disabled: app operates strictly online against Supabase
   }
 
   private extractMissingColumn(errMsg: string): string | null {
@@ -900,6 +962,25 @@ class DataStore {
 
   private async runClientSingleOperation(op: SqlOperation): Promise<{ error: any | null }> {
     if (!supabase) return { error: { message: 'Client Supabase not initialized' } };
+
+    if (op.type === 'delete_all') {
+      if (op.table === 'menu_item_ingredients') {
+        const { error } = await supabase
+          .from(op.table)
+          .delete()
+          .neq('menu_item_id', '00000000-0000-0000-0000-000000000000');
+        return { error };
+      }
+      if (op.table === 'business_settings') {
+        const { error } = await supabase.from(op.table).delete().neq('id', -1);
+        return { error };
+      }
+      const { error } = await supabase
+        .from(op.table)
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000');
+      return { error };
+    }
 
     if (op.type === 'delete') {
       let q = supabase.from(op.table).delete();
@@ -1057,21 +1138,13 @@ class DataStore {
   public flushPendingSqlWrites(): Promise<void> {
     this.writeChain = this.writeChain.then(async () => {
       if (this.pendingSqlBatches.length === 0) return;
-      if (!isSupabaseConfigured && !this.serverDbConfigured) {
-        // Double-check server API once if batches were queued before status check resolved
-        try {
-          const st = await fetch('/api/db?mode=status').then((r) => r.json());
-          if (st?.configured) {
-            this.serverDbConfigured = true;
-          } else {
-            // No SQL database configured at all; clear queue silently
-            this.pendingSqlBatches = [];
-            this.savePendingSqlBatches();
-            return;
-          }
-        } catch {
-          return;
-        }
+
+      if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && !navigator.onLine) {
+        this.pendingSqlBatches = [];
+        this.isInternetConnected = false;
+        this.isWritingState = false;
+        this.notify();
+        return;
       }
 
       this.isWritingState = true;
@@ -1082,7 +1155,16 @@ class DataStore {
         let lastError: any = null;
         let transientFailure = false;
 
-        if (isSupabaseConfigured && supabase) {
+        // Primary write path: Server /api/db (uses SUPABASE_SERVICE_ROLE_KEY directly against online Supabase)
+        const serverRes = await this.sendBatchViaServerApi(batch.operations);
+        if (serverRes.success) {
+          succeeded = true;
+          this.isInternetConnected = true;
+        } else if (serverRes.networkFailed) {
+          transientFailure = true;
+          lastError = { message: serverRes.error };
+        } else if (isSupabaseConfigured && supabase) {
+          // Secondary fallback via live browser Supabase client
           let clientFailed = false;
           for (const op of batch.operations) {
             const { error } = await this.runClientSingleOperation(op);
@@ -1095,47 +1177,24 @@ class DataStore {
               break;
             }
           }
-
           if (!clientFailed) {
             succeeded = true;
-          } else if (!transientFailure) {
-            // Fallback to server API (e.g. if SUPABASE_SERVICE_ROLE_KEY is configured server-side)
-            const serverRes = await this.sendBatchViaServerApi(batch.operations);
-            if (serverRes.success) {
-              succeeded = true;
-            } else if (serverRes.networkFailed) {
-              transientFailure = true;
-            } else if (serverRes.error) {
-              lastError = { message: serverRes.error };
-            }
           }
         } else {
-          const serverRes = await this.sendBatchViaServerApi(batch.operations);
-          if (serverRes.success) {
-            succeeded = true;
-          } else if (serverRes.networkFailed) {
-            transientFailure = true;
-            lastError = { message: serverRes.error };
-          } else if (!serverRes.configured) {
-            this.pendingSqlBatches = [];
-            this.savePendingSqlBatches();
-            break;
-          } else {
-            lastError = { message: serverRes.error };
-          }
+          lastError = { message: serverRes.error };
         }
 
         if (succeeded) {
           this.pendingSqlBatches.shift();
-          this.savePendingSqlBatches();
           this.clearDbError();
         } else if (transientFailure) {
-          // Keep in persistent queue to auto-retry when network recovers
+          // Immediately transition to Internet Disconnected state; do not queue offline edits
+          this.pendingSqlBatches = [];
+          this.isInternetConnected = false;
+          this.notify();
           break;
         } else {
-          // Schema / constraint error: report clearly and drop offending batch so subsequent changes aren't blocked
           this.pendingSqlBatches.shift();
-          this.savePendingSqlBatches();
           this.reportDbError(batch.label, lastError);
         }
       }
@@ -1148,12 +1207,16 @@ class DataStore {
 
   private enqueueSqlOperations(label: string, operations: SqlOperation[]) {
     if (!operations || operations.length === 0) return;
+    if (!this.isOnline()) {
+      this.isInternetConnected = false;
+      this.notify();
+      return;
+    }
     this.pendingSqlBatches.push({
       id: generateUUID(),
       label,
       operations
     });
-    this.savePendingSqlBatches();
     this.flushPendingSqlWrites();
   }
 
@@ -1312,242 +1375,30 @@ class DataStore {
     return [{ type: 'upsert', table: 'stock_purchases', values: this.toStockPurchaseSqlRow(sp), onConflict: 'id' }];
   }
 
-  // Push complete current application state to SQL database in strict Foreign-Key dependency order
+  // Local DB push is permanently disabled; all reads/writes happen directly on online Supabase
   public async pushAllToSupabase(): Promise<{ success: boolean; error?: string }> {
-    if (!this.isSqlConnected()) {
-      return { success: false, error: 'Supabase SQL database is not configured yet.' };
-    }
-
-    const s = this.state.settings;
-    const ops: SqlOperation[] = [
-      {
-        type: 'upsert',
-        table: 'business_settings',
-        values: {
-          id: 1,
-          name: s.name,
-          address: s.address || null,
-          phone: s.phone || null,
-          email: s.email || null,
-          bank_name: s.bank_name || null,
-          account_name: s.account_name || null,
-          account_number: s.account_number || null,
-          ifsc_code: s.ifsc_code || null,
-          upi_id: s.upi_id || null,
-          payment_terms: s.payment_terms || null,
-          auto_email_invoices: s.auto_email_invoices !== false,
-          invoice_notification_email: s.invoice_notification_email || 'ippasevents@gmail.com'
-        },
-        onConflict: 'id'
-      }
-    ];
-
-    for (const p of this.state.profiles.filter((x) => isValidUUID(x.id))) {
-      ops.push({
-        type: 'upsert',
-        table: 'profiles',
-        values: {
-          id: p.id,
-          username: p.username,
-          password: p.password || null,
-          full_name: p.full_name,
-          phone: p.phone || null,
-          role: p.role
-        },
-        onConflict: 'id'
-      });
-    }
-
-    for (const c of this.state.clients.filter((x) => isValidUUID(x.id))) {
-      ops.push({ type: 'upsert', table: 'clients', values: this.toClientSqlRow(c), onConflict: 'id' });
-    }
-
-    for (const i of this.state.ingredients.filter((x) => isValidUUID(x.id))) {
-      ops.push({ type: 'upsert', table: 'ingredients', values: this.toIngredientSqlRow(i), onConflict: 'id' });
-    }
-
-    for (const m of this.state.menuItems.filter((x) => isValidUUID(x.id))) {
-      ops.push({ type: 'upsert', table: 'menu_items', values: this.toMenuItemSqlRow(m), onConflict: 'id' });
-    }
-
-    const validRecipes = this.state.recipes.filter(
-      (r) => isValidUUID(r.menu_item_id) && isValidUUID(r.ingredient_id)
-    );
-    if (validRecipes.length > 0) {
-      ops.push({
-        type: 'upsert',
-        table: 'menu_item_ingredients',
-        values: validRecipes.map((r) => ({
-          menu_item_id: r.menu_item_id,
-          ingredient_id: r.ingredient_id,
-          qty_per_guest: r.qty_per_guest
-        })),
-        onConflict: 'menu_item_id,ingredient_id'
-      });
-    }
-
-    for (const st of this.state.staff.filter((x) => isValidUUID(x.id))) {
-      ops.push({ type: 'upsert', table: 'staff_members', values: this.toStaffSqlRow(st), onConflict: 'id' });
-    }
-
-    for (const e of this.state.events.filter((x) => isValidUUID(x.id) && isValidUUID(x.client_id))) {
-      ops.push({ type: 'upsert', table: 'events', values: this.toEventSqlRow(e), onConflict: 'id' });
-    }
-
-    for (const ei of this.state.eventItems.filter(
-      (x) => isValidUUID(x.id) && isValidUUID(x.event_id) && isValidUUID(x.menu_item_id)
-    )) {
-      ops.push({
-        type: 'upsert',
-        table: 'event_items',
-        values: {
-          id: ei.id,
-          event_id: ei.event_id,
-          menu_item_id: ei.menu_item_id,
-          pricing_type: ei.pricing_type || 'per_guest',
-          price_per_unit: ei.price_per_unit,
-          price_per_guest: ei.price_per_guest,
-          quantity: ei.quantity ?? null
-        },
-        onConflict: 'event_id,menu_item_id'
-      });
-    }
-
-    for (const ex of this.state.eventExtras.filter((x) => isValidUUID(x.id) && isValidUUID(x.event_id))) {
-      ops.push({
-        type: 'upsert',
-        table: 'event_extras',
-        values: {
-          id: ex.id,
-          event_id: ex.event_id,
-          description: ex.description,
-          amount: ex.amount
-        },
-        onConflict: 'id'
-      });
-    }
-
-    for (const sh of this.state.shifts.filter(
-      (x) => isValidUUID(x.id) && isValidUUID(x.event_id) && isValidUUID(x.staff_member_id)
-    )) {
-      ops.push({
-        type: 'upsert',
-        table: 'shifts',
-        values: {
-          id: sh.id,
-          event_id: sh.event_id,
-          staff_member_id: sh.staff_member_id,
-          role_label: sh.role_label || null,
-          starts_at: sh.starts_at,
-          ends_at: sh.ends_at,
-          attendance_status: sh.attendance_status || 'pending',
-          attendance_marked_at: sh.attendance_marked_at || null
-        },
-        onConflict: 'id'
-      });
-    }
-
-    for (const sr of (this.state.staffSalaryRecords || []).filter(
-      (x) => isValidUUID(x.id) && isValidUUID(x.staff_member_id)
-    )) {
-      ops.push({
-        type: 'upsert',
-        table: 'staff_salary_records',
-        values: {
-          id: sr.id,
-          staff_member_id: sr.staff_member_id,
-          event_id: isValidUUID(sr.event_id) ? sr.event_id : null,
-          record_type: sr.record_type,
-          amount: sr.amount,
-          method: sr.method,
-          note: sr.note || null,
-          recorded_at: sr.recorded_at
-        },
-        onConflict: 'id'
-      });
-    }
-
-    for (const inv of this.state.invoices.filter((x) => isValidUUID(x.id) && isValidUUID(x.event_id))) {
-      ops.push({ type: 'upsert', table: 'invoices', values: this.toInvoiceSqlRow(inv), onConflict: 'id' });
-    }
-
-    for (const pay of this.state.payments.filter((x) => isValidUUID(x.id) && isValidUUID(x.invoice_id))) {
-      const ch = this.inferPaymentChannel(pay.method, pay.payment_channel);
-      const destAcc = this.resolveDestinationAccount(pay);
-      ops.push({
-        type: 'upsert',
-        table: 'payments',
-        values: {
-          id: pay.id,
-          invoice_id: pay.invoice_id,
-          amount: pay.amount,
-          method: pay.method,
-          payment_channel: ch,
-          destination_account: destAcc,
-          note: pay.note || null,
-          paid_at: pay.paid_at
-        },
-        onConflict: 'id'
-      });
-    }
-
-    for (const sp of (this.state.stockPurchases || []).filter((x) => isValidUUID(x.id))) {
-      ops.push({
-        type: 'upsert',
-        table: 'stock_purchases',
-        values: this.toStockPurchaseSqlRow(sp),
-        onConflict: 'id'
-      });
-
-      for (const spi of (sp.items || []).filter((it) => isValidUUID(it.id))) {
-        ops.push({
-          type: 'upsert',
-          table: 'stock_purchase_items',
-          values: {
-            id: spi.id,
-            purchase_id: sp.id,
-            ingredient_id: isValidUUID(spi.ingredient_id) ? spi.ingredient_id : null,
-            item_name: spi.item_name,
-            quantity: spi.quantity,
-            unit: spi.unit,
-            unit_price: spi.unit_price,
-            total_price: spi.total_price
-          },
-          onConflict: 'id'
-        });
-      }
-    }
-
-    for (const spp of (this.state.stockPurchasePayments || []).filter(
-      (x) => isValidUUID(x.id) && isValidUUID(x.purchase_id)
-    )) {
-      ops.push({
-        type: 'upsert',
-        table: 'stock_purchase_payments',
-        values: {
-          id: spp.id,
-          purchase_id: spp.purchase_id,
-          amount: spp.amount,
-          paid_at: spp.paid_at,
-          method: spp.method,
-          note: spp.note || null
-        },
-        onConflict: 'id'
-      });
-    }
-
-    this.enqueueSqlOperations('Full SQL Database Push', ops);
-    await this.flushPendingSqlWrites();
+    await this.syncFromSupabase(false);
     if (this.syncError) {
       return { success: false, error: this.syncError };
     }
     return { success: true };
   }
 
-  private setupRealtimeSubscription() {
-    if (!isSupabaseConfigured || !supabase) return;
+  private setupRealtimeSubscription(forceRecreate: boolean = false) {
+    if (!isSupabaseConfigured || !supabase || !this.isOnline()) return;
+    if (this.realtimeChannel && !forceRecreate) return;
+
     try {
-      supabase
+      if (this.realtimeChannel) {
+        try {
+          supabase.removeChannel(this.realtimeChannel);
+        } catch {
+          // ignore
+        }
+        this.realtimeChannel = null;
+      }
+
+      this.realtimeChannel = supabase
         .channel('ippas-live-realtime-sync')
         .on(
           'postgres_changes',
@@ -1557,7 +1408,19 @@ class DataStore {
             this.inspectRealtimeDatabasePayload(payload);
           }
         )
-        .subscribe();
+        .subscribe((status: string) => {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            this.realtimeChannel = null;
+            if (this.realtimeReconnectTimer) {
+              clearTimeout(this.realtimeReconnectTimer);
+            }
+            this.realtimeReconnectTimer = setTimeout(() => {
+              if (this.isOnline()) {
+                this.setupRealtimeSubscription(true);
+              }
+            }, 3000);
+          }
+        });
     } catch (err) {
       console.warn('Realtime subscription warning:', err);
     }
@@ -1965,14 +1828,19 @@ class DataStore {
   }
 
   public async syncFromSupabase(silent: boolean = false): Promise<void> {
-    if (!this.isSqlConnected()) return;
+    if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && !navigator.onLine) {
+      this.isInternetConnected = false;
+      this.isSyncingState = false;
+      this.notify();
+      return;
+    }
+
     if (!silent) {
       this.isSyncingState = true;
       this.notify();
     }
 
     try {
-      // CRITICAL: Always flush any pending or in-flight SQL writes first so we never overwrite new changes with stale DB rows
       await this.flushPendingSqlWrites();
 
       let settingsRes: any;
@@ -1994,7 +1862,41 @@ class DataStore {
       let purchasePaymentsRes: any;
       let activityLogsRes: any;
 
-      if (isSupabaseConfigured && supabase) {
+      // Primary live read via server /api/db (uses SUPABASE_SERVICE_ROLE_KEY with no-store)
+      const apiRes = await fetch('/api/db', { cache: 'no-store' });
+      const apiJson = await apiRes.json();
+
+      if (!apiRes.ok && apiJson?.online === false) {
+        this.isInternetConnected = false;
+        this.isSyncingState = false;
+        this.notify();
+        return;
+      }
+
+      if (apiJson?.configured && apiJson?.results) {
+        this.serverDbConfigured = true;
+        this.isInternetConnected = true;
+        ({
+          settingsRes,
+          profilesRes,
+          clientsRes,
+          ingredientsRes,
+          menuItemsRes,
+          recipesRes,
+          eventsRes,
+          eventItemsRes,
+          eventExtrasRes,
+          staffRes,
+          shiftsRes,
+          salaryRecordsRes,
+          invoicesRes,
+          paymentsRes,
+          purchasesRes,
+          purchaseItemsRes,
+          purchasePaymentsRes,
+          activityLogsRes
+        } = apiJson.results);
+      } else if (isSupabaseConfigured && supabase) {
         [
           settingsRes,
           profilesRes,
@@ -2034,64 +1936,48 @@ class DataStore {
           supabase.from('stock_purchase_payments').select('*').order('paid_at', { ascending: false }),
           supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(400)
         ]);
+        this.isInternetConnected = true;
       } else {
-        const apiRes = await fetch('/api/db');
-        const apiJson = await apiRes.json();
-        if (!apiJson?.configured || !apiJson?.results) {
-          this.isSyncingState = false;
-          this.notify();
-          return;
-        }
-        ({
-          settingsRes,
-          profilesRes,
-          clientsRes,
-          ingredientsRes,
-          menuItemsRes,
-          recipesRes,
-          eventsRes,
-          eventItemsRes,
-          eventExtrasRes,
-          staffRes,
-          shiftsRes,
-          salaryRecordsRes,
-          invoicesRes,
-          paymentsRes,
-          purchasesRes,
-          purchaseItemsRes,
-          purchasePaymentsRes,
-          activityLogsRes
-        } = apiJson.results);
-      }
-
-      // Surface schema/RLS errors clearly so user knows if schema.sql / migration_06.sql needs to be run
-      const firstCriticalErr =
-        clientsRes.error ||
-        eventsRes.error ||
-        menuItemsRes.error ||
-        ingredientsRes.error ||
-        invoicesRes.error;
-
-      if (firstCriticalErr) {
-        this.reportDbError('Database Read Error (Run schema.sql in Supabase)', firstCriticalErr);
+        this.isInternetConnected = false;
         this.isSyncingState = false;
         this.notify();
         return;
       }
 
-      if (purchasesRes.error) {
+      const firstCriticalErr =
+        clientsRes?.error ||
+        eventsRes?.error ||
+        menuItemsRes?.error ||
+        ingredientsRes?.error ||
+        invoicesRes?.error;
+
+      if (firstCriticalErr) {
+        if (this.isTransientNetworkError(firstCriticalErr)) {
+          this.isInternetConnected = false;
+          this.isSyncingState = false;
+          this.notify();
+          return;
+        }
+        this.reportDbError('Database Read Error (Run schema.sql in Supabase)', firstCriticalErr);
+        this.hasInitialRemoteLoaded = true;
+        this.isSyncingState = false;
+        this.notify();
+        return;
+      }
+
+      if (purchasesRes?.error) {
         this.reportDbError('Stock Purchases Table Missing (Run schema.sql in Supabase)', purchasesRes.error);
       } else {
         this.clearDbError();
       }
 
-      // Seed default profiles & settings into SQL if profiles table has no login accounts yet
-      let rawProfiles = profilesRes.data || [];
-      const usableProfiles = rawProfiles.filter(
+      // Seed default login profiles ONLY if Supabase profiles table has zero management accounts
+      let rawProfiles = profilesRes?.data || [];
+      let usableProfiles = rawProfiles.filter(
         (p: any) => p.role === 'super_admin' || p.role === 'owner' || p.role === 'manager' || p.role === 'accountant'
       );
 
-      if (!profilesRes.error && usableProfiles.length === 0) {
+      if (!profilesRes?.error && usableProfiles.length === 0) {
         this.enqueueSqlOperations('Seed Default Login Profiles', [
           {
             type: 'upsert',
@@ -2107,10 +1993,10 @@ class DataStore {
             onConflict: 'id'
           }
         ]);
-        rawProfiles = INITIAL_PROFILES;
+        usableProfiles = INITIAL_PROFILES;
       }
 
-      if (!settingsRes.error && !settingsRes.data) {
+      if (!settingsRes?.error && !settingsRes?.data) {
         this.enqueueSqlOperations('Seed Business Settings', [
           {
             type: 'upsert',
@@ -2121,62 +2007,27 @@ class DataStore {
         ]);
       }
 
-      const sqlCoreRowCount =
-        (clientsRes.data || []).length +
-        (eventsRes.data || []).length +
-        (menuItemsRes.data || []).length +
-        (ingredientsRes.data || []).length +
-        (staffRes.data || []).length +
-        (invoicesRes.data || []).length +
-        (purchasesRes.data || []).length;
-
-      const localCoreRowCount =
-        this.state.clients.length +
-        this.state.events.length +
-        this.state.menuItems.length +
-        this.state.ingredients.length +
-        this.state.staff.length +
-        this.state.invoices.length +
-        (this.state.stockPurchases || []).length;
-
-      if (typeof window !== 'undefined') {
-        const BOOTSTRAP_KEY = 'ippas_catering_sql_bootstrapped';
-        if (sqlCoreRowCount > 0) {
-          localStorage.setItem(BOOTSTRAP_KEY, '1');
-        } else if (localCoreRowCount > 0 && !localStorage.getItem(BOOTSTRAP_KEY)) {
-          localStorage.setItem(BOOTSTRAP_KEY, '1');
-          await this.pushAllToSupabase();
-          this.isSyncingState = false;
-          this.notify();
-          return;
-        }
-      }
-
-      let loadedProfiles: Profile[] =
-        usableProfiles.length > 0
-          ? usableProfiles.map((p: any) => {
-              const fallbackRole = (p.role as UserRole) || 'manager';
-              return {
-                id: p.id,
-                username: p.username || fallbackRole,
-                password: p.password || `${fallbackRole}123`,
-                full_name: p.full_name || fallbackRole,
-                phone: p.phone || '',
-                role: fallbackRole,
-                role_title: p.role_title || undefined,
-                hourly_rate: p.hourly_rate != null ? Number(p.hourly_rate) : undefined
-              };
-            })
-          : this.state.profiles;
+      let loadedProfiles: Profile[] = usableProfiles.map((p: any) => {
+        const fallbackRole = (p.role as UserRole) || 'manager';
+        return {
+          id: p.id,
+          username: p.username || fallbackRole,
+          password: p.password || `${fallbackRole}123`,
+          full_name: p.full_name || fallbackRole,
+          phone: p.phone || '',
+          role: fallbackRole,
+          role_title: p.role_title || undefined,
+          hourly_rate: p.hourly_rate != null ? Number(p.hourly_rate) : undefined
+        };
+      });
 
       if (!loadedProfiles.some((p) => p.role === 'super_admin')) {
-        const existingSuper = this.state.profiles.find((p) => p.role === 'super_admin') || INITIAL_PROFILES[0];
-        loadedProfiles = [existingSuper, ...loadedProfiles];
+        loadedProfiles = [INITIAL_PROFILES[0], ...loadedProfiles];
       }
 
-      const purchaseItemsData = purchaseItemsRes.data || [];
-      const loadedPurchases: StockPurchase[] = !purchasesRes.error
-        ? (purchasesRes.data || []).map((sp: any) => {
+      const purchaseItemsData = purchaseItemsRes?.data || [];
+      const loadedPurchases: StockPurchase[] = !purchasesRes?.error
+        ? (purchasesRes?.data || []).map((sp: any) => {
             const itemsForPurchase: StockPurchaseItem[] = purchaseItemsData
               .filter((it: any) => it.purchase_id === sp.id)
               .map((it: any) => ({
@@ -2206,10 +2057,10 @@ class DataStore {
               created_at: sp.created_at || new Date().toISOString()
             };
           })
-        : this.state.stockPurchases;
+        : [];
 
-      const loadedPurchasePayments: StockPurchasePayment[] = !purchasePaymentsRes.error
-        ? (purchasePaymentsRes.data || []).map((spp: any) => ({
+      const loadedPurchasePayments: StockPurchasePayment[] = !purchasePaymentsRes?.error
+        ? (purchasePaymentsRes?.data || []).map((spp: any) => ({
             id: spp.id,
             purchase_id: spp.purchase_id,
             amount: Number(spp.amount || 0),
@@ -2217,15 +2068,25 @@ class DataStore {
             method: spp.method || 'Cash',
             note: spp.note || ''
           }))
-        : this.state.stockPurchasePayments;
+        : [];
+
+      const loadedStaff: StaffMember[] = (staffRes?.data || []).map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        phone: s.phone || '',
+        password: s.password || 'password123',
+        role_title: s.role_title || 'Service Crew',
+        hourly_rate: Number(s.hourly_rate || 0),
+        active: s.active !== false
+      }));
 
       this.state = {
         ...this.state,
-        settings: settingsRes.data
+        settings: settingsRes?.data
           ? { ...INITIAL_SETTINGS, ...settingsRes.data }
-          : this.state.settings,
+          : INITIAL_SETTINGS,
         profiles: loadedProfiles,
-        clients: (clientsRes.data || []).map((c: any) => ({
+        clients: (clientsRes?.data || []).map((c: any) => ({
           id: c.id,
           name: c.name,
           email: c.email || '',
@@ -2234,7 +2095,7 @@ class DataStore {
           notes: c.notes || '',
           created_at: c.created_at || new Date().toISOString()
         })),
-        ingredients: (ingredientsRes.data || []).map((i: any) => ({
+        ingredients: (ingredientsRes?.data || []).map((i: any) => ({
           id: i.id,
           name: i.name,
           unit: i.unit || 'kg',
@@ -2242,7 +2103,7 @@ class DataStore {
           stock_qty: Number(i.stock_qty || 0),
           low_stock_level: Number(i.low_stock_level || 0)
         })),
-        menuItems: (menuItemsRes.data || []).map((m: any) => {
+        menuItems: (menuItemsRes?.data || []).map((m: any) => {
           const unitPrice = Number(m.price_per_unit ?? m.price_per_guest ?? 0);
           return {
             id: m.id,
@@ -2255,12 +2116,12 @@ class DataStore {
             active: m.active !== false
           };
         }),
-        recipes: (recipesRes.data || []).map((r: any) => ({
+        recipes: (recipesRes?.data || []).map((r: any) => ({
           menu_item_id: r.menu_item_id,
           ingredient_id: r.ingredient_id,
           qty_per_guest: Number(r.qty_per_guest || 0)
         })),
-        events: (eventsRes.data || []).map((e: any) => ({
+        events: (eventsRes?.data || []).map((e: any) => ({
           id: e.id,
           client_id: e.client_id,
           title: e.title,
@@ -2271,9 +2132,10 @@ class DataStore {
           guest_count: Number(e.guest_count || 1),
           status: e.status || 'inquiry',
           notes: e.notes || '',
+          payment_terms: e.payment_terms || undefined,
           created_at: e.created_at || new Date().toISOString()
         })),
-        eventItems: (eventItemsRes.data || []).map((ei: any) => {
+        eventItems: (eventItemsRes?.data || []).map((ei: any) => {
           const unitPrice = Number(ei.price_per_unit ?? ei.price_per_guest ?? 0);
           return {
             id: ei.id,
@@ -2285,22 +2147,14 @@ class DataStore {
             quantity: ei.quantity != null ? Number(ei.quantity) : undefined
           };
         }),
-        eventExtras: (eventExtrasRes.data || []).map((x: any) => ({
+        eventExtras: (eventExtrasRes?.data || []).map((x: any) => ({
           id: x.id,
           event_id: x.event_id,
           description: x.description,
           amount: Number(x.amount || 0)
         })),
-        staff: (staffRes.data || []).map((s: any) => ({
-          id: s.id,
-          name: s.name,
-          phone: s.phone || '',
-          password: s.password || 'password123',
-          role_title: s.role_title || 'Service Crew',
-          hourly_rate: Number(s.hourly_rate || 0),
-          active: s.active !== false
-        })),
-        shifts: (shiftsRes.data || [])
+        staff: loadedStaff,
+        shifts: (shiftsRes?.data || [])
           .filter((sh: any) => sh.staff_member_id || sh.staff_id)
           .map((sh: any) => ({
             id: sh.id,
@@ -2315,8 +2169,8 @@ class DataStore {
                 : 'pending',
             attendance_marked_at: sh.attendance_marked_at || undefined
           })),
-        staffSalaryRecords: !salaryRecordsRes.error
-          ? (salaryRecordsRes.data || []).map((sr: any) => ({
+        staffSalaryRecords: !salaryRecordsRes?.error
+          ? (salaryRecordsRes?.data || []).map((sr: any) => ({
               id: sr.id,
               staff_member_id: sr.staff_member_id,
               event_id: sr.event_id || undefined,
@@ -2326,8 +2180,8 @@ class DataStore {
               note: sr.note || '',
               recorded_at: sr.recorded_at || new Date().toISOString()
             }))
-          : this.state.staffSalaryRecords || [],
-        invoices: (invoicesRes.data || []).map((inv: any) => {
+          : [],
+        invoices: (invoicesRes?.data || []).map((inv: any) => {
           const amt = Number(inv.amount || 0);
           const disc = Number(inv.discount || 0);
           const sub = inv.subtotal != null ? Number(inv.subtotal) : amt + disc;
@@ -2345,7 +2199,7 @@ class DataStore {
             notes: inv.notes || ''
           };
         }),
-        payments: (paymentsRes.data || []).map((p: any) => {
+        payments: (paymentsRes?.data || []).map((p: any) => {
           const method = p.method || 'Cash';
           const ch: PaymentChannel =
             p.payment_channel === 'cash' || p.payment_channel === 'bank'
@@ -2353,9 +2207,9 @@ class DataStore {
               : method.toLowerCase().includes('cash')
               ? 'cash'
               : 'bank';
-          const fallbackSettings = settingsRes.data
+          const fallbackSettings = settingsRes?.data
             ? { ...INITIAL_SETTINGS, ...settingsRes.data }
-            : this.state.settings;
+            : INITIAL_SETTINGS;
           const bankLabel = fallbackSettings.bank_name
             ? `${fallbackSettings.bank_name}${fallbackSettings.account_number ? ` (A/c ${fallbackSettings.account_number})` : ''}`
             : 'Primary Business Bank Account';
@@ -2375,9 +2229,9 @@ class DataStore {
         }),
         stockPurchases: loadedPurchases,
         stockPurchasePayments: loadedPurchasePayments,
-        auditLogs: !activityLogsRes.error
+        auditLogs: !activityLogsRes?.error
           ? this.deduplicateAuditLogs([
-              ...(activityLogsRes.data || []).map((al: any) => ({
+              ...(activityLogsRes?.data || []).map((al: any) => ({
                 id: al.id,
                 entity_type: (al.entity_type || 'database') as AuditEntityType,
                 entity_id: String(al.entity_id || ''),
@@ -2393,26 +2247,38 @@ class DataStore {
                 is_read_by_owner: Boolean(al.is_read_by_owner),
                 created_at: al.created_at || new Date().toISOString()
               })),
-              // Keep very recent local logs (last 10s) in case insert is still in flight
               ...(this.state.auditLogs || []).filter(
                 (localLog) => Date.now() - new Date(localLog.created_at).getTime() < 10000
               )
             ])
-          : this.state.auditLogs || []
+          : []
       };
 
-      // Ensure currentUserId points to a valid record after remote sync
-      if (this.state.currentRole !== 'staff') {
-        const match =
-          this.state.profiles.find((p) => p.id === this.state.currentUserId) ||
-          this.state.profiles.find((p) => p.role === this.state.currentRole);
-        if (match) {
-          this.state.currentUserId = match.id;
+      // Validate active session against live Supabase accounts
+      if (this.state.isAuthenticated) {
+        if (this.state.currentRole === 'staff') {
+          const staffExists = this.state.staff.some((s) => s.id === this.state.currentUserId && s.active !== false);
+          if (!staffExists) {
+            this.state.isAuthenticated = false;
+          }
+        } else {
+          const match =
+            this.state.profiles.find((p) => p.id === this.state.currentUserId) ||
+            this.state.profiles.find((p) => p.role === this.state.currentRole);
+          if (match) {
+            this.state.currentUserId = match.id;
+            this.state.currentRole = match.role;
+          } else {
+            this.state.isAuthenticated = false;
+          }
         }
       }
 
+      this.hasInitialRemoteLoaded = true;
+      this.isInternetConnected = true;
       this.saveLocalOnly();
     } catch (err) {
+      this.isInternetConnected = false;
       this.reportDbError('Supabase Connection Failed', err);
     } finally {
       this.isSyncingState = false;
@@ -2421,210 +2287,62 @@ class DataStore {
   }
 
   private loadInitial(): AppState {
+    let currentRole: UserRole = 'owner';
+    let currentUserId = INITIAL_PROFILES[0].id;
+    let isAuthenticated = false;
+
     if (typeof window !== 'undefined') {
       try {
         const sessionRaw = localStorage.getItem(SESSION_KEY);
         const session = sessionRaw ? JSON.parse(sessionRaw) : null;
-        const stored = localStorage.getItem(STORAGE_KEY);
-
-        if (stored) {
-          const parsed = JSON.parse(stored);
-
-          let normalizedProfiles: Profile[] = Array.isArray(parsed.profiles)
-            ? parsed.profiles
-                .filter((p: any) => p && (p.role === 'super_admin' || p.role === 'owner' || p.role === 'manager' || p.role === 'accountant'))
-                .map((p: any) => {
-                  const initMatch = INITIAL_PROFILES.find((ip) => ip.id === p.id || ip.role === p.role);
-                  return {
-                    ...p,
-                    username: p.username || initMatch?.username || p.role,
-                    password: p.password || initMatch?.password || `${p.role}123`
-                  };
-                })
-            : [];
-
-          if (normalizedProfiles.length === 0) {
-            normalizedProfiles = INITIAL_PROFILES;
-          } else {
-            if (!normalizedProfiles.some((p) => p.role === 'super_admin')) {
-              normalizedProfiles = [INITIAL_PROFILES[0], ...normalizedProfiles];
-            }
-            if (!normalizedProfiles.some((p) => p.role === 'owner')) {
-              normalizedProfiles = [INITIAL_PROFILES[1], ...normalizedProfiles];
-            }
-          }
-
-          let currentRole: UserRole = session?.currentRole ?? parsed.currentRole;
+        if (session) {
           if (
-            currentRole !== 'super_admin' &&
-            currentRole !== 'owner' &&
-            currentRole !== 'manager' &&
-            currentRole !== 'accountant' &&
-            currentRole !== 'staff'
+            session.currentRole === 'super_admin' ||
+            session.currentRole === 'owner' ||
+            session.currentRole === 'manager' ||
+            session.currentRole === 'accountant' ||
+            session.currentRole === 'staff'
           ) {
-            currentRole = 'owner';
+            currentRole = session.currentRole;
           }
-
-          const currentUserId =
-            session?.currentUserId ||
-            parsed.currentUserId ||
-            normalizedProfiles.find((p) => p.role === currentRole)?.id ||
-            INITIAL_PROFILES[0].id;
-          const isAuthenticated = Boolean(session ? session.isAuthenticated : parsed.isAuthenticated);
-
-          const menuItems: MenuItem[] = (parsed.menuItems || INITIAL_MENU_ITEMS).map((m: any) => ({
-            ...m,
-            pricing_type: m.pricing_type || 'per_guest',
-            price_per_unit: Number(m.price_per_unit || m.price_per_guest || 0),
-            price_per_guest: Number(m.price_per_guest || m.price_per_unit || 0)
-          }));
-
-          const eventItems: EventItem[] = (parsed.eventItems || INITIAL_EVENT_ITEMS).map((ei: any) => ({
-            ...ei,
-            pricing_type: ei.pricing_type || 'per_guest',
-            price_per_unit: Number(ei.price_per_unit || ei.price_per_guest || 0),
-            price_per_guest: Number(ei.price_per_guest || ei.price_per_unit || 0),
-            quantity: ei.quantity !== undefined ? Number(ei.quantity) : undefined
-          }));
-
-          const normalizedSettings = { ...INITIAL_SETTINGS, ...(parsed.settings || {}) };
-          const defaultBankLabel = normalizedSettings.bank_name
-            ? `${normalizedSettings.bank_name.split('/')[0].trim()}${normalizedSettings.account_number ? ` (A/c ${normalizedSettings.account_number})` : ''}`
-            : 'Primary Business Bank Account';
-
-          const normalizedShifts: Shift[] = Array.isArray(parsed.shifts)
-            ? parsed.shifts.map((sh: any) => ({
-                ...sh,
-                attendance_status:
-                  sh.attendance_status === 'present' || sh.attendance_status === 'absent'
-                    ? sh.attendance_status
-                    : 'pending',
-                attendance_marked_at: sh.attendance_marked_at || undefined
-              }))
-            : isSupabaseConfigured
-            ? []
-            : INITIAL_SHIFTS;
-
-          const normalizedPayments: Payment[] = Array.isArray(parsed.payments)
-            ? parsed.payments.map((p: any) => {
-                const method = p.method || 'Bank Transfer';
-                const ch: PaymentChannel =
-                  p.payment_channel === 'cash' || p.payment_channel === 'bank'
-                    ? p.payment_channel
-                    : String(method).toLowerCase().includes('cash')
-                    ? 'cash'
-                    : 'bank';
-                const destAcc =
-                  p.destination_account && String(p.destination_account).trim()
-                    ? String(p.destination_account).trim()
-                    : ch === 'cash'
-                    ? 'Cash in Hand (Office Counter)'
-                    : defaultBankLabel;
-                return {
-                  ...p,
-                  method,
-                  payment_channel: ch,
-                  destination_account: destAcc
-                };
-              })
-            : isSupabaseConfigured
-            ? []
-            : INITIAL_PAYMENTS;
-
-          return {
-            ...parsed,
-            settings: normalizedSettings,
-            profiles: normalizedProfiles,
-            currentRole,
-            currentUserId,
-            isAuthenticated,
-            menuItems,
-            eventItems,
-            staff: Array.isArray(parsed.staff)
-              ? parsed.staff
-              : isSupabaseConfigured
-              ? []
-              : INITIAL_STAFF,
-            shifts: normalizedShifts,
-            payments: normalizedPayments,
-            staffSalaryRecords: Array.isArray(parsed.staffSalaryRecords)
-              ? parsed.staffSalaryRecords
-              : isSupabaseConfigured
-              ? []
-              : INITIAL_STAFF_SALARY_RECORDS,
-            stockPurchases: Array.isArray(parsed.stockPurchases) ? parsed.stockPurchases : INITIAL_STOCK_PURCHASES,
-            stockPurchasePayments: Array.isArray(parsed.stockPurchasePayments) ? parsed.stockPurchasePayments : INITIAL_STOCK_PURCHASE_PAYMENTS,
-            auditLogs: Array.isArray(parsed.auditLogs)
-              ? parsed.auditLogs
-              : isSupabaseConfigured
-              ? []
-              : INITIAL_AUDIT_LOGS
-          };
+          if (session.currentUserId) {
+            currentUserId = session.currentUserId;
+          }
+          isAuthenticated = Boolean(session.isAuthenticated);
         }
-      } catch (e) {
-        console.warn('Could not read from localStorage, using default data', e);
+      } catch {
+        // ignore
       }
     }
 
-    // When Supabase is configured, start with empty collections while remote fetch loads real DB rows
-    if (isSupabaseConfigured) {
-      return {
-        settings: INITIAL_SETTINGS,
-        profiles: INITIAL_PROFILES,
-        currentRole: 'owner',
-        currentUserId: INITIAL_PROFILES[0].id,
-        isAuthenticated: false,
-        clients: [],
-        ingredients: [],
-        menuItems: [],
-        recipes: [],
-        events: [],
-        eventItems: [],
-        eventExtras: [],
-        staff: [],
-        shifts: [],
-        staffSalaryRecords: [],
-        invoices: [],
-        payments: [],
-        stockPurchases: [],
-        stockPurchasePayments: [],
-        auditLogs: []
-      };
-    }
-
+    // Strictly start with empty collections — all records load exclusively from online Supabase DB
     return {
       settings: INITIAL_SETTINGS,
-      profiles: INITIAL_PROFILES,
-      currentRole: 'owner',
-      currentUserId: INITIAL_PROFILES[0].id,
-      isAuthenticated: false,
-      clients: INITIAL_CLIENTS,
-      ingredients: INITIAL_INGREDIENTS,
-      menuItems: INITIAL_MENU_ITEMS,
-      recipes: INITIAL_RECIPES,
-      events: INITIAL_EVENTS,
-      eventItems: INITIAL_EVENT_ITEMS,
-      eventExtras: INITIAL_EVENT_EXTRAS,
-      staff: INITIAL_STAFF,
-      shifts: INITIAL_SHIFTS,
-      staffSalaryRecords: INITIAL_STAFF_SALARY_RECORDS,
-      invoices: INITIAL_INVOICES,
-      payments: INITIAL_PAYMENTS,
-      stockPurchases: INITIAL_STOCK_PURCHASES,
-      stockPurchasePayments: INITIAL_STOCK_PURCHASE_PAYMENTS,
-      auditLogs: INITIAL_AUDIT_LOGS
+      profiles: [],
+      currentRole,
+      currentUserId,
+      isAuthenticated,
+      clients: [],
+      ingredients: [],
+      menuItems: [],
+      recipes: [],
+      events: [],
+      eventItems: [],
+      eventExtras: [],
+      staff: [],
+      shifts: [],
+      staffSalaryRecords: [],
+      invoices: [],
+      payments: [],
+      stockPurchases: [],
+      stockPurchasePayments: [],
+      auditLogs: []
     };
   }
 
   private saveLocalOnly() {
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
-        this.saveSession();
-      } catch (e) {
-        console.warn('Could not persist to localStorage', e);
-      }
-    }
+    // Only save lightweight login session; NEVER cache database records locally
+    this.saveSession();
   }
 
   private save() {
@@ -3082,105 +2800,57 @@ class DataStore {
     password: string;
     mode?: 'restore_defaults' | 'clear_all_data';
   }): { success: boolean; error?: string } {
+    if (!this.isOnline()) {
+      return { success: false, error: 'Internet disconnected. Cannot modify online Supabase database.' };
+    }
+
     const verification = this.verifyOwnerPassword(options.password);
     if (!verification.success) {
       return verification;
     }
 
-    const keepAuth = this.state.isAuthenticated;
-    const keepUserId = this.state.currentUserId;
-    const activeOwner =
-      this.state.profiles.find((p) => p.id === keepUserId && p.role === 'owner') ||
-      this.state.profiles.find((p) => p.role === 'owner') ||
-      this.state.profiles[0];
+    const activeOwner = this.getCurrentUser();
 
-    const mode = options.mode || 'restore_defaults';
+    // Clear transactional records directly in online Supabase database (child tables first)
+    this.state = {
+      ...this.state,
+      clients: [],
+      events: [],
+      eventItems: [],
+      eventExtras: [],
+      shifts: [],
+      staffSalaryRecords: [],
+      invoices: [],
+      payments: [],
+      stockPurchases: [],
+      stockPurchasePayments: [],
+      auditLogs: []
+    };
 
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-
-    // Preserve updated owner credentials so the owner does not lose access or custom password
-    const preservedProfiles = INITIAL_PROFILES.map((p) => {
-      if (p.role === 'owner' && activeOwner) {
-        return {
-          ...p,
-          id: activeOwner.id || p.id,
-          username: activeOwner.username || p.username,
-          password: activeOwner.password || p.password,
-          full_name: activeOwner.full_name || p.full_name,
-          phone: activeOwner.phone || p.phone
-        };
-      }
-      return p;
-    });
-
-    if (mode === 'clear_all_data') {
-      // Clear all transactional and event records, keep basic configuration intact
-      this.state = {
-        settings: this.state.settings || INITIAL_SETTINGS,
-        profiles: preservedProfiles,
-        currentRole: 'owner',
-        currentUserId: activeOwner?.id || preservedProfiles[0].id,
-        isAuthenticated: keepAuth,
-        clients: [],
-        ingredients: INITIAL_INGREDIENTS,
-        menuItems: INITIAL_MENU_ITEMS,
-        recipes: INITIAL_RECIPES,
-        events: [],
-        eventItems: [],
-        eventExtras: [],
-        staff: INITIAL_STAFF,
-        shifts: [],
-        staffSalaryRecords: [],
-        invoices: [],
-        payments: [],
-        stockPurchases: [],
-        stockPurchasePayments: [],
-        auditLogs: []
-      };
-    } else {
-      // Restore initial clean defaults (sample events, menu, clients)
-      this.state = {
-        settings: INITIAL_SETTINGS,
-        profiles: preservedProfiles,
-        currentRole: 'owner',
-        currentUserId: activeOwner?.id || preservedProfiles[0].id,
-        isAuthenticated: keepAuth,
-        clients: INITIAL_CLIENTS,
-        ingredients: INITIAL_INGREDIENTS,
-        menuItems: INITIAL_MENU_ITEMS,
-        recipes: INITIAL_RECIPES,
-        events: INITIAL_EVENTS,
-        eventItems: INITIAL_EVENT_ITEMS,
-        eventExtras: INITIAL_EVENT_EXTRAS,
-        staff: INITIAL_STAFF,
-        shifts: INITIAL_SHIFTS,
-        staffSalaryRecords: INITIAL_STAFF_SALARY_RECORDS,
-        invoices: INITIAL_INVOICES,
-        payments: INITIAL_PAYMENTS,
-        stockPurchases: INITIAL_STOCK_PURCHASES,
-        stockPurchasePayments: INITIAL_STOCK_PURCHASE_PAYMENTS,
-        auditLogs: INITIAL_AUDIT_LOGS
-      };
-    }
+    this.enqueueSqlOperations('Wipe Online Supabase Transactions', [
+      { type: 'delete_all', table: 'payments' },
+      { type: 'delete_all', table: 'invoices' },
+      { type: 'delete_all', table: 'shifts' },
+      { type: 'delete_all', table: 'staff_salary_records' },
+      { type: 'delete_all', table: 'event_items' },
+      { type: 'delete_all', table: 'event_extras' },
+      { type: 'delete_all', table: 'events' },
+      { type: 'delete_all', table: 'stock_purchase_payments' },
+      { type: 'delete_all', table: 'stock_purchase_items' },
+      { type: 'delete_all', table: 'stock_purchases' },
+      { type: 'delete_all', table: 'clients' },
+      { type: 'delete_all', table: 'activity_logs' }
+    ]);
 
     this.logMutation({
       entity_type: 'settings',
-      entity_id: mode === 'clear_all_data' ? 'db-clear' : 'db-reset',
+      entity_id: 'db-clear',
       action: 'delete',
-      summary:
-        mode === 'clear_all_data'
-          ? 'Owner re-authenticated with password and wiped all transactional records'
-          : 'Owner re-authenticated with password and reset database to clean default state',
+      summary: 'Owner re-authenticated with password and wiped all transactional records in online Supabase',
       details: `Action authorized by Owner (${activeOwner?.username || 'owner'}). Password re-authentication verified.`
     });
 
     this.save();
-
-    if (this.isSqlConnected()) {
-      this.pushAllToSupabase();
-    }
 
     return { success: true };
   }

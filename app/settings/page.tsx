@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState } from 'react';
 import { store } from '@/lib/store';
-import { isSupabaseConfigured } from '@/lib/supabase';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import OwnerDatabaseExportCard from '@/components/OwnerDatabaseExportCard';
 import { PWAInstallButton } from '@/components/PWAInstallButton';
@@ -14,8 +13,6 @@ export default function SettingsPage() {
   const [syncStatus, setSyncStatus] = useState(store.getSyncStatus());
   const [form, setForm] = useState(state.settings);
   const [savedNotice, setSavedNotice] = useState(false);
-  const [isPushingSql, setIsPushingSql] = useState(false);
-  const [pushFeedback, setPushFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   useEffect(() => {
@@ -37,27 +34,6 @@ export default function SettingsPage() {
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 3000);
   };
-
-  const handlePushAllToSql = async () => {
-    setIsPushingSql(true);
-    setPushFeedback(null);
-    const res = await store.pushAllToSupabase();
-    setIsPushingSql(false);
-    if (res.success) {
-      setPushFeedback({
-        type: 'success',
-        message: '✓ All 18 SQL tables have been synchronized with your current app records!'
-      });
-      setTimeout(() => setPushFeedback(null), 5000);
-    } else {
-      setPushFeedback({
-        type: 'error',
-        message: res.error || 'Could not push records to SQL database.'
-      });
-    }
-  };
-
-  const isSqlActive = syncStatus.isConnected || store.isSqlConnected();
 
   return (
     <div>
@@ -292,8 +268,8 @@ export default function SettingsPage() {
           {/* Owner-Only Full Database Download (Excel / CSV) */}
           <OwnerDatabaseExportCard role={role} />
 
-          {/* Automatic Cloud Database & Realtime Sync Card */}
-          <div className="card" style={{ marginBottom: '1.25rem', borderLeft: isSqlActive ? '4px solid #10b981' : '4px solid #f59e0b' }}>
+          {/* Online-Only Supabase Cloud Database & Realtime Sync Card */}
+          <div className="card" style={{ marginBottom: '1.25rem', borderLeft: '4px solid #10b981' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span
@@ -302,12 +278,12 @@ export default function SettingsPage() {
                     width: '10px',
                     height: '10px',
                     borderRadius: '50%',
-                    background: syncStatus.error ? '#ef4444' : isSqlActive ? '#10b981' : '#f59e0b',
-                    boxShadow: isSqlActive ? '0 0 8px #10b981' : undefined
+                    background: syncStatus.error ? '#ef4444' : '#10b981',
+                    boxShadow: '0 0 8px #10b981'
                   }}
                 />
                 <h2 className="card-title" style={{ margin: 0 }}>
-                  {isSqlActive ? '☁️ Supabase Cloud Database' : '☁️ Cloud Database (Offline)'}
+                  ☁️ Supabase Cloud Database (Always Online)
                 </h2>
               </div>
 
@@ -315,104 +291,46 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  disabled={syncStatus.isSyncing || isPushingSql}
-                  onClick={() => store.syncFromSupabase()}
-                  title="Pull latest records from cloud database"
+                  disabled={syncStatus.isSyncing}
+                  onClick={() => store.syncFromSupabase(false)}
+                  title="Refresh live records from Supabase cloud database"
                 >
-                  {syncStatus.isSyncing ? 'Syncing...' : '↻ Sync Now'}
+                  {syncStatus.isSyncing ? 'Refreshing...' : '↻ Refresh Live Data'}
                 </button>
-                {isOwner && (
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    disabled={isPushingSql || syncStatus.isWriting}
-                    onClick={handlePushAllToSql}
-                    title="Push all local records to Supabase tables"
-                  >
-                    {isPushingSql ? 'Pushing to Cloud...' : '⬆️ Push All Data to Cloud'}
-                  </button>
-                )}
               </div>
             </div>
 
             <div style={{ fontSize: '0.85rem', color: '#475569', lineHeight: 1.6 }}>
-              {isSqlActive ? (
-                <div
-                  style={{
-                    background: '#f0fdf4',
-                    border: '1px solid #bbf7d0',
-                    borderRadius: '8px',
-                    padding: '0.75rem 0.95rem',
-                    marginBottom: '0.85rem'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.4rem' }}>
-                    <div style={{ fontWeight: 700, color: '#166534', fontSize: '0.88rem' }}>
-                      ✓ Live Connected &bull; Realtime Two-Way Sync Active
-                    </div>
-                    <span
-                      style={{
-                        background: '#dcfce7',
-                        color: '#15803d',
-                        padding: '0.15rem 0.5rem',
-                        borderRadius: '9999px',
-                        fontSize: '0.72rem',
-                        fontWeight: 700
-                      }}
-                    >
-                      AUTOMATIC ONLINE SYNC
-                    </span>
+              <div
+                style={{
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: '8px',
+                  padding: '0.75rem 0.95rem',
+                  marginBottom: syncStatus.error ? '0.85rem' : 0
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.4rem' }}>
+                  <div style={{ fontWeight: 700, color: '#166534', fontSize: '0.88rem' }}>
+                    ✓ Live Connected &bull; Online Supabase Database Only
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: '#15803d', marginTop: '0.35rem' }}>
-                    Every event create, edit, invoice, quotation, stock purchase, and staff payment writes directly to your Supabase PostgreSQL cloud database in real time.
-                  </div>
+                  <span
+                    style={{
+                      background: '#dcfce7',
+                      color: '#15803d',
+                      padding: '0.15rem 0.5rem',
+                      borderRadius: '9999px',
+                      fontSize: '0.72rem',
+                      fontWeight: 700
+                    }}
+                  >
+                    ALWAYS ONLINE
+                  </span>
                 </div>
-              ) : (
-                <div
-                  style={{
-                    background: '#fffbeb',
-                    border: '1px solid #fef3c7',
-                    borderRadius: '8px',
-                    padding: '0.75rem 0.95rem',
-                    marginBottom: '0.85rem',
-                    color: '#92400e'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.4rem' }}>
-                    <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>
-                      🟡 Offline Mode &bull; Safe Local Storage
-                    </div>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}
-                      onClick={() => store.autoConnectSupabaseWhenOnline()}
-                    >
-                      🔄 Reconnect Cloud
-                    </button>
-                  </div>
-                  <div style={{ fontSize: '0.8rem', marginTop: '0.35rem' }}>
-                    You are currently offline. You can continue creating events, invoices, and logging payments without interruption. All changes are stored locally and will automatically connect and sync to Supabase once back online.
-                  </div>
+                <div style={{ fontSize: '0.8rem', color: '#15803d', marginTop: '0.35rem' }}>
+                  All records are read and written directly to your live Supabase PostgreSQL cloud database in real time. Local offline storage is disabled.
                 </div>
-              )}
-
-              {pushFeedback && (
-                <div
-                  style={{
-                    background: pushFeedback.type === 'success' ? '#dcfce7' : '#fee2e2',
-                    border: `1px solid ${pushFeedback.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
-                    color: pushFeedback.type === 'success' ? '#15803d' : '#991b1b',
-                    padding: '0.6rem 0.8rem',
-                    borderRadius: '6px',
-                    fontSize: '0.8rem',
-                    marginBottom: '0.75rem',
-                    fontWeight: 500
-                  }}
-                >
-                  {pushFeedback.message}
-                </div>
-              )}
+              </div>
 
               {syncStatus.error && (
                 <div

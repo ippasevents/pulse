@@ -1,10 +1,10 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const STORAGE_URL_KEY = 'ippas_supabase_live_url';
-const STORAGE_KEY_KEY = 'ippas_supabase_live_anon_key';
-
 type ConfigChangeListener = (client: SupabaseClient | null) => void;
 const changeListeners: Set<ConfigChangeListener> = new Set();
+
+let runtimeUrl = '';
+let runtimeAnonKey = '';
 
 function cleanUrl(raw?: string | null): string {
   let url = (raw || '').trim();
@@ -20,24 +20,12 @@ export function getSupabaseConfig(): {
   isConnected: boolean;
   source: 'custom' | 'env' | 'none';
 } {
-  let customUrl = '';
-  let customKey = '';
-
-  if (typeof window !== 'undefined') {
-    try {
-      customUrl = cleanUrl(localStorage.getItem(STORAGE_URL_KEY));
-      customKey = (localStorage.getItem(STORAGE_KEY_KEY) || '').trim();
-    } catch {
-      // ignore localStorage disabled
-    }
-  }
-
-  if (customUrl && customKey && customUrl.startsWith('http')) {
+  if (runtimeUrl && runtimeAnonKey && runtimeUrl.startsWith('http')) {
     return {
-      url: customUrl,
-      anonKey: customKey,
+      url: runtimeUrl,
+      anonKey: runtimeAnonKey,
       isConnected: true,
-      source: 'custom'
+      source: 'env'
     };
   }
 
@@ -61,18 +49,28 @@ export function getSupabaseConfig(): {
   };
 }
 
+function buildSupabaseClient(url: string, key: string): SupabaseClient {
+  return createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    },
+    realtime: {
+      params: {
+        eventsPerSecond: 10
+      },
+      heartbeatIntervalMs: 15000
+    }
+  });
+}
+
 function initSupabaseClient(): SupabaseClient | null {
   const config = getSupabaseConfig();
   if (!config.isConnected) {
     return null;
   }
   try {
-    return createClient(config.url, config.anonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true
-      }
-    });
+    return buildSupabaseClient(config.url, config.anonKey);
   } catch (err) {
     console.error('[Supabase Client Init Error]', err);
     return null;
@@ -91,33 +89,33 @@ export function getSupabaseClient(): SupabaseClient | null {
 }
 
 export async function ensureSupabaseOnlineConnection(): Promise<SupabaseClient | null> {
-  if (supabase) {
-    return supabase;
+  if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && !navigator.onLine) {
+    return null;
   }
 
-  const directClient = getSupabaseClient();
-  if (directClient) {
-    return directClient;
-  }
-
-  if (typeof window !== 'undefined' && (typeof navigator === 'undefined' || navigator.onLine)) {
+  if (typeof window !== 'undefined') {
     try {
-      const res = await fetch('/api/db/config');
+      const res = await fetch('/api/db/config', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data?.configured && data?.url && data?.anonKey) {
-          const resSetup = setLiveSupabaseCredentials(data.url, data.anonKey);
-          if (resSetup.success && resSetup.client) {
-            return resSetup.client;
+          const cleanServerUrl = cleanUrl(data.url);
+          const cleanServerKey = String(data.anonKey).trim();
+          if (!supabase || runtimeUrl !== cleanServerUrl || runtimeAnonKey !== cleanServerKey) {
+            const resSetup = setLiveSupabaseCredentials(cleanServerUrl, cleanServerKey);
+            if (resSetup.success && resSetup.client) {
+              return resSetup.client;
+            }
           }
+          return supabase;
         }
       }
     } catch {
-      // Offline or network unreachable
+      return null;
     }
   }
 
-  return null;
+  return getSupabaseClient();
 }
 
 export function setLiveSupabaseCredentials(
@@ -131,25 +129,13 @@ export function setLiveSupabaseCredentials(
     return { success: false, client: null, error: 'Please provide a valid Supabase URL starting with https://' };
   }
   if (!key || key.length < 15) {
-    return { success: false, client: null, error: 'Please provide a valid Supabase anon/public API key' };
+    return { success: false, client: null, error: 'Please provide a valid Supabase API key' };
   }
 
   try {
-    const newClient = createClient(url, key, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true
-      }
-    });
-
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem(STORAGE_URL_KEY, url);
-        localStorage.setItem(STORAGE_KEY_KEY, key);
-      } catch {
-        // ignore
-      }
-    }
+    runtimeUrl = url;
+    runtimeAnonKey = key;
+    const newClient = buildSupabaseClient(url, key);
 
     supabase = newClient;
     isSupabaseConfigured = true;
@@ -169,15 +155,8 @@ export function setLiveSupabaseCredentials(
 }
 
 export function clearLiveSupabaseCredentials(): void {
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.removeItem(STORAGE_URL_KEY);
-      localStorage.removeItem(STORAGE_KEY_KEY);
-    } catch {
-      // ignore
-    }
-  }
-
+  runtimeUrl = '';
+  runtimeAnonKey = '';
   supabase = initSupabaseClient();
   isSupabaseConfigured = Boolean(supabase);
 
@@ -205,11 +184,7 @@ export async function testSupabaseLiveConnection(
   }
 
   try {
-    const testClient = createClient(url, key, {
-      auth: { persistSession: false }
-    });
-
-    // Test query on business_settings
+    const testClient = buildSupabaseClient(url, key);
     const { data, error } = await testClient
       .from('business_settings')
       .select('id, name')
@@ -220,7 +195,7 @@ export async function testSupabaseLiveConnection(
         return {
           success: true,
           tablesFound: false,
-          message: 'Connected to Supabase! However, the catering database tables have not been created yet. Run schema.sql in your Supabase SQL editor.'
+          message: 'Connected to Supabase! Run schema.sql in your Supabase SQL editor to initialize tables.'
         };
       }
       return {

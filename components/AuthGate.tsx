@@ -43,6 +43,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [role, setRole] = useState<UserRole>('owner');
   const [isMounted, setIsMounted] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
+  const [isDbReady, setIsDbReady] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -50,58 +53,202 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setIsMounted(true);
-    const s = store.getState();
-    setIsAuthenticated(s.isAuthenticated);
-    setRole(s.currentRole);
 
-    const unsub = store.subscribe(() => {
-      const next = store.getState();
-      setIsAuthenticated(next.isAuthenticated);
-      setRole(next.currentRole);
-    });
-    return unsub;
+    const syncConnectionAndAuth = () => {
+      const browserOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+      const storeOnline = store.isOnline();
+      setIsOnline(browserOnline && storeOnline);
+      setIsDbReady(store.isInitialSyncDone());
+
+      const s = store.getState();
+      setIsAuthenticated(s.isAuthenticated);
+      setRole(s.currentRole);
+    };
+
+    syncConnectionAndAuth();
+
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    const handleOnline = async () => {
+      setIsRetrying(true);
+      await store.autoConnectSupabaseWhenOnline();
+      setIsRetrying(false);
+      syncConnectionAndAuth();
+    };
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+
+    const unsub = store.subscribe(syncConnectionAndAuth);
+
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+      unsub();
+    };
   }, []);
 
   const allowed = isRouteAllowed(role, pathname);
 
   useEffect(() => {
-    if (isMounted && isAuthenticated) {
+    if (isMounted && isOnline && isDbReady && isAuthenticated) {
       store.refreshOnNavigation();
     }
-  }, [isMounted, isAuthenticated, pathname]);
+  }, [isMounted, isOnline, isDbReady, isAuthenticated, pathname]);
 
   useEffect(() => {
-    if (isMounted && isAuthenticated && !allowed) {
+    if (isMounted && isOnline && isDbReady && isAuthenticated && !allowed) {
       router.replace('/dashboard');
     }
-  }, [isMounted, isAuthenticated, allowed, router]);
+  }, [isMounted, isOnline, isDbReady, isAuthenticated, allowed, router]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleRetryConnection = async () => {
+    setIsRetrying(true);
+    await store.autoConnectSupabaseWhenOnline();
+    setIsOnline((typeof navigator === 'undefined' ? true : navigator.onLine) && store.isOnline());
+    setIsDbReady(store.isInitialSyncDone());
+    setIsRetrying(false);
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setIsOnline(false);
+      return;
+    }
+
     setError('');
     setIsLoading(true);
 
-    setTimeout(() => {
-      const result = store.login(username.trim(), password);
+    await store.syncFromSupabase(true);
+    if (!store.isOnline()) {
       setIsLoading(false);
-      if (!result.success) {
-        setError(result.error || 'Invalid credentials');
-      }
-    }, 200);
+      setIsOnline(false);
+      return;
+    }
+
+    const result = store.login(username.trim(), password);
+    setIsLoading(false);
+    if (!result.success) {
+      setError(result.error || 'Invalid credentials');
+    }
   };
 
-  if (!isMounted) {
+  // STRICT OFFLINE / DISCONNECTED GATE: Never show any page when internet or Supabase is disconnected
+  if (isMounted && !isOnline) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc' }}>
-        <div style={{ textAlign: 'center' }}>
-          <img src="/logo.png" alt="IPPAS Pulse" style={{ height: '50px', marginBottom: '1rem', objectFit: 'contain' }} />
-          <div style={{ color: '#64748b', fontSize: '0.9rem' }}>Loading IPPAS Pulse...</div>
+      <div
+        style={{
+          minHeight: '100vh',
+          background: '#0f172a',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1.5rem',
+          color: '#f8fafc',
+          textAlign: 'center'
+        }}
+      >
+        <div
+          style={{
+            maxWidth: '420px',
+            width: '100%',
+            background: '#1e293b',
+            border: '1px solid #334155',
+            borderRadius: '16px',
+            padding: '2.5rem 2rem',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+          }}
+        >
+          <div
+            style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '50%',
+              background: 'rgba(239, 68, 68, 0.15)',
+              border: '2px solid #ef4444',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 1.25rem auto',
+              fontSize: '1.75rem'
+            }}
+          >
+            📡
+          </div>
+          <h1
+            style={{
+              fontSize: '1.45rem',
+              fontWeight: 800,
+              color: '#ffffff',
+              margin: '0 0 0.65rem 0',
+              letterSpacing: '-0.02em'
+            }}
+          >
+            Internet Disconnected
+          </h1>
+          <p
+            style={{
+              fontSize: '0.9rem',
+              color: '#94a3b8',
+              lineHeight: 1.6,
+              margin: '0 0 1.5rem 0'
+            }}
+          >
+            No active internet connection to Supabase database. Please reconnect to the internet to continue — offline viewing is disabled.
+          </p>
+          <button
+            type="button"
+            onClick={handleRetryConnection}
+            disabled={isRetrying}
+            className="btn btn-primary"
+            style={{
+              width: '100%',
+              padding: '0.75rem 1rem',
+              fontSize: '0.92rem',
+              fontWeight: 700,
+              borderRadius: '8px'
+            }}
+          >
+            {isRetrying ? 'Reconnecting to Supabase...' : 'Retry Connection'}
+          </button>
         </div>
       </div>
     );
   }
 
-  // If not authenticated, render strict and minimal Login Screen with ONLY Username & Password inputs
+  // Wait for live Supabase connection & initial data sync before rendering any page
+  if (!isMounted || !isDbReady) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#f8fafc'
+        }}
+      >
+        <div style={{ textAlign: 'center' }}>
+          <img
+            src="/logo.png"
+            alt="IPPAS Pulse"
+            style={{ height: '50px', marginBottom: '1rem', objectFit: 'contain' }}
+          />
+          <div style={{ color: '#0f172a', fontWeight: 600, fontSize: '0.95rem' }}>
+            Connecting to Live Supabase Database...
+          </div>
+          <div style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '0.3rem' }}>
+            Syncing real-time online records
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Login Screen (online only)
   if (!isAuthenticated) {
     return (
       <div
@@ -210,7 +357,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Authenticated: Render full application with strict role route enforcement
+  // Authenticated & Online: Render full application with strict role route enforcement
   return (
     <div className="app-container">
       <Navbar />

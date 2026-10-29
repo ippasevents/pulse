@@ -6,7 +6,24 @@ declare global {
   var _postgresPool: Pool | undefined;
 }
 
+const createMockPool = (): Pool =>
+  ({
+    query: async () => ({ rows: [] }),
+    connect: async () => ({ query: async () => ({ rows: [] }), release: () => {} }),
+    on: () => {}
+  }) as unknown as Pool;
+
 export const createPool = (): Pool => {
+  if (
+    !process.env.SQL_HOST ||
+    !process.env.SQL_USER ||
+    !process.env.SQL_PASSWORD ||
+    !process.env.SQL_DB_NAME
+  ) {
+    console.warn('[AI Studio] Database not connected — using mock');
+    return createMockPool();
+  }
+
   if (!global._postgresPool) {
     try {
       global._postgresPool = new Pool({
@@ -23,22 +40,13 @@ export const createPool = (): Pool => {
       });
     } catch {
       console.warn('[AI Studio] Database not connected — using mock');
-      global._postgresPool = {
-        query: async () => ({ rows: [] }),
-        connect: async () => ({ query: async () => ({ rows: [] }), release: () => {} }),
-        on: () => {}
-      } as unknown as Pool;
+      return createMockPool();
     }
   }
   return global._postgresPool;
 };
 
-let db: any;
-try {
-  const pool = createPool();
-  db = drizzle(pool, { schema });
-} catch {
-  console.warn('[AI Studio] Database not connected — using mock');
+const createMockDb = () => {
   const noOp = {
     findMany: async () => [],
     findFirst: async () => null,
@@ -47,9 +55,31 @@ try {
     update: async (d: any) => d?.data ?? {},
     delete: async () => ({})
   };
-  db = new Proxy({}, {
-    get: (_, prop) => (prop === 'query' ? new Proxy({}, { get: () => noOp }) : async () => [])
-  });
+  return new Proxy(
+    {},
+    {
+      get: (_, prop) => (prop === 'query' ? new Proxy({}, { get: () => noOp }) : async () => [])
+    }
+  );
+};
+
+let db: any;
+try {
+  if (
+    process.env.SQL_HOST &&
+    process.env.SQL_USER &&
+    process.env.SQL_PASSWORD &&
+    process.env.SQL_DB_NAME
+  ) {
+    const pool = createPool();
+    db = drizzle(pool, { schema });
+  } else {
+    console.warn('[AI Studio] Database not connected — using mock');
+    db = createMockDb();
+  }
+} catch {
+  console.warn('[AI Studio] Database not connected — using mock');
+  db = createMockDb();
 }
 
 export { db };

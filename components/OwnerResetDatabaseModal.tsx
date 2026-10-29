@@ -16,7 +16,7 @@ export default function OwnerResetDatabaseModal({
 }: OwnerResetDatabaseModalProps) {
   const [password, setPassword] = useState('');
   const [confirmWord, setConfirmWord] = useState('');
-  const [mode, setMode] = useState<'restore_defaults' | 'clear_all_data'>('restore_defaults');
+  const [mode] = useState<'clear_all_data'>('clear_all_data');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -67,11 +67,7 @@ export default function OwnerResetDatabaseModal({
       });
 
       if (result.success) {
-        setSuccess(
-          mode === 'clear_all_data'
-            ? '✓ All transactional data cleared successfully! Ready for fresh bookings.'
-            : '✓ Database reset to default state successfully!'
-        );
+        setSuccess('✓ All transactional data cleared in online Supabase database!');
         setPassword('');
         setConfirmWord('');
         if (onSuccess) {
@@ -214,69 +210,28 @@ export default function OwnerResetDatabaseModal({
             </span>
           </div>
 
-          {/* Mode Selector */}
+          {/* Action Description */}
           <div style={{ marginBottom: '1.25rem' }}>
-            <label className="form-label" style={{ fontWeight: 700, marginBottom: '0.5rem', display: 'block' }}>
-              Select Action Type:
-            </label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '0.75rem',
-                  padding: '0.75rem 0.9rem',
-                  borderRadius: '8px',
-                  border: mode === 'restore_defaults' ? '2px solid #ef4444' : '1px solid var(--border)',
-                  background: mode === 'restore_defaults' ? '#fff5f5' : '#fff',
-                  cursor: 'pointer'
-                }}
-              >
-                <input
-                  type="radio"
-                  name="resetMode"
-                  checked={mode === 'restore_defaults'}
-                  onChange={() => setMode('restore_defaults')}
-                  style={{ marginTop: '0.2rem' }}
-                />
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#0f172a' }}>
-                    ↺ Restore Seeded Sample Database
-                  </div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                    Restores initial sample events, recipes, and reference records. Owner login credentials will be preserved.
-                  </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '0.75rem',
+                padding: '0.75rem 0.9rem',
+                borderRadius: '8px',
+                border: '2px solid #ef4444',
+                background: '#fff5f5'
+              }}
+            >
+              <div style={{ fontSize: '1.1rem', marginTop: '0.1rem' }}>🗑️</div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#0f172a' }}>
+                  Wipe All Online Supabase Transactions (Clean Start)
                 </div>
-              </label>
-
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '0.75rem',
-                  padding: '0.75rem 0.9rem',
-                  borderRadius: '8px',
-                  border: mode === 'clear_all_data' ? '2px solid #ef4444' : '1px solid var(--border)',
-                  background: mode === 'clear_all_data' ? '#fff5f5' : '#fff',
-                  cursor: 'pointer'
-                }}
-              >
-                <input
-                  type="radio"
-                  name="resetMode"
-                  checked={mode === 'clear_all_data'}
-                  onChange={() => setMode('clear_all_data')}
-                  style={{ marginTop: '0.2rem' }}
-                />
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#0f172a' }}>
-                    🗑️ Wipe All Transactions (Clean Start)
-                  </div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                    Clears all events, invoices, and payments for new orders. Company profile, staff roster, and menu catalogue will remain intact.
-                  </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                  Deletes all events, clients, shifts, stock purchases, invoices, and payments directly from your online Supabase database. Company profile, login accounts, staff roster, and menu catalogue remain intact.
                 </div>
-              </label>
+              </div>
             </div>
           </div>
 
