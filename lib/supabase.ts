@@ -14,6 +14,29 @@ function cleanUrl(raw?: string | null): string {
   return url;
 }
 
+export function deriveSupabaseUrlFromJwt(jwtKey?: string | null): string {
+  try {
+    const parts = (jwtKey || '').trim().split('.');
+    if (parts.length !== 3) return '';
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const jsonStr =
+      typeof Buffer !== 'undefined'
+        ? Buffer.from(padded, 'base64').toString('utf-8')
+        : typeof atob === 'function'
+        ? atob(padded)
+        : '';
+    if (!jsonStr) return '';
+    const payload = JSON.parse(jsonStr);
+    if (payload?.ref && typeof payload.ref === 'string') {
+      return `https://${payload.ref}.supabase.co`;
+    }
+  } catch {
+    // ignore non-JWT keys
+  }
+  return '';
+}
+
 export function getSupabaseConfig(): {
   url: string;
   anonKey: string;
@@ -29,8 +52,12 @@ export function getSupabaseConfig(): {
     };
   }
 
-  const envUrl = cleanUrl(process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL);
   const envKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+  const envUrl = cleanUrl(
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      process.env.SUPABASE_URL ||
+      deriveSupabaseUrlFromJwt(envKey)
+  );
 
   if (envUrl && envKey && envUrl.startsWith('http') && !envUrl.includes('your-project')) {
     return {
