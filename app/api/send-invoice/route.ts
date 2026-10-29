@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
+import * as dotenv from 'dotenv';
+
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 
 export interface SendInvoicePayload {
   to?: string;
@@ -74,7 +78,7 @@ export async function POST(req: NextRequest) {
     }
 
     const smtpUser = (process.env.SMTP_USER || 'ippassales@gmail.com').trim();
-    const smtpPass = process.env.SMTP_PASS;
+    const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '').trim();
     const smtpHost = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
     const smtpPort = Number(process.env.SMTP_PORT || 465);
 
