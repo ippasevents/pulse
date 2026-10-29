@@ -221,11 +221,15 @@ create table if not exists shifts (
   staff_member_id uuid references staff_members(id) on delete cascade,
   role_label text,
   starts_at timestamptz not null,
-  ends_at timestamptz not null
+  ends_at timestamptz not null,
+  attendance_status text not null default 'pending' check (attendance_status in ('pending', 'present', 'absent')),
+  attendance_marked_at timestamptz
 );
 
 alter table shifts alter column staff_id drop not null;
 alter table shifts add column if not exists staff_member_id uuid references staff_members(id) on delete cascade;
+alter table shifts add column if not exists attendance_status text not null default 'pending';
+alter table shifts add column if not exists attendance_marked_at timestamptz;
 alter table shifts drop constraint if exists shifts_check;
 alter table shifts drop constraint if exists shifts_staff_id_fkey;
 alter table shifts add constraint shifts_staff_id_fkey
@@ -282,11 +286,15 @@ create table if not exists payments (
   invoice_id uuid not null references invoices(id) on delete cascade,
   amount numeric(12,2) not null,
   method text,
+  payment_channel text not null default 'bank' check (payment_channel in ('bank', 'cash')),
+  destination_account text,
   note text,
   paid_at timestamptz not null default now()
 );
 
 alter table payments
+  add column if not exists payment_channel text not null default 'bank',
+  add column if not exists destination_account text,
   add column if not exists note text;
 
 -- ============================================================================

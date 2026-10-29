@@ -4,10 +4,11 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { store, StockEstimationItem } from '@/lib/store';
-import { EventRecord, EventStatus, MenuItem, Invoice, Payment, PricingType } from '@/lib/types';
+import { EventRecord, EventStatus, MenuItem, Invoice, Payment, PaymentChannel, PricingType, ShiftAttendanceStatus } from '@/lib/types';
 import { downloadElementAsPdf } from '@/lib/downloadPdf';
 import { sendInvoiceEmailNotification } from '@/lib/emailInvoice';
 import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
+import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
 
 export default function EventDetailPage() {
   const params = useParams();
@@ -73,10 +74,13 @@ export default function EventDetailPage() {
     notes: ''
   });
 
-  // Record Part-Payment modal state (against the same invoice)
+  // Record Part-Payment modal state (against the same invoice, with Bank/Cash & Destination Account)
   const [partPayInvoice, setPartPayInvoice] = useState<Invoice | null>(null);
   const [partPayAmount, setPartPayAmount] = useState<number>(0);
   const [partPayMethod, setPartPayMethod] = useState('bank transfer');
+  const [partPayChannel, setPartPayChannel] = useState<PaymentChannel>('bank');
+  const [partPayDestAccount, setPartPayDestAccount] = useState('');
+  const [partPayCustomAccount, setPartPayCustomAccount] = useState('');
   const [partPayNote, setPartPayNote] = useState('');
 
   // Per-kg item quantity staging when adding dishes
@@ -158,15 +162,17 @@ export default function EventDetailPage() {
   // Automatic Stock Estimation for this event
   const stockEst = store.getEventStockEstimation(event.id);
 
-  // Estimated staff cost
-  let estimatedStaffCost = 0;
+  // Confirmed Staff Pay — strictly counted ONLY for staff marked 'present'
+  let attendedStaffCost = 0;
+  let attendedStaffCount = 0;
   shifts.forEach((sh) => {
-    const staffMember = state.staff.find((st) => st.id === sh.staff_member_id);
-    if (staffMember) {
-      const startH = parseInt(sh.starts_at.slice(11, 13) || '17');
-      const endH = parseInt(sh.ends_at.slice(11, 13) || '23');
-      const hours = Math.max(1, endH >= startH ? endH - startH : 24 - startH + endH);
-      estimatedStaffCost += hours * staffMember.hourly_rate;
+    if (sh.attendance_status === 'present' && event.status !== 'cancelled') {
+      attendedStaffCount += 1;
+      const staffMember = state.staff.find((st) => st.id === sh.staff_member_id);
+      if (staffMember) {
+        const hrs = store.calculateShiftHours(sh.starts_at, sh.ends_at);
+        attendedStaffCost += Math.round(hrs * Number(staffMember.hourly_rate || 0));
+      }
     }
   });
 
@@ -330,10 +336,16 @@ export default function EventDetailPage() {
       .filter((p) => p.invoice_id === inv.id)
       .reduce((s, p) => s + p.amount, 0);
     const balance = Math.max(0, inv.amount - paymentsForInv);
+    const defaultMethod = 'bank transfer';
+    const defaultChannel: PaymentChannel = 'bank';
+    const defaultAcc = store.getDefaultDestinationAccount(defaultChannel, defaultMethod);
 
     setPartPayInvoice(inv);
     setPartPayAmount(balance);
-    setPartPayMethod('bank transfer');
+    setPartPayMethod(defaultMethod);
+    setPartPayChannel(defaultChannel);
+    setPartPayDestAccount(defaultAcc);
+    setPartPayCustomAccount('');
     setPartPayNote(`Part payment against ${inv.invoice_number}`);
   };
 
@@ -341,17 +353,26 @@ export default function EventDetailPage() {
     e.preventDefault();
     if (!partPayInvoice || partPayAmount <= 0) return;
 
+    const finalAccount =
+      partPayDestAccount === '__custom__'
+        ? partPayCustomAccount.trim() ||
+          store.getDefaultDestinationAccount(partPayChannel, partPayMethod)
+        : partPayDestAccount ||
+          store.getDefaultDestinationAccount(partPayChannel, partPayMethod);
+
     store.addPayment({
       invoice_id: partPayInvoice.id,
       amount: partPayAmount,
       method: partPayMethod,
+      payment_channel: partPayChannel,
+      destination_account: finalAccount,
       note: partPayNote
     });
 
     setPartPayInvoice(null);
     setStatusBanner({
       type: 'success',
-      message: 'Part-payment recorded on the invoice successfully.'
+      message: `Part-payment recorded to "${finalAccount}" (${partPayChannel === 'cash' ? 'Cash' : 'Bank'}).`
     });
   };
 
@@ -955,12 +976,29 @@ export default function EventDetailPage() {
       {/* ----------------------------------------------------------------------------------- */}
       {activeTab === 'shifts' && (
         <div className="grid-2">
-          {/* Shifts table */}
+          {/* Shifts & Attendance Register table */}
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h2 className="card-title" style={{ margin: 0 }}>Scheduled Staff Shifts</h2>
-              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)' }}>
-                Est. Staff Cost: ₹{estimatedStaffCost.toLocaleString('en-IN')}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.85rem' }}>
+              <div>
+                <h2 className="card-title" style={{ margin: 0 }}>Event Staff Attendance Register</h2>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                  Shift pay is displayed &amp; counted ONLY when staff is marked <strong>Present</strong>.
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#059669' }}>
+                  Attended Pay ({attendedStaffCount}/{shifts.length}): ₹{attendedStaffCost.toLocaleString('en-IN')}
+                </div>
+                {(canEditOps || isFinance) && shifts.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontWeight: 700 }}
+                    onClick={() => store.markEventShiftsAttendance(event.id, 'present')}
+                  >
+                    ✓ Mark All Present
+                  </button>
+                )}
               </div>
             </div>
 
@@ -974,15 +1012,23 @@ export default function EventDetailPage() {
                   <thead>
                     <tr>
                       <th>Staff Member</th>
-                      <th>Role</th>
-                      <th>Times</th>
-                      <th>Rate</th>
+                      <th>Role &amp; Times</th>
+                      <th style={{ textAlign: 'center' }}>Attendance</th>
+                      <th style={{ textAlign: 'right' }}>Shift Pay</th>
                       {canEditOps && <th style={{ textAlign: 'center' }}>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {shifts.map((sh) => {
                       const staffMember = state.staff.find((st) => st.id === sh.staff_member_id);
+                      const hrs = store.calculateShiftHours(sh.starts_at, sh.ends_at);
+                      const attStatus: ShiftAttendanceStatus =
+                        sh.attendance_status === 'present' || sh.attendance_status === 'absent'
+                          ? sh.attendance_status
+                          : 'pending';
+                      const isPresent = attStatus === 'present' && event.status !== 'cancelled';
+                      const earnedWage = isPresent ? Math.round(hrs * Number(staffMember?.hourly_rate || 0)) : 0;
+
                       return (
                         <tr key={sh.id}>
                           <td>
@@ -994,19 +1040,82 @@ export default function EventDetailPage() {
                               <OwnerAuditBadge
                                 role={role}
                                 entry={store.getEntityAudit(sh.id, ['shift'])}
-                                prefixLabel="Assigned by"
+                                prefixLabel="Updated by"
                               />
                             )}
                           </td>
-                          <td>
-                            <span className="badge" style={{ background: '#f1f5f9' }}>
-                              {sh.role_label || staffMember?.role_title}
-                            </span>
-                          </td>
                           <td style={{ fontSize: '0.8rem' }}>
-                            {sh.starts_at.slice(11, 16)} - {sh.ends_at.slice(11, 16)}
+                            <div style={{ fontWeight: 600 }}>
+                              {sh.role_label || staffMember?.role_title}
+                            </div>
+                            <div style={{ color: 'var(--text-muted)' }}>
+                              {sh.starts_at.slice(11, 16)} - {sh.ends_at.slice(11, 16)} ({hrs} hrs)
+                            </div>
                           </td>
-                          <td style={{ fontWeight: 600 }}>₹{staffMember?.hourly_rate}/hr</td>
+                          <td style={{ textAlign: 'center' }}>
+                            {canEditOps || isFinance ? (
+                              <div style={{ display: 'inline-flex', gap: '0.28rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  style={{
+                                    background: attStatus === 'present' ? '#16a34a' : '#f1f5f9',
+                                    color: attStatus === 'present' ? '#ffffff' : '#334155',
+                                    border: `1px solid ${attStatus === 'present' ? '#15803d' : '#cbd5e1'}`,
+                                    fontWeight: 700,
+                                    fontSize: '0.72rem',
+                                    padding: '0.2rem 0.45rem'
+                                  }}
+                                  onClick={() => store.updateShiftAttendance(sh.id, 'present')}
+                                >
+                                  ✓ Present
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  style={{
+                                    background: attStatus === 'absent' ? '#dc2626' : '#f1f5f9',
+                                    color: attStatus === 'absent' ? '#ffffff' : '#334155',
+                                    border: `1px solid ${attStatus === 'absent' ? '#b91c1c' : '#cbd5e1'}`,
+                                    fontWeight: 700,
+                                    fontSize: '0.72rem',
+                                    padding: '0.2rem 0.45rem'
+                                  }}
+                                  onClick={() => store.updateShiftAttendance(sh.id, 'absent')}
+                                >
+                                  ✕ Absent
+                                </button>
+                              </div>
+                            ) : (
+                              <span
+                                style={{
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  color:
+                                    attStatus === 'present'
+                                      ? '#15803d'
+                                      : attStatus === 'absent'
+                                      ? '#dc2626'
+                                      : '#b45309'
+                                }}
+                              >
+                                {attStatus === 'present'
+                                  ? '✓ Present'
+                                  : attStatus === 'absent'
+                                  ? '✕ Absent'
+                                  : '⏳ Pending'}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {isPresent ? (
+                              <span style={{ fontWeight: 800, color: '#059669' }}>
+                                ₹{earnedWage.toLocaleString('en-IN')}
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>
+                            )}
+                          </td>
                           {canEditOps && (
                             <td style={{ textAlign: 'center' }}>
                               <button
@@ -1118,6 +1227,14 @@ export default function EventDetailPage() {
               <span className="stats-sub">Pending client payment</span>
             </div>
           </div>
+
+          {isFinance && (
+            <InvoiceCollectionsCard
+              breakdown={store.getInvoiceCollectionsBreakdown(event.id)}
+              title="🏦 Event Collections — Bank vs Cash & Account Holdings"
+              subtitle="Exact Bank vs Cash split and destination accounts holding client receipts for this event."
+            />
+          )}
 
           <div className="grid-2" style={{ marginBottom: '1.5rem' }}>
             {/* Invoices list with Part-Payments on Same Invoice */}
@@ -1366,8 +1483,9 @@ export default function EventDetailPage() {
                     <tr>
                       <th>Payment Date</th>
                       <th>Applied Invoice</th>
-                      <th>Method</th>
-                      <th>Notes / Reference</th>
+                      <th>Channel</th>
+                      <th>Destination Account</th>
+                      <th>Method &amp; Notes</th>
                       <th style={{ textAlign: 'right' }}>Amount Paid</th>
                       {isFinance && <th style={{ textAlign: 'center' }}>Remove</th>}
                     </tr>
@@ -1377,15 +1495,34 @@ export default function EventDetailPage() {
                       .filter((p) => invoices.some((i) => i.id === p.invoice_id))
                       .map((pmt) => {
                         const inv = invoices.find((i) => i.id === pmt.invoice_id);
+                        const ch = store.inferPaymentChannel(pmt.method, pmt.payment_channel);
+                        const destAcc = store.resolveDestinationAccount(pmt);
+                        const isCash = ch === 'cash';
+
                         return (
                           <tr key={pmt.id}>
                             <td>{pmt.paid_at.slice(0, 10)}</td>
                             <td>
                               <span style={{ fontWeight: 700 }}>{inv?.invoice_number}</span>
                             </td>
-                            <td style={{ textTransform: 'capitalize' }}>{pmt.method}</td>
+                            <td>
+                              <span
+                                style={{
+                                  fontSize: '0.74rem',
+                                  fontWeight: 800,
+                                  color: isCash ? '#059669' : '#1d4ed8',
+                                  textTransform: 'uppercase'
+                                }}
+                              >
+                                {isCash ? '💵 Cash' : '🏦 Bank'}
+                              </span>
+                            </td>
+                            <td style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.84rem' }}>
+                              {destAcc}
+                            </td>
                             <td style={{ fontSize: '0.85rem' }}>
-                              <div>{pmt.note || '—'}</div>
+                              <div style={{ fontWeight: 600, textTransform: 'capitalize' }}>{pmt.method}</div>
+                              {pmt.note && <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{pmt.note}</div>}
                               {role === 'owner' && (
                                 <OwnerAuditBadge
                                   role={role}
@@ -1394,7 +1531,7 @@ export default function EventDetailPage() {
                                 />
                               )}
                             </td>
-                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: isCash ? '#059669' : '#1d4ed8' }}>
                               ₹{pmt.amount.toLocaleString('en-IN')}
                             </td>
                             {isFinance && (
@@ -2219,22 +2356,30 @@ export default function EventDetailPage() {
                           <thead>
                             <tr style={{ borderBottom: '1px solid #cbd5e1', color: '#64748b' }}>
                               <th style={{ textAlign: 'left', padding: '4px' }}>Date</th>
-                              <th style={{ textAlign: 'left', padding: '4px' }}>Method</th>
-                              <th style={{ textAlign: 'left', padding: '4px' }}>Note / Reference</th>
+                              <th style={{ textAlign: 'left', padding: '4px' }}>Method &amp; Channel</th>
+                              <th style={{ textAlign: 'left', padding: '4px' }}>Account</th>
+                              <th style={{ textAlign: 'left', padding: '4px' }}>Note</th>
                               <th style={{ textAlign: 'right', padding: '4px' }}>Amount Paid</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {paymentsForThis.map((pmt) => (
-                              <tr key={pmt.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                <td style={{ padding: '4px' }}>{pmt.paid_at.slice(0, 10)}</td>
-                                <td style={{ padding: '4px', textTransform: 'capitalize' }}>{pmt.method}</td>
-                                <td style={{ padding: '4px', color: '#64748b' }}>{pmt.note || '—'}</td>
-                                <td style={{ padding: '4px', textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
-                                  ₹{pmt.amount.toLocaleString('en-IN')}
-                                </td>
-                              </tr>
-                            ))}
+                            {paymentsForThis.map((pmt) => {
+                              const ch = store.inferPaymentChannel(pmt.method, pmt.payment_channel);
+                              const acc = store.resolveDestinationAccount(pmt);
+                              return (
+                                <tr key={pmt.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                  <td style={{ padding: '4px' }}>{pmt.paid_at.slice(0, 10)}</td>
+                                  <td style={{ padding: '4px', textTransform: 'capitalize' }}>
+                                    {pmt.method} ({ch === 'cash' ? 'Cash' : 'Bank'})
+                                  </td>
+                                  <td style={{ padding: '4px', fontWeight: 600, color: '#0f172a' }}>{acc}</td>
+                                  <td style={{ padding: '4px', color: '#64748b' }}>{pmt.note || '—'}</td>
+                                  <td style={{ padding: '4px', textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
+                                    ₹{pmt.amount.toLocaleString('en-IN')}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
 
@@ -2394,20 +2539,80 @@ export default function EventDetailPage() {
                 />
               </div>
 
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Payment Mode *</label>
+                  <select
+                    className="form-control"
+                    value={partPayMethod}
+                    onChange={(e) => {
+                      const nextMethod = e.target.value;
+                      const nextChannel = store.inferPaymentChannel(nextMethod);
+                      const nextAcc = store.getDefaultDestinationAccount(nextChannel, nextMethod);
+                      setPartPayMethod(nextMethod);
+                      setPartPayChannel(nextChannel);
+                      setPartPayDestAccount(nextAcc);
+                    }}
+                  >
+                    <option value="bank transfer">Bank Transfer (NEFT/RTGS/IMPS)</option>
+                    <option value="upi">UPI / GPay / PhonePe</option>
+                    <option value="cash">Cash</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="card">Card</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Received Into (Bank vs Cash) *</label>
+                  <select
+                    className="form-control"
+                    value={partPayChannel}
+                    onChange={(e) => {
+                      const nextChannel = e.target.value as PaymentChannel;
+                      const nextAcc = store.getDefaultDestinationAccount(nextChannel, partPayMethod);
+                      setPartPayChannel(nextChannel);
+                      setPartPayDestAccount(nextAcc);
+                    }}
+                  >
+                    <option value="bank">🏦 Bank Account</option>
+                    <option value="cash">💵 Cash in Hand</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="form-group">
-                <label className="form-label">Payment Mode</label>
+                <label className="form-label">Destination Account (Deposited To) *</label>
                 <select
                   className="form-control"
-                  value={partPayMethod}
-                  onChange={(e) => setPartPayMethod(e.target.value)}
+                  value={partPayDestAccount}
+                  onChange={(e) => setPartPayDestAccount(e.target.value)}
                 >
-                  <option value="bank transfer">Bank Transfer (NEFT/RTGS/IMPS)</option>
-                  <option value="upi">UPI / GPay / PhonePe</option>
-                  <option value="cash">Cash</option>
-                  <option value="cheque">Cheque</option>
-                  <option value="card">Card</option>
+                  {store.getPresetPaymentAccounts(partPayChannel).map((acc) => (
+                    <option key={acc.label} value={acc.label}>
+                      {acc.label}
+                    </option>
+                  ))}
+                  <option value="__custom__">+ Enter Custom Bank / Cash Account...</option>
                 </select>
               </div>
+
+              {partPayDestAccount === '__custom__' && (
+                <div className="form-group">
+                  <label className="form-label">Custom Account / Cash Location Name *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={
+                      partPayChannel === 'cash'
+                        ? 'e.g. Venue Cash Counter / Owner Safe'
+                        : 'e.g. South Indian Bank (A/c 4455)'
+                    }
+                    value={partPayCustomAccount}
+                    onChange={(e) => setPartPayCustomAccount(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
 
               <div className="form-group">
                 <label className="form-label">Payment Note / Installment Details</label>

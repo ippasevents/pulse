@@ -130,6 +130,9 @@ export interface StaffMember {
   active: boolean;
 }
 
+export type ShiftAttendanceStatus = 'pending' | 'present' | 'absent';
+export type PaymentChannel = 'bank' | 'cash';
+
 export interface Shift {
   id: string;
   event_id: string;
@@ -137,6 +140,8 @@ export interface Shift {
   role_label?: string;
   starts_at: string;
   ends_at: string;
+  attendance_status?: ShiftAttendanceStatus;
+  attendance_marked_at?: string;
 }
 
 export interface StaffSalaryRecord {
@@ -169,6 +174,8 @@ export interface Payment {
   invoice_id: string;
   amount: number;
   method: string;
+  payment_channel?: PaymentChannel;
+  destination_account?: string;
   paid_at: string;
   note?: string;
 }

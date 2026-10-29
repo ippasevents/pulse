@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { store } from '@/lib/store';
-import { StaffMember, StaffSalaryRecordType } from '@/lib/types';
+import { ShiftAttendanceStatus, StaffMember, StaffSalaryRecordType } from '@/lib/types';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 
 export default function StaffPage() {
@@ -24,8 +24,12 @@ export default function StaffPage() {
     note: ''
   });
 
-  // Individual Staff Statement Modal
+  // Individual Staff Statement Modal & Removal Confirmation States
   const [statementStaff, setStatementStaff] = useState<StaffMember | null>(null);
+  const [staffToDelete, setStaffToDelete] = useState<StaffMember | null>(null);
+  const [confirmRemoveShiftId, setConfirmRemoveShiftId] = useState<string | null>(null);
+  const [confirmDeleteSalaryId, setConfirmDeleteSalaryId] = useState<string | null>(null);
+  const [attendanceEventFilter, setAttendanceEventFilter] = useState<string>('');
   const [notice, setNotice] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
@@ -53,6 +57,7 @@ export default function StaffPage() {
   const role = state.currentRole;
   const canEditStaff = role === 'owner' || role === 'manager';
   const canManageSalary = role === 'owner' || role === 'manager' || role === 'accountant';
+  const canMarkAttendance = role === 'owner' || role === 'manager' || role === 'accountant';
 
   // Summaries across all staff
   const staffRows = state.staff.map((st) => ({
@@ -146,13 +151,38 @@ export default function StaffPage() {
     b.recorded_at.localeCompare(a.recorded_at)
   );
 
+  const filteredShifts = state.shifts.filter((sh) =>
+    attendanceEventFilter ? sh.event_id === attendanceEventFilter : true
+  );
+
+  const handleMarkShiftAttendance = (shiftId: string, status: ShiftAttendanceStatus, staffName?: string) => {
+    store.updateShiftAttendance(shiftId, status);
+    const label = status === 'present' ? 'Present' : status === 'absent' ? 'Absent' : 'Pending';
+    showNotice(`Attendance marked "${label}"${staffName ? ` for ${staffName}` : ''}.`);
+  };
+
+  const handleConfirmDeleteStaff = () => {
+    if (!staffToDelete) return;
+    const removedName = staffToDelete.name;
+    store.deleteStaff(staffToDelete.id);
+    if (statementStaff?.id === staffToDelete.id) {
+      setStatementStaff(null);
+    }
+    if (editingStaff?.id === staffToDelete.id) {
+      setEditingStaff(null);
+      setIsModalOpen(false);
+    }
+    setStaffToDelete(null);
+    showNotice(`Removed "${removedName}" from staff roster & database.`);
+  };
+
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Staff &amp; Salary Management</h1>
+          <h1 className="page-title">Staff Finance &amp; Attendance Register</h1>
           <p className="page-subtitle">
-            Manage banquet crew roster, shift earnings, salary payments disbursed, and pending balances payable.
+            Track event shift attendance, shift wages (strictly shown &amp; counted only when Present), salary payouts, and pending balances.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -230,7 +260,7 @@ export default function StaffPage() {
           <span className="stats-value" style={{ color: '#2563eb' }}>
             ₹{totalEarnedAll.toLocaleString('en-IN')}
           </span>
-          <span className="stats-sub">Shift wages &amp; duty allowances</span>
+          <span className="stats-sub">Attended shifts only + allowances</span>
         </div>
 
         <div className="stats-card" style={{ borderLeft: '4px solid #059669' }}>
@@ -298,7 +328,7 @@ export default function StaffPage() {
               <tr>
                 <th>Staff Name &amp; Login Phone</th>
                 <th>Role &amp; Rate</th>
-                <th style={{ textAlign: 'center' }}>Shifts / Hours</th>
+                <th style={{ textAlign: 'center' }}>Attended Shifts / Hours</th>
                 <th style={{ textAlign: 'right' }}>Total Earned</th>
                 <th style={{ textAlign: 'right' }}>Salary Paid</th>
                 <th style={{ textAlign: 'right' }}>Balance Payable</th>
@@ -336,10 +366,16 @@ export default function StaffPage() {
                       </div>
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      <div style={{ fontWeight: 600 }}>{summary.shiftItems.length} shifts</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        {summary.totalShiftHours} hrs
+                      <div style={{ fontWeight: 700, color: '#059669' }}>
+                        {summary.attendedShiftsCount} attended ({summary.totalShiftHours} hrs)
                       </div>
+                      {(summary.absentShiftsCount > 0 || summary.pendingShiftsCount > 0) && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                          {summary.absentShiftsCount > 0 ? `${summary.absentShiftsCount} absent` : ''}
+                          {summary.absentShiftsCount > 0 && summary.pendingShiftsCount > 0 ? ' • ' : ''}
+                          {summary.pendingShiftsCount > 0 ? `${summary.pendingShiftsCount} pending` : ''}
+                        </div>
+                      )}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: '#1e293b' }}>
                       ₹{summary.totalEarned.toLocaleString('en-IN')}
@@ -419,24 +455,34 @@ export default function StaffPage() {
                           📋 Ledger
                         </button>
                         {canEditStaff && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => {
-                              setEditingStaff(staff);
-                              setFormData({
-                                name: staff.name,
-                                phone: staff.phone || '',
-                                password: staff.password || 'password123',
-                                role_title: staff.role_title || '',
-                                hourly_rate: staff.hourly_rate,
-                                active: staff.active
-                              });
-                              setIsModalOpen(true);
-                            }}
-                          >
-                            Edit
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => {
+                                setEditingStaff(staff);
+                                setFormData({
+                                  name: staff.name,
+                                  phone: staff.phone || '',
+                                  password: staff.password || 'password123',
+                                  role_title: staff.role_title || '',
+                                  hourly_rate: staff.hourly_rate,
+                                  active: staff.active
+                                });
+                                setIsModalOpen(true);
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              title="Remove this staff member permanently"
+                              onClick={() => setStaffToDelete(staff)}
+                            >
+                              🗑 Remove
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -448,166 +494,367 @@ export default function StaffPage() {
         </div>
       </div>
 
-      <div className="grid-2" style={{ marginBottom: '1.5rem' }}>
-        {/* Salary Payments & Allowances History */}
-        <div className="card">
-          <h2 className="card-title">💳 Recent Salary Payments &amp; Wage Entries</h2>
-          {recentSalaryRecords.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-              No salary payments or wage adjustments recorded yet.
+      {/* Event Shift Attendance Register (Strict Attendance-Gated Pay) */}
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            marginBottom: '1rem',
+            flexWrap: 'wrap',
+            gap: '0.75rem'
+          }}
+        >
+          <div>
+            <h2 className="card-title" style={{ margin: 0 }}>
+              📋 Event Shift Attendance Register
+            </h2>
+            <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+              Mark whether each assigned crew member attended the event. <strong>Shift payment is displayed and counted ONLY when marked Present.</strong> Absent or unmarked shifts never show or accrue pay.
             </p>
-          ) : (
-            <div className="data-table-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Staff Member</th>
-                    <th>Type</th>
-                    <th>Method / Note</th>
-                    <th style={{ textAlign: 'right' }}>Amount</th>
-                    {canManageSalary && <th style={{ textAlign: 'center' }}>Delete</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentSalaryRecords.slice(0, 15).map((rec) => {
-                    const st = state.staff.find((s) => s.id === rec.staff_member_id);
-                    const isPayment = rec.record_type === 'payment';
-                    return (
-                      <tr key={rec.id}>
-                        <td style={{ fontSize: '0.8rem' }}>
-                          {new Date(rec.recorded_at).toLocaleDateString('en-GB', {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric'
-                          })}
-                        </td>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{st?.name || 'Staff Member'}</div>
-                          {role === 'owner' && (
-                            <OwnerAuditBadge
-                              role={role}
-                              entry={store.getEntityAudit(rec.id, ['salary'])}
-                              prefixLabel="Recorded by"
-                            />
-                          )}
-                        </td>
-                        <td>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <select
+              className="form-control"
+              style={{ width: 'auto', minWidth: '220px', fontSize: '0.85rem' }}
+              value={attendanceEventFilter}
+              onChange={(e) => setAttendanceEventFilter(e.target.value)}
+            >
+              <option value="">All Events ({state.shifts.length} assigned shifts)</option>
+              {state.events
+                .filter((ev) => state.shifts.some((sh) => sh.event_id === ev.id))
+                .map((ev) => (
+                  <option key={ev.id} value={ev.id}>
+                    {ev.title} ({ev.event_date})
+                  </option>
+                ))}
+            </select>
+
+            {canMarkAttendance && attendanceEventFilter && filteredShifts.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                style={{ fontWeight: 600 }}
+                onClick={() => {
+                  store.markEventShiftsAttendance(attendanceEventFilter, 'present');
+                  showNotice('Marked all shifts for the selected event as Present.');
+                }}
+              >
+                ✓ Mark All Present
+              </button>
+            )}
+          </div>
+        </div>
+
+        {filteredShifts.length === 0 ? (
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+            No assigned event shifts found. Schedule crew shifts from inside any Event page.
+          </p>
+        ) : (
+          <div className="data-table-container">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Event &amp; Date</th>
+                  <th>Assigned Staff &amp; Role</th>
+                  <th>Shift Timing</th>
+                  <th style={{ textAlign: 'center' }}>Attendance Register</th>
+                  <th style={{ textAlign: 'right' }}>Shift Payment (Present Only)</th>
+                  {canEditStaff && <th style={{ textAlign: 'center' }}>Remove Shift</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredShifts.map((sh) => {
+                  const evt = state.events.find((e) => e.id === sh.event_id);
+                  const st = state.staff.find((s) => s.id === sh.staff_member_id);
+                  const hrs = store.calculateShiftHours(sh.starts_at, sh.ends_at);
+                  const attStatus: ShiftAttendanceStatus =
+                    sh.attendance_status === 'present' || sh.attendance_status === 'absent'
+                      ? sh.attendance_status
+                      : 'pending';
+                  const isPresent = attStatus === 'present' && evt?.status !== 'cancelled';
+                  const earnedPay = isPresent ? Math.round(hrs * Number(st?.hourly_rate || 0)) : 0;
+
+                  return (
+                    <tr key={sh.id}>
+                      <td>
+                        <Link
+                          href={`/events/${evt?.id}`}
+                          style={{ fontWeight: 600, color: 'var(--primary)', textDecoration: 'underline' }}
+                        >
+                          {evt?.title || 'Unknown Event'}
+                        </Link>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {evt?.event_date} {evt?.venue ? `• ${evt.venue}` : ''}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>{st?.name || 'Unassigned'}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {sh.role_label || st?.role_title}
+                        </div>
+                        {role === 'owner' && (
+                          <OwnerAuditBadge
+                            role={role}
+                            entry={store.getEntityAudit(sh.id, ['shift'])}
+                            prefixLabel="Updated by"
+                          />
+                        )}
+                      </td>
+                      <td style={{ fontSize: '0.82rem' }}>
+                        <div style={{ fontWeight: 600 }}>
+                          {sh.starts_at.slice(11, 16)} - {sh.ends_at.slice(11, 16)}
+                        </div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>{hrs} hrs</div>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        {canMarkAttendance ? (
+                          <div style={{ display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              style={{
+                                background: attStatus === 'present' ? '#16a34a' : '#f1f5f9',
+                                color: attStatus === 'present' ? '#ffffff' : '#334155',
+                                border: `1px solid ${attStatus === 'present' ? '#15803d' : '#cbd5e1'}`,
+                                fontWeight: 700,
+                                fontSize: '0.75rem',
+                                padding: '0.25rem 0.55rem'
+                              }}
+                              onClick={() => handleMarkShiftAttendance(sh.id, 'present', st?.name)}
+                            >
+                              ✓ Present
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              style={{
+                                background: attStatus === 'absent' ? '#dc2626' : '#f1f5f9',
+                                color: attStatus === 'absent' ? '#ffffff' : '#334155',
+                                border: `1px solid ${attStatus === 'absent' ? '#b91c1c' : '#cbd5e1'}`,
+                                fontWeight: 700,
+                                fontSize: '0.75rem',
+                                padding: '0.25rem 0.55rem'
+                              }}
+                              onClick={() => handleMarkShiftAttendance(sh.id, 'absent', st?.name)}
+                            >
+                              ✕ Absent
+                            </button>
+                            {attStatus !== 'pending' && (
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                style={{
+                                  background: '#ffffff',
+                                  color: '#64748b',
+                                  border: '1px solid #cbd5e1',
+                                  fontSize: '0.72rem',
+                                  padding: '0.25rem 0.45rem'
+                                }}
+                                title="Reset attendance to Pending"
+                                onClick={() => handleMarkShiftAttendance(sh.id, 'pending', st?.name)}
+                              >
+                                Reset
+                              </button>
+                            )}
+                          </div>
+                        ) : (
                           <span
-                            className="badge"
                             style={{
-                              background: isPayment ? '#dcfce7' : '#dbeafe',
-                              color: isPayment ? '#15803d' : '#1d4ed8',
-                              fontWeight: 600
+                              fontWeight: 700,
+                              fontSize: '0.78rem',
+                              color:
+                                attStatus === 'present'
+                                  ? '#15803d'
+                                  : attStatus === 'absent'
+                                  ? '#dc2626'
+                                  : '#b45309'
                             }}
                           >
-                            {isPayment ? 'Salary Paid' : 'Duty Wage'}
+                            {attStatus === 'present'
+                              ? '✓ Present'
+                              : attStatus === 'absent'
+                              ? '✕ Absent'
+                              : '⏳ Pending'}
                           </span>
-                        </td>
-                        <td style={{ fontSize: '0.8rem' }}>
-                          <div>{rec.method}</div>
-                          {rec.note && <div style={{ color: 'var(--text-muted)' }}>{rec.note}</div>}
-                        </td>
-                        <td
-                          style={{
-                            textAlign: 'right',
-                            fontWeight: 700,
-                            color: isPayment ? '#059669' : '#2563eb'
-                          }}
-                        >
-                          ₹{rec.amount.toLocaleString('en-IN')}
-                        </td>
-                        {canManageSalary && (
-                          <td style={{ textAlign: 'center' }}>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {isPresent ? (
+                          <span style={{ fontWeight: 800, color: '#059669', fontSize: '0.95rem' }}>
+                            ₹{earnedPay.toLocaleString('en-IN')}
+                          </span>
+                        ) : attStatus === 'absent' ? (
+                          <span style={{ fontSize: '0.78rem', color: '#dc2626', fontWeight: 600 }}>
+                            — (Absent)
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                            — (Mark Present to unlock)
+                          </span>
+                        )}
+                      </td>
+                      {canEditStaff && (
+                        <td style={{ textAlign: 'center' }}>
+                          {confirmRemoveShiftId === sh.id ? (
+                            <div style={{ display: 'inline-flex', gap: '0.25rem', alignItems: 'center' }}>
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                style={{ fontSize: '0.72rem', padding: '0.2rem 0.45rem' }}
+                                onClick={() => {
+                                  store.removeShift(sh.id);
+                                  setConfirmRemoveShiftId(null);
+                                  showNotice(`Removed shift for ${st?.name || 'staff'} from ${evt?.title || 'event'}.`);
+                                }}
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{ fontSize: '0.72rem', padding: '0.2rem 0.45rem' }}
+                                onClick={() => setConfirmRemoveShiftId(null)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
                             <button
                               type="button"
                               className="btn btn-danger btn-sm"
-                              onClick={() => {
-                                if (confirm('Remove this salary entry? Staff balance will update immediately.')) {
+                              style={{ fontSize: '0.74rem', padding: '0.22rem 0.5rem' }}
+                              title="Unassign staff from this event shift"
+                              onClick={() => setConfirmRemoveShiftId(sh.id)}
+                            >
+                              ✕ Remove
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Salary Payments & Allowances History */}
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <h2 className="card-title">💳 Recent Salary Payments &amp; Wage Entries</h2>
+        {recentSalaryRecords.length === 0 ? (
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+            No salary payments or wage adjustments recorded yet.
+          </p>
+        ) : (
+          <div className="data-table-container">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Staff Member</th>
+                  <th>Type</th>
+                  <th>Method / Note</th>
+                  <th style={{ textAlign: 'right' }}>Amount</th>
+                  {canManageSalary && <th style={{ textAlign: 'center' }}>Delete</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {recentSalaryRecords.slice(0, 15).map((rec) => {
+                  const st = state.staff.find((s) => s.id === rec.staff_member_id);
+                  const isPayment = rec.record_type === 'payment';
+                  return (
+                    <tr key={rec.id}>
+                      <td style={{ fontSize: '0.8rem' }}>
+                        {new Date(rec.recorded_at).toLocaleDateString('en-GB', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric'
+                        })}
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{st?.name || 'Staff Member'}</div>
+                        {role === 'owner' && (
+                          <OwnerAuditBadge
+                            role={role}
+                            entry={store.getEntityAudit(rec.id, ['salary'])}
+                            prefixLabel="Recorded by"
+                          />
+                        )}
+                      </td>
+                      <td>
+                        <span
+                          className="badge"
+                          style={{
+                            background: isPayment ? '#dcfce7' : '#dbeafe',
+                            color: isPayment ? '#15803d' : '#1d4ed8',
+                            fontWeight: 600
+                          }}
+                        >
+                          {isPayment ? 'Salary Paid' : 'Duty Wage'}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: '0.8rem' }}>
+                        <div>{rec.method}</div>
+                        {rec.note && <div style={{ color: 'var(--text-muted)' }}>{rec.note}</div>}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: 'right',
+                          fontWeight: 700,
+                          color: isPayment ? '#059669' : '#2563eb'
+                        }}
+                      >
+                        ₹{rec.amount.toLocaleString('en-IN')}
+                      </td>
+                      {canManageSalary && (
+                        <td style={{ textAlign: 'center' }}>
+                          {confirmDeleteSalaryId === rec.id ? (
+                            <div style={{ display: 'inline-flex', gap: '0.25rem', alignItems: 'center' }}>
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                style={{ fontSize: '0.72rem', padding: '0.2rem 0.45rem' }}
+                                onClick={() => {
                                   store.deleteStaffSalaryRecord(rec.id);
-                                }
-                              }}
+                                  setConfirmDeleteSalaryId(null);
+                                  showNotice('Removed salary entry. Staff balance updated.');
+                                }}
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{ fontSize: '0.72rem', padding: '0.2rem 0.45rem' }}
+                                onClick={() => setConfirmDeleteSalaryId(null)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              title="Delete this salary entry"
+                              onClick={() => setConfirmDeleteSalaryId(rec.id)}
                             >
                               ✕
                             </button>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* Upcoming Shifts Schedule */}
-        <div className="card">
-          <h2 className="card-title">📅 Assigned Event Shifts</h2>
-          {state.shifts.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-              No upcoming shifts scheduled. Assign shifts from inside any event page.
-            </p>
-          ) : (
-            <div className="data-table-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Event</th>
-                    <th>Staff Assigned</th>
-                    <th>Timing &amp; Hours</th>
-                    <th style={{ textAlign: 'right' }}>Shift Wage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {state.shifts.map((sh) => {
-                    const evt = state.events.find((e) => e.id === sh.event_id);
-                    const st = state.staff.find((s) => s.id === sh.staff_member_id);
-                    const hrs = store.calculateShiftHours(sh.starts_at, sh.ends_at);
-                    const wage = Math.round(hrs * Number(st?.hourly_rate || 0));
-                    return (
-                      <tr key={sh.id}>
-                        <td>
-                          <Link
-                            href={`/events/${evt?.id}`}
-                            style={{ fontWeight: 600, color: 'var(--primary)', textDecoration: 'underline' }}
-                          >
-                            {evt?.title || 'Unknown Event'}
-                          </Link>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {evt?.event_date}
-                          </div>
-                        </td>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{st?.name || 'Unassigned'}</div>
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                            {sh.role_label || st?.role_title}
-                          </div>
-                          {role === 'owner' && (
-                            <OwnerAuditBadge
-                              role={role}
-                              entry={store.getEntityAudit(sh.id, ['shift'])}
-                              prefixLabel="Assigned by"
-                            />
                           )}
                         </td>
-                        <td style={{ fontSize: '0.8rem' }}>
-                          <div>
-                            {sh.starts_at.slice(11, 16)} - {sh.ends_at.slice(11, 16)}
-                          </div>
-                          <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>{hrs} hrs</div>
-                        </td>
-                        <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                          ₹{wage.toLocaleString('en-IN')}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Record Salary Payment / Extra Wage Modal */}
@@ -869,14 +1116,15 @@ export default function StaffPage() {
               )}
 
               <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.5rem' }}>
-                Shift &amp; Allowance Earnings ({sum.shiftItems.length + sum.earningRecords.length})
+                Shift Attendance &amp; Allowance Earnings ({sum.shiftItems.length + sum.earningRecords.length})
               </h3>
-              <div className="data-table-container" style={{ maxHeight: '220px', overflowY: 'auto' }}>
+              <div className="data-table-container" style={{ maxHeight: '240px', overflowY: 'auto' }}>
                 <table className="data-table">
                   <thead>
                     <tr>
                       <th>Date</th>
                       <th>Event / Allowance</th>
+                      <th>Attendance</th>
                       <th>Details</th>
                       <th style={{ textAlign: 'right' }}>Earned</th>
                     </tr>
@@ -886,8 +1134,13 @@ export default function StaffPage() {
                       <tr key={er.id}>
                         <td>{new Date(er.recorded_at).toLocaleDateString('en-GB')}</td>
                         <td style={{ fontWeight: 600 }}>{er.method}</td>
+                        <td>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#2563eb' }}>
+                            Allowance
+                          </span>
+                        </td>
                         <td>{er.note || 'Manual wage entry'}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#2563eb' }}>
                           ₹{er.amount.toLocaleString('en-IN')}
                         </td>
                       </tr>
@@ -897,10 +1150,33 @@ export default function StaffPage() {
                         <td>{si.event?.event_date || '—'}</td>
                         <td style={{ fontWeight: 600 }}>{si.event?.title || 'Event Shift'}</td>
                         <td>
-                          {si.hours} hrs @ ₹{si.hourlyRate}/hr ({si.shift.role_label || 'Crew'})
+                          {si.attendanceStatus === 'present' ? (
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#15803d' }}>
+                              ✓ Present
+                            </span>
+                          ) : si.attendanceStatus === 'absent' ? (
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#dc2626' }}>
+                              ✕ Absent
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#b45309' }}>
+                              ⏳ Pending
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {si.isAttended
+                            ? `${si.hours} hrs @ ₹${si.hourlyRate}/hr (${si.shift.role_label || 'Crew'})`
+                            : `${si.hours} hrs (${si.shift.role_label || 'Crew'})`}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                          ₹{si.earnedAmount.toLocaleString('en-IN')}
+                          {si.isAttended ? (
+                            <span style={{ color: '#059669' }}>
+                              ₹{si.earnedAmount.toLocaleString('en-IN')}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -908,23 +1184,40 @@ export default function StaffPage() {
                 </table>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
-                {canManageSalary && (
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={() => {
-                      const target = statementStaff;
-                      setStatementStaff(null);
-                      openSalaryModal('payment', target);
-                    }}
-                  >
-                    💸 Pay Balance
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+                <div>
+                  {canEditStaff && (
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      onClick={() => {
+                        const target = statementStaff;
+                        setStatementStaff(null);
+                        setStaffToDelete(target);
+                      }}
+                    >
+                      🗑 Remove Staff
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  {canManageSalary && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => {
+                        const target = statementStaff;
+                        setStatementStaff(null);
+                        openSalaryModal('payment', target);
+                      }}
+                    >
+                      💸 Pay Balance
+                    </button>
+                  )}
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setStatementStaff(null)}>
+                    Close
                   </button>
-                )}
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setStatementStaff(null)}>
-                  Close
-                </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1020,18 +1313,130 @@ export default function StaffPage() {
                 </label>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  {editingStaff ? 'Save Changes' : 'Register Staff'}
-                </button>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: editingStaff && canEditStaff ? 'space-between' : 'flex-end',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  marginTop: '1.25rem',
+                  flexWrap: 'wrap'
+                }}
+              >
+                {editingStaff && canEditStaff && (
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={() => {
+                      const target = editingStaff;
+                      setIsModalOpen(false);
+                      setStaffToDelete(target);
+                    }}
+                  >
+                    🗑 Remove Staff
+                  </button>
+                )}
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary">
+                    {editingStaff ? 'Save Changes' : 'Register Staff'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* Confirm Permanent Staff Removal Modal */}
+      {staffToDelete && (() => {
+        const delSummary = store.getStaffSalarySummary(staffToDelete.id);
+        const totalAssignedShifts = delSummary.shiftItems.length;
+        return (
+          <div className="modal-overlay" onClick={() => setStaffToDelete(null)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+              <div className="modal-header">
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, color: '#dc2626' }}>
+                  🗑 Remove Staff Member
+                </h2>
+                <button className="btn btn-secondary btn-sm" onClick={() => setStaffToDelete(null)}>
+                  ✕
+                </button>
+              </div>
+
+              <p style={{ fontSize: '0.9rem', color: '#334155', lineHeight: 1.5, marginBottom: '1rem' }}>
+                Are you sure you want to permanently remove <strong>{staffToDelete.name}</strong> from your staff roster?
+              </p>
+
+              <div
+                style={{
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  borderRadius: '8px',
+                  padding: '0.85rem 1rem',
+                  marginBottom: '1rem',
+                  fontSize: '0.84rem',
+                  color: '#7f1d1d'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                  <span>Role &amp; Phone Login:</span>
+                  <strong>
+                    {staffToDelete.role_title || 'Crew'} ({staffToDelete.phone || 'No phone'})
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                  <span>Assigned Event Shifts:</span>
+                  <strong>{totalAssignedShifts} shift(s)</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                  <span>Earned / Paid:</span>
+                  <strong>
+                    ₹{delSummary.totalEarned.toLocaleString('en-IN')} / ₹{delSummary.totalPaid.toLocaleString('en-IN')}
+                  </strong>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    borderTop: '1px solid #fca5a5',
+                    paddingTop: '0.35rem',
+                    marginTop: '0.35rem',
+                    fontWeight: 700
+                  }}
+                >
+                  <span>Pending Balance Payable:</span>
+                  <span>₹{delSummary.balancePayable.toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.45, marginBottom: '1.25rem' }}>
+                Removing this staff member will revoke their mobile login and remove their assigned shifts and salary records across the website, server, and SQL database. (Tip: If you only want to pause scheduling while keeping past history, click <strong>Edit</strong> and uncheck <em>Available for scheduling</em> instead.)
+              </p>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setStaffToDelete(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  style={{ fontWeight: 700 }}
+                  onClick={handleConfirmDeleteStaff}
+                >
+                  🗑 Yes, Remove Staff
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

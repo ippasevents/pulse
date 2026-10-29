@@ -15,6 +15,8 @@ import {
 } from 'recharts';
 import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
 import { getAuditTargetLink } from '@/components/OwnerActivityAlertModal';
+import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
+import OwnerDatabaseExportCard from '@/components/OwnerDatabaseExportCard';
 
 export default function DashboardPage() {
   const [state, setState] = useState(store.getState());
@@ -108,6 +110,9 @@ export default function DashboardPage() {
       : {
           staffId: '',
           shiftItems: [],
+          attendedShiftsCount: 0,
+          absentShiftsCount: 0,
+          pendingShiftsCount: 0,
           totalShiftHours: 0,
           shiftEarnings: 0,
           extraEarnings: 0,
@@ -166,7 +171,7 @@ export default function DashboardPage() {
               ₹{salarySummary.totalEarned.toLocaleString('en-IN')}
             </span>
             <span className="stats-sub">
-              {salarySummary.shiftItems.length} duty shifts ({salarySummary.totalShiftHours} hrs)
+              {salarySummary.attendedShiftsCount} attended shift{salarySummary.attendedShiftsCount === 1 ? '' : 's'} ({salarySummary.totalShiftHours} hrs)
               {salarySummary.extraEarnings > 0
                 ? ` + ₹${salarySummary.extraEarnings.toLocaleString('en-IN')} bonus`
                 : ''}
@@ -430,7 +435,7 @@ export default function DashboardPage() {
 
           <div className="card">
             <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '0.75rem', color: '#0f172a' }}>
-              🧑‍🍳 Duty Shifts &amp; Salary Earned ({salarySummary.shiftItems.length + salarySummary.earningRecords.length})
+              🧑‍🍳 Duty Attendance &amp; Salary Earned ({salarySummary.shiftItems.length + salarySummary.earningRecords.length})
             </h3>
             {salarySummary.shiftItems.length === 0 && salarySummary.earningRecords.length === 0 ? (
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
@@ -443,6 +448,7 @@ export default function DashboardPage() {
                     <tr>
                       <th>Date</th>
                       <th>Function / Duty</th>
+                      <th>Attendance</th>
                       <th style={{ textAlign: 'right' }}>Earned</th>
                     </tr>
                   </thead>
@@ -458,6 +464,11 @@ export default function DashboardPage() {
                         <td style={{ fontSize: '0.82rem' }}>
                           <div style={{ fontWeight: 600 }}>{er.method}</div>
                           {er.note && <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{er.note}</div>}
+                        </td>
+                        <td>
+                          <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#2563eb' }}>
+                            Bonus / Allowance
+                          </span>
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: '#2563eb' }}>
                           ₹{er.amount.toLocaleString('en-IN')}
@@ -477,11 +488,32 @@ export default function DashboardPage() {
                         <td style={{ fontSize: '0.82rem' }}>
                           <div style={{ fontWeight: 600 }}>{si.event?.title || 'Event Shift'}</div>
                           <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                            {si.hours} hrs @ ₹{si.hourlyRate}/hr
+                            {si.hours} hrs ({si.shift.role_label || 'Crew'})
                           </div>
                         </td>
+                        <td>
+                          {si.attendanceStatus === 'present' ? (
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#15803d' }}>
+                              ✓ Present
+                            </span>
+                          ) : si.attendanceStatus === 'absent' ? (
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#dc2626' }}>
+                              ✕ Absent
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#b45309' }}>
+                              ⏳ Pending
+                            </span>
+                          )}
+                        </td>
                         <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                          ₹{si.earnedAmount.toLocaleString('en-IN')}
+                          {si.isAttended ? (
+                            <span style={{ color: '#059669' }}>
+                              ₹{si.earnedAmount.toLocaleString('en-IN')}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -857,6 +889,12 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Bank vs Cash & Destination Account Holdings */}
+        <InvoiceCollectionsCard
+          breakdown={store.getInvoiceCollectionsBreakdown()}
+          showInvoicesLink
+        />
+
         {/* 1. Monthly Total Sales Amount Graph */}
         <div className="card" style={{ marginBottom: '1.5rem' }}>
           <div
@@ -1217,6 +1255,15 @@ export default function DashboardPage() {
           </span>
         </div>
       </div>
+
+      {/* Owner-Only Full Database Download (Excel .xlsx & CSV .csv) */}
+      <OwnerDatabaseExportCard role={role} compact />
+
+      {/* Bank vs Cash & Destination Account Holdings */}
+      <InvoiceCollectionsCard
+        breakdown={store.getInvoiceCollectionsBreakdown()}
+        showInvoicesLink
+      />
 
       {/* Owner-Only Live Non-Owner & Direct Database Activity Monitor */}
       <div

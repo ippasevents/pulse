@@ -45,6 +45,7 @@ export default function UsersPage() {
 
   // Delete Confirmation State
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeleteStaffId, setConfirmDeleteStaffId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = store.subscribe(() => {
@@ -210,6 +211,15 @@ export default function UsersPage() {
     });
     setEditingStaff(null);
     notifySuccess(`Updated staff login credentials for ${staffEditForm.name.trim()}!`);
+  };
+
+  const handleDeleteStaffLogin = (staff: StaffMember) => {
+    store.deleteStaff(staff.id);
+    setConfirmDeleteStaffId(null);
+    if (editingStaff?.id === staff.id) {
+      setEditingStaff(null);
+    }
+    notifySuccess(`Removed staff member "${staff.name}" and revoked their mobile login.`);
   };
 
   const togglePasswordVisibility = (id: string) => {
@@ -541,17 +551,53 @@ export default function UsersPage() {
                   </td>
                   {isOwner && (
                     <td style={{ textAlign: 'center' }}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => handleOpenStaffEdit(staff)}
-                      >
-                        Edit Login
-                      </button>
+                      {confirmDeleteStaffId === staff.id ? (
+                        <div style={{ display: 'inline-flex', gap: '0.3rem', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleDeleteStaffLogin(staff)}
+                          >
+                            Confirm Remove
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setConfirmDeleteStaffId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleOpenStaffEdit(staff)}
+                          >
+                            Edit Login
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={() => setConfirmDeleteStaffId(staff.id)}
+                            title="Remove staff member permanently"
+                          >
+                            🗑 Remove
+                          </button>
+                        </div>
+                      )}
                     </td>
                   )}
                 </tr>
               ))}
+              {state.staff.length === 0 && (
+                <tr>
+                  <td colSpan={isOwner ? 6 : 5} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
+                    No staff members registered.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -891,13 +937,34 @@ export default function UsersPage() {
                 />
               </div>
 
-              <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setEditingStaff(null)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" style={{ fontWeight: 600 }}>
-                  Save Staff Login
-                </button>
+              <div
+                className="modal-actions"
+                style={{
+                  display: 'flex',
+                  justifyContent: isOwner ? 'space-between' : 'flex-end',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  marginTop: '1.25rem',
+                  flexWrap: 'wrap'
+                }}
+              >
+                {isOwner && (
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-sm"
+                    onClick={() => handleDeleteStaffLogin(editingStaff)}
+                  >
+                    🗑 Remove Staff
+                  </button>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setEditingStaff(null)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary" style={{ fontWeight: 600 }}>
+                    Save Staff Login
+                  </button>
+                </div>
               </div>
             </form>
           </div>

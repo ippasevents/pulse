@@ -3,12 +3,13 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { store } from '@/lib/store';
-import { Invoice, Payment } from '@/lib/types';
+import { Invoice, Payment, PaymentChannel } from '@/lib/types';
 import { downloadElementAsPdf } from '@/lib/downloadPdf';
 import EditBankDetailsModal from '@/components/EditBankDetailsModal';
 import { getMaxDueDate, getDefaultDueDate, clampDueDate } from '@/lib/dateUtils';
 import { sendInvoiceEmailNotification } from '@/lib/emailInvoice';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
+import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
 
 export default function InvoicesPage() {
   const [state, setState] = useState(store.getState());
@@ -35,11 +36,14 @@ export default function InvoicesPage() {
     notes: ''
   });
 
-  // Part Payment modal state (same invoice)
+  // Part Payment modal state (same invoice, with Bank vs Cash & Destination Account)
   const [partPayInvoice, setPartPayInvoice] = useState<Invoice | null>(null);
   const [partPayForm, setPartPayForm] = useState({
     amount: 0,
     method: 'UPI / GPay',
+    payment_channel: 'bank' as PaymentChannel,
+    destination_account: '',
+    custom_account: '',
     note: ''
   });
 
@@ -123,10 +127,16 @@ export default function InvoicesPage() {
       .filter((p) => p.invoice_id === inv.id)
       .reduce((s, p) => s + p.amount, 0);
     const balance = Math.max(0, inv.amount - alreadyPaid);
+    const defaultMethod = 'UPI / GPay';
+    const defaultChannel: PaymentChannel = 'bank';
+    const defaultAcc = store.getDefaultDestinationAccount(defaultChannel, defaultMethod);
 
     setPartPayForm({
       amount: balance,
-      method: 'UPI / GPay',
+      method: defaultMethod,
+      payment_channel: defaultChannel,
+      destination_account: defaultAcc,
+      custom_account: '',
       note: ''
     });
   };
@@ -135,10 +145,19 @@ export default function InvoicesPage() {
     e.preventDefault();
     if (!partPayInvoice || partPayForm.amount <= 0) return;
 
+    const finalAccount =
+      partPayForm.destination_account === '__custom__'
+        ? partPayForm.custom_account.trim() ||
+          store.getDefaultDestinationAccount(partPayForm.payment_channel, partPayForm.method)
+        : partPayForm.destination_account ||
+          store.getDefaultDestinationAccount(partPayForm.payment_channel, partPayForm.method);
+
     store.addPayment({
       invoice_id: partPayInvoice.id,
       amount: Number(partPayForm.amount),
       method: partPayForm.method,
+      payment_channel: partPayForm.payment_channel,
+      destination_account: finalAccount,
       note: partPayForm.note.trim()
     });
 
@@ -298,7 +317,10 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      <div className="card">
+      {/* Bank vs Cash & Where Total Amounts Are Held */}
+      <InvoiceCollectionsCard breakdown={store.getInvoiceCollectionsBreakdown()} />
+
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
         <h2 className="card-title">All Event Invoices</h2>
         <div className="data-table-container">
           <table className="data-table">
@@ -438,6 +460,122 @@ export default function InvoicesPage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Complete Invoice Receipts Ledger — Bank vs Cash & Destination Account */}
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div style={{ marginBottom: '0.85rem' }}>
+          <h2 className="card-title" style={{ margin: 0 }}>
+            💳 All Invoice Payment Receipts &amp; Account Ledger
+          </h2>
+          <p style={{ fontSize: '0.83rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+            Every client receipt showing whether it came via Bank or Cash and the exact destination account holding the amount.
+          </p>
+        </div>
+
+        {state.payments.length === 0 ? (
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+            No client payments recorded yet. Click &ldquo;+ Part Pay&rdquo; on any invoice above to record Bank or Cash receipts.
+          </p>
+        ) : (
+          <div className="data-table-container">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Invoice &amp; Event</th>
+                  <th>Channel</th>
+                  <th>Destination Account (Deposited To)</th>
+                  <th>Method &amp; Reference</th>
+                  <th style={{ textAlign: 'right' }}>Amount Received</th>
+                  {isFinance && <th style={{ textAlign: 'center' }}>Remove</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {[...state.payments]
+                  .sort((a, b) => (b.paid_at || '').localeCompare(a.paid_at || ''))
+                  .map((p) => {
+                    const inv = state.invoices.find((i) => i.id === p.invoice_id);
+                    const evt = state.events.find((e) => e.id === inv?.event_id);
+                    const client = state.clients.find((c) => c.id === evt?.client_id);
+                    const ch = store.inferPaymentChannel(p.method, p.payment_channel);
+                    const destAcc = store.resolveDestinationAccount(p);
+                    const isCash = ch === 'cash';
+
+                    return (
+                      <tr key={p.id}>
+                        <td style={{ fontSize: '0.82rem' }}>
+                          {new Date(p.paid_at).toLocaleDateString('en-GB', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric'
+                          })}
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                            {inv?.invoice_number || 'Invoice'}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            {evt?.title || 'Event'} {client?.name ? `• ${client.name}` : ''}
+                          </div>
+                        </td>
+                        <td>
+                          <span
+                            style={{
+                              fontSize: '0.74rem',
+                              fontWeight: 800,
+                              color: isCash ? '#059669' : '#1d4ed8',
+                              textTransform: 'uppercase'
+                            }}
+                          >
+                            {isCash ? '💵 Cash' : '🏦 Bank'}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.84rem' }}>
+                          {destAcc}
+                        </td>
+                        <td style={{ fontSize: '0.82rem' }}>
+                          <div style={{ fontWeight: 600 }}>{p.method}</div>
+                          {p.note && <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{p.note}</div>}
+                          {role === 'owner' && (
+                            <OwnerAuditBadge
+                              role={role}
+                              entry={store.getEntityAudit(p.id, ['payment'])}
+                              prefixLabel="Logged by"
+                            />
+                          )}
+                        </td>
+                        <td
+                          style={{
+                            textAlign: 'right',
+                            fontWeight: 800,
+                            color: isCash ? '#059669' : '#1d4ed8'
+                          }}
+                        >
+                          ₹{p.amount.toLocaleString('en-IN')}
+                        </td>
+                        {isFinance && (
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              onClick={() => {
+                                if (confirm('Remove this payment receipt? Invoice and account balances will update immediately.')) {
+                                  store.deletePayment(p.id);
+                                }
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* STRICT STANDARD A4 PORTRAIT PRINT & PDF MODAL */}
@@ -706,24 +844,34 @@ export default function InvoicesPage() {
                           <thead>
                             <tr style={{ borderBottom: '1px solid #cbd5e1', color: '#475569' }}>
                               <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Receipt Date</th>
-                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Method</th>
-                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Note / Reference</th>
+                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Method &amp; Channel</th>
+                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Account</th>
+                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Note</th>
                               <th style={{ textAlign: 'right', padding: '0.35rem 0.25rem' }}>Amount Paid</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {invPayments.map((p) => (
-                              <tr key={p.id} style={{ borderBottom: '1px dashed #e2e8f0' }}>
-                                <td style={{ padding: '0.35rem 0.25rem' }}>
-                                  {new Date(p.paid_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                </td>
-                                <td style={{ padding: '0.35rem 0.25rem', fontWeight: 500 }}>{p.method}</td>
-                                <td style={{ padding: '0.35rem 0.25rem', color: '#64748b' }}>{p.note || '-'}</td>
-                                <td style={{ textAlign: 'right', padding: '0.35rem 0.25rem', fontWeight: 600, color: '#16a34a' }}>
-                                  ₹{p.amount.toLocaleString('en-IN')}
-                                </td>
-                              </tr>
-                            ))}
+                            {invPayments.map((p) => {
+                              const ch = store.inferPaymentChannel(p.method, p.payment_channel);
+                              const acc = store.resolveDestinationAccount(p);
+                              return (
+                                <tr key={p.id} style={{ borderBottom: '1px dashed #e2e8f0' }}>
+                                  <td style={{ padding: '0.35rem 0.25rem' }}>
+                                    {new Date(p.paid_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                  </td>
+                                  <td style={{ padding: '0.35rem 0.25rem', fontWeight: 500 }}>
+                                    {p.method} ({ch === 'cash' ? 'Cash' : 'Bank'})
+                                  </td>
+                                  <td style={{ padding: '0.35rem 0.25rem', fontWeight: 600, color: '#0f172a' }}>
+                                    {acc}
+                                  </td>
+                                  <td style={{ padding: '0.35rem 0.25rem', color: '#64748b' }}>{p.note || '-'}</td>
+                                  <td style={{ textAlign: 'right', padding: '0.35rem 0.25rem', fontWeight: 600, color: '#16a34a' }}>
+                                    ₹{p.amount.toLocaleString('en-IN')}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       )}
@@ -819,9 +967,9 @@ export default function InvoicesPage() {
                         Previous Installments:
                       </div>
                       {existingPayments.map((p) => (
-                        <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#334155', padding: '0.15rem 0' }}>
+                        <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#334155', padding: '0.15rem 0', gap: '0.5rem' }}>
                           <span>
-                            {new Date(p.paid_at).toLocaleDateString('en-GB')} &bull; {p.method} {p.note ? `(${p.note})` : ''}
+                            {new Date(p.paid_at).toLocaleDateString('en-GB')} &bull; {p.method} &rarr; <strong>{store.resolveDestinationAccount(p)}</strong>
                           </span>
                           <span style={{ fontWeight: 600 }}>₹{p.amount.toLocaleString('en-IN')}</span>
                         </div>
@@ -845,20 +993,86 @@ export default function InvoicesPage() {
                 />
               </div>
 
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Payment Method *</label>
+                  <select
+                    className="form-control"
+                    value={partPayForm.method}
+                    onChange={(e) => {
+                      const nextMethod = e.target.value;
+                      const nextChannel = store.inferPaymentChannel(nextMethod);
+                      const nextAcc = store.getDefaultDestinationAccount(nextChannel, nextMethod);
+                      setPartPayForm({
+                        ...partPayForm,
+                        method: nextMethod,
+                        payment_channel: nextChannel,
+                        destination_account: nextAcc
+                      });
+                    }}
+                  >
+                    <option value="UPI / GPay">UPI / GPay / PhonePe</option>
+                    <option value="Bank Transfer">Bank Transfer (NEFT/IMPS)</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Cheque">Cheque</option>
+                    <option value="Card">Debit / Credit Card</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Received Into (Bank vs Cash) *</label>
+                  <select
+                    className="form-control"
+                    value={partPayForm.payment_channel}
+                    onChange={(e) => {
+                      const nextChannel = e.target.value as PaymentChannel;
+                      const nextAcc = store.getDefaultDestinationAccount(nextChannel, partPayForm.method);
+                      setPartPayForm({
+                        ...partPayForm,
+                        payment_channel: nextChannel,
+                        destination_account: nextAcc
+                      });
+                    }}
+                  >
+                    <option value="bank">🏦 Bank Account</option>
+                    <option value="cash">💵 Cash in Hand</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="form-group">
-                <label className="form-label">Payment Method</label>
+                <label className="form-label">Destination Account (Deposited To) *</label>
                 <select
                   className="form-control"
-                  value={partPayForm.method}
-                  onChange={(e) => setPartPayForm({ ...partPayForm, method: e.target.value })}
+                  value={partPayForm.destination_account}
+                  onChange={(e) => setPartPayForm({ ...partPayForm, destination_account: e.target.value })}
                 >
-                  <option value="UPI / GPay">UPI / GPay / PhonePe</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Bank Transfer">Bank Transfer (NEFT/IMPS)</option>
-                  <option value="Cheque">Cheque</option>
-                  <option value="Card">Debit / Credit Card</option>
+                  {store.getPresetPaymentAccounts(partPayForm.payment_channel).map((acc) => (
+                    <option key={acc.label} value={acc.label}>
+                      {acc.label}
+                    </option>
+                  ))}
+                  <option value="__custom__">+ Enter Custom Bank / Cash Account...</option>
                 </select>
               </div>
+
+              {partPayForm.destination_account === '__custom__' && (
+                <div className="form-group">
+                  <label className="form-label">Custom Account / Cash Location Name *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder={
+                      partPayForm.payment_channel === 'cash'
+                        ? 'e.g. Event Venue Cash Counter / Owner Safe'
+                        : 'e.g. South Indian Bank (A/c 4455) / Secondary UPI'
+                    }
+                    value={partPayForm.custom_account}
+                    onChange={(e) => setPartPayForm({ ...partPayForm, custom_account: e.target.value })}
+                    required
+                  />
+                </div>
+              )}
 
               <div className="form-group">
                 <label className="form-label">Reference Note / Transaction ID</label>

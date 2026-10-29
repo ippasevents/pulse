@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { store } from '@/lib/store';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
+import OwnerDatabaseExportCard from '@/components/OwnerDatabaseExportCard';
 
 export default function SettingsPage() {
   const [state, setState] = useState(store.getState());
@@ -291,6 +292,9 @@ export default function SettingsPage() {
         </div>
 
         <div>
+          {/* Owner-Only Full Database Download (Excel / CSV) */}
+          <OwnerDatabaseExportCard role={role} />
+
           {/* Connection & Architecture Card */}
           <div className="card" style={{ marginBottom: '1.25rem' }}>
             <h2 className="card-title">Database &amp; Supabase SQL Integration</h2>

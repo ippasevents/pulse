@@ -11,10 +11,12 @@ import {
   EventExtra,
   StaffMember,
   Shift,
+  ShiftAttendanceStatus,
   StaffSalaryRecord,
   StaffSalaryRecordType,
   Invoice,
   Payment,
+  PaymentChannel,
   BusinessSettings,
   Profile,
   UserRole,
@@ -34,12 +36,17 @@ export interface StaffShiftEarningItem {
   event?: EventRecord;
   hours: number;
   hourlyRate: number;
+  attendanceStatus: ShiftAttendanceStatus;
+  isAttended: boolean;
   earnedAmount: number;
 }
 
 export interface StaffSalarySummary {
   staffId: string;
   shiftItems: StaffShiftEarningItem[];
+  attendedShiftsCount: number;
+  absentShiftsCount: number;
+  pendingShiftsCount: number;
   totalShiftHours: number;
   shiftEarnings: number;
   extraEarnings: number;
@@ -49,6 +56,25 @@ export interface StaffSalarySummary {
   advanceExcess: number;
   paymentRecords: StaffSalaryRecord[];
   earningRecords: StaffSalaryRecord[];
+}
+
+export interface InvoiceAccountHolding {
+  accountName: string;
+  channel: PaymentChannel;
+  totalReceived: number;
+  paymentCount: number;
+  lastReceivedAt: string;
+}
+
+export interface InvoiceCollectionsBreakdown {
+  totalInvoiced: number;
+  totalCollected: number;
+  totalPendingReceivable: number;
+  totalBankReceived: number;
+  totalCashReceived: number;
+  bankPaymentCount: number;
+  cashPaymentCount: number;
+  accountHoldings: InvoiceAccountHolding[];
 }
 
 export interface StockEstimationItem {
@@ -317,10 +343,45 @@ const INITIAL_STAFF: StaffMember[] = [
 ];
 
 const INITIAL_SHIFTS: Shift[] = [
-  { id: '00000000-0000-4000-8000-000000000801', event_id: '00000000-0000-4000-8000-000000000401', staff_member_id: '00000000-0000-4000-8000-000000000701', role_label: 'Captain', starts_at: '2026-11-12T16:00:00Z', ends_at: '2026-11-12T23:30:00Z' },
-  { id: '00000000-0000-4000-8000-000000000802', event_id: '00000000-0000-4000-8000-000000000401', staff_member_id: '00000000-0000-4000-8000-000000000702', role_label: 'Head Cook', starts_at: '2026-11-12T14:00:00Z', ends_at: '2026-11-12T22:00:00Z' },
-  { id: '00000000-0000-4000-8000-000000000803', event_id: '00000000-0000-4000-8000-000000000401', staff_member_id: '00000000-0000-4000-8000-000000000703', role_label: 'Server', starts_at: '2026-11-12T17:30:00Z', ends_at: '2026-11-12T23:00:00Z' },
-  { id: '00000000-0000-4000-8000-000000000804', event_id: '00000000-0000-4000-8000-000000000401', staff_member_id: '00000000-0000-4000-8000-000000000704', role_label: 'Server', starts_at: '2026-11-12T17:30:00Z', ends_at: '2026-11-12T23:00:00Z' }
+  {
+    id: '00000000-0000-4000-8000-000000000801',
+    event_id: '00000000-0000-4000-8000-000000000401',
+    staff_member_id: '00000000-0000-4000-8000-000000000701',
+    role_label: 'Captain',
+    starts_at: '2026-11-12T16:00:00Z',
+    ends_at: '2026-11-12T23:30:00Z',
+    attendance_status: 'present',
+    attendance_marked_at: '2026-10-27T18:00:00Z'
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000802',
+    event_id: '00000000-0000-4000-8000-000000000401',
+    staff_member_id: '00000000-0000-4000-8000-000000000702',
+    role_label: 'Head Cook',
+    starts_at: '2026-11-12T14:00:00Z',
+    ends_at: '2026-11-12T22:00:00Z',
+    attendance_status: 'present',
+    attendance_marked_at: '2026-10-27T18:00:00Z'
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000803',
+    event_id: '00000000-0000-4000-8000-000000000401',
+    staff_member_id: '00000000-0000-4000-8000-000000000703',
+    role_label: 'Server',
+    starts_at: '2026-11-12T17:30:00Z',
+    ends_at: '2026-11-12T23:00:00Z',
+    attendance_status: 'absent',
+    attendance_marked_at: '2026-10-27T18:05:00Z'
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000804',
+    event_id: '00000000-0000-4000-8000-000000000401',
+    staff_member_id: '00000000-0000-4000-8000-000000000704',
+    role_label: 'Server',
+    starts_at: '2026-11-12T17:30:00Z',
+    ends_at: '2026-11-12T23:00:00Z',
+    attendance_status: 'pending'
+  }
 ];
 
 const INITIAL_STAFF_SALARY_RECORDS: StaffSalaryRecord[] = [
@@ -353,7 +414,26 @@ const INITIAL_INVOICES: Invoice[] = [
 ];
 
 const INITIAL_PAYMENTS: Payment[] = [
-  { id: '00000000-0000-4000-8000-000000001001', invoice_id: '00000000-0000-4000-8000-000000000901', amount: 100000, method: 'Bank Transfer (Federal Bank)', note: 'Advance booking deposit', paid_at: '2026-10-12T14:15:00Z' }
+  {
+    id: '00000000-0000-4000-8000-000000001001',
+    invoice_id: '00000000-0000-4000-8000-000000000901',
+    amount: 75000,
+    method: 'Bank Transfer (NEFT)',
+    payment_channel: 'bank',
+    destination_account: 'Federal Bank (A/c 9876-5432-1000)',
+    note: 'Advance booking bank transfer',
+    paid_at: '2026-10-12T14:15:00Z'
+  },
+  {
+    id: '00000000-0000-4000-8000-000000001002',
+    invoice_id: '00000000-0000-4000-8000-000000000901',
+    amount: 25000,
+    method: 'Cash',
+    payment_channel: 'cash',
+    destination_account: 'Cash in Hand (Office Counter)',
+    note: 'Cash advance received at office',
+    paid_at: '2026-10-13T11:20:00Z'
+  }
 ];
 
 const INITIAL_STOCK_PURCHASES: StockPurchase[] = [
@@ -737,6 +817,16 @@ class DataStore {
         q = q.eq(k, v);
       }
       const { error } = await q;
+      if (error) {
+        const msg = String(error.message || '');
+        if (
+          msg.includes('does not exist') ||
+          msg.includes('Could not find the table') ||
+          msg.includes('schema cache')
+        ) {
+          return { error: null };
+        }
+      }
       return { error };
     }
 
@@ -1259,7 +1349,9 @@ class DataStore {
           staff_member_id: sh.staff_member_id,
           role_label: sh.role_label || null,
           starts_at: sh.starts_at,
-          ends_at: sh.ends_at
+          ends_at: sh.ends_at,
+          attendance_status: sh.attendance_status || 'pending',
+          attendance_marked_at: sh.attendance_marked_at || null
         },
         onConflict: 'id'
       });
@@ -1290,6 +1382,8 @@ class DataStore {
     }
 
     for (const pay of this.state.payments.filter((x) => isValidUUID(x.id) && isValidUUID(x.invoice_id))) {
+      const ch = this.inferPaymentChannel(pay.method, pay.payment_channel);
+      const destAcc = this.resolveDestinationAccount(pay);
       ops.push({
         type: 'upsert',
         table: 'payments',
@@ -1298,6 +1392,8 @@ class DataStore {
           invoice_id: pay.invoice_id,
           amount: pay.amount,
           method: pay.method,
+          payment_channel: ch,
+          destination_account: destAcc,
           note: pay.note || null,
           paid_at: pay.paid_at
         },
@@ -2108,7 +2204,12 @@ class DataStore {
             staff_member_id: sh.staff_member_id || sh.staff_id,
             role_label: sh.role_label || '',
             starts_at: sh.starts_at,
-            ends_at: sh.ends_at
+            ends_at: sh.ends_at,
+            attendance_status:
+              sh.attendance_status === 'present' || sh.attendance_status === 'absent'
+                ? sh.attendance_status
+                : 'pending',
+            attendance_marked_at: sh.attendance_marked_at || undefined
           })),
         staffSalaryRecords: !salaryRecordsRes.error
           ? (salaryRecordsRes.data || []).map((sr: any) => ({
@@ -2140,14 +2241,34 @@ class DataStore {
             notes: inv.notes || ''
           };
         }),
-        payments: (paymentsRes.data || []).map((p: any) => ({
-          id: p.id,
-          invoice_id: p.invoice_id,
-          amount: Number(p.amount || 0),
-          method: p.method || 'Cash',
-          paid_at: p.paid_at || new Date().toISOString(),
-          note: p.note || ''
-        })),
+        payments: (paymentsRes.data || []).map((p: any) => {
+          const method = p.method || 'Cash';
+          const ch: PaymentChannel =
+            p.payment_channel === 'cash' || p.payment_channel === 'bank'
+              ? p.payment_channel
+              : method.toLowerCase().includes('cash')
+              ? 'cash'
+              : 'bank';
+          const fallbackSettings = settingsRes.data
+            ? { ...INITIAL_SETTINGS, ...settingsRes.data }
+            : this.state.settings;
+          const bankLabel = fallbackSettings.bank_name
+            ? `${fallbackSettings.bank_name}${fallbackSettings.account_number ? ` (A/c ${fallbackSettings.account_number})` : ''}`
+            : 'Primary Business Bank Account';
+          const destAcc =
+            p.destination_account ||
+            (ch === 'cash' ? 'Cash in Hand (Office Counter)' : bankLabel);
+          return {
+            id: p.id,
+            invoice_id: p.invoice_id,
+            amount: Number(p.amount || 0),
+            method,
+            payment_channel: ch,
+            destination_account: destAcc,
+            paid_at: p.paid_at || new Date().toISOString(),
+            note: p.note || ''
+          };
+        }),
         stockPurchases: loadedPurchases,
         stockPurchasePayments: loadedPurchasePayments,
         auditLogs: !activityLogsRes.error
@@ -2251,15 +2372,66 @@ class DataStore {
             quantity: ei.quantity !== undefined ? Number(ei.quantity) : undefined
           }));
 
+          const normalizedSettings = { ...INITIAL_SETTINGS, ...(parsed.settings || {}) };
+          const defaultBankLabel = normalizedSettings.bank_name
+            ? `${normalizedSettings.bank_name.split('/')[0].trim()}${normalizedSettings.account_number ? ` (A/c ${normalizedSettings.account_number})` : ''}`
+            : 'Primary Business Bank Account';
+
+          const normalizedShifts: Shift[] = Array.isArray(parsed.shifts)
+            ? parsed.shifts.map((sh: any) => ({
+                ...sh,
+                attendance_status:
+                  sh.attendance_status === 'present' || sh.attendance_status === 'absent'
+                    ? sh.attendance_status
+                    : 'pending',
+                attendance_marked_at: sh.attendance_marked_at || undefined
+              }))
+            : isSupabaseConfigured
+            ? []
+            : INITIAL_SHIFTS;
+
+          const normalizedPayments: Payment[] = Array.isArray(parsed.payments)
+            ? parsed.payments.map((p: any) => {
+                const method = p.method || 'Bank Transfer';
+                const ch: PaymentChannel =
+                  p.payment_channel === 'cash' || p.payment_channel === 'bank'
+                    ? p.payment_channel
+                    : String(method).toLowerCase().includes('cash')
+                    ? 'cash'
+                    : 'bank';
+                const destAcc =
+                  p.destination_account && String(p.destination_account).trim()
+                    ? String(p.destination_account).trim()
+                    : ch === 'cash'
+                    ? 'Cash in Hand (Office Counter)'
+                    : defaultBankLabel;
+                return {
+                  ...p,
+                  method,
+                  payment_channel: ch,
+                  destination_account: destAcc
+                };
+              })
+            : isSupabaseConfigured
+            ? []
+            : INITIAL_PAYMENTS;
+
           return {
             ...parsed,
-            settings: { ...INITIAL_SETTINGS, ...(parsed.settings || {}) },
+            settings: normalizedSettings,
             profiles: normalizedProfiles,
             currentRole,
             currentUserId,
             isAuthenticated,
             menuItems,
             eventItems,
+            staff: Array.isArray(parsed.staff)
+              ? parsed.staff
+              : isSupabaseConfigured
+              ? []
+              : INITIAL_STAFF,
+            shifts: normalizedShifts,
+            payments: normalizedPayments,
             staffSalaryRecords: Array.isArray(parsed.staffSalaryRecords)
               ? parsed.staffSalaryRecords
               : isSupabaseConfigured
@@ -3633,6 +3805,11 @@ class DataStore {
 
   public deleteStaff(id: string) {
     const existing = this.state.staff.find((s) => s.id === id);
+    const removedShiftsCount = this.state.shifts.filter((sh) => sh.staff_member_id === id).length;
+    const removedSalaryCount = Array.isArray(this.state.staffSalaryRecords)
+      ? this.state.staffSalaryRecords.filter((sr) => sr.staff_member_id === id).length
+      : 0;
+
     this.state.staff = this.state.staff.filter((s) => s.id !== id);
     this.state.shifts = this.state.shifts.filter((sh) => sh.staff_member_id !== id);
     if (Array.isArray(this.state.staffSalaryRecords)) {
@@ -3640,11 +3817,20 @@ class DataStore {
         (sr) => sr.staff_member_id !== id
       );
     }
+
+    // If the removed staff member happened to hold the active staff session, sign out cleanly
+    if (this.state.currentRole === 'staff' && this.state.currentUserId === id) {
+      this.state.isAuthenticated = false;
+      this.state.currentRole = 'owner';
+      this.state.currentUserId = this.state.profiles[0]?.id || INITIAL_PROFILES[0].id;
+    }
+
     this.logMutation({
       entity_type: 'staff',
       entity_id: id,
       action: 'delete',
-      summary: `Deleted staff member "${existing?.name || id}"`
+      summary: `Removed staff member "${existing?.name || id}"`,
+      details: `${existing?.role_title || 'Crew'}${existing?.phone ? ` • Phone: ${existing.phone}` : ''} • Cleared ${removedShiftsCount} shift(s) & ${removedSalaryCount} salary entry(s)`
     });
     this.save();
 
@@ -3669,7 +3855,20 @@ class DataStore {
 
     const staffMember = this.state.staff.find((s) => s.id === shift.staff_member_id);
     const evt = this.state.events.find((e) => e.id === shift.event_id);
-    const newShift: Shift = { ...shift, ends_at: endsAt, id: generateUUID() };
+    const attendanceStatus: ShiftAttendanceStatus =
+      shift.attendance_status === 'present' || shift.attendance_status === 'absent'
+        ? shift.attendance_status
+        : 'pending';
+    const newShift: Shift = {
+      ...shift,
+      ends_at: endsAt,
+      attendance_status: attendanceStatus,
+      attendance_marked_at:
+        attendanceStatus !== 'pending'
+          ? shift.attendance_marked_at || new Date().toISOString()
+          : undefined,
+      id: generateUUID()
+    };
     this.state.shifts.push(newShift);
     this.logMutation({
       entity_type: 'shift',
@@ -3677,7 +3876,7 @@ class DataStore {
       parent_event_id: newShift.event_id,
       action: 'create',
       summary: `Assigned "${staffMember?.name || 'Staff'}" to "${evt?.title || 'Event'}"`,
-      details: `Role: ${newShift.role_label || 'Crew'} • ${newShift.starts_at.slice(11, 16)} - ${newShift.ends_at.slice(11, 16)}`
+      details: `Role: ${newShift.role_label || 'Crew'} • ${newShift.starts_at.slice(11, 16)} - ${newShift.ends_at.slice(11, 16)} • Attendance: ${attendanceStatus.toUpperCase()}`
     });
     this.save();
 
@@ -3694,7 +3893,9 @@ class DataStore {
             staff_member_id: newShift.staff_member_id,
             role_label: newShift.role_label || null,
             starts_at: newShift.starts_at,
-            ends_at: newShift.ends_at
+            ends_at: newShift.ends_at,
+            attendance_status: newShift.attendance_status || 'pending',
+            attendance_marked_at: newShift.attendance_marked_at || null
           },
           onConflict: 'id'
         }
@@ -3702,6 +3903,114 @@ class DataStore {
     }
 
     return newShift;
+  }
+
+  public updateShiftAttendance(shiftId: string, status: ShiftAttendanceStatus) {
+    let updatedShift: Shift | undefined;
+    const markedAt = status === 'pending' ? undefined : new Date().toISOString();
+
+    this.state.shifts = this.state.shifts.map((sh) => {
+      if (sh.id !== shiftId) return sh;
+      updatedShift = {
+        ...sh,
+        attendance_status: status,
+        attendance_marked_at: markedAt
+      };
+      return updatedShift;
+    });
+
+    if (!updatedShift) return;
+
+    const staffMember = this.state.staff.find((s) => s.id === updatedShift!.staff_member_id);
+    const evt = this.state.events.find((e) => e.id === updatedShift!.event_id);
+    const statusLabel =
+      status === 'present' ? 'PRESENT (Attended)' : status === 'absent' ? 'ABSENT' : 'PENDING';
+
+    this.logMutation({
+      entity_type: 'shift',
+      entity_id: shiftId,
+      parent_event_id: updatedShift.event_id,
+      action: 'update',
+      summary: `Marked attendance ${statusLabel} for "${staffMember?.name || 'Staff'}" on "${evt?.title || 'Event'}"`
+    });
+    this.save();
+
+    if (
+      isValidUUID(updatedShift.id) &&
+      isValidUUID(updatedShift.event_id) &&
+      isValidUUID(updatedShift.staff_member_id)
+    ) {
+      this.enqueueSqlOperations('Update Shift Attendance', [
+        ...this.ensureEventParentOps(updatedShift.event_id),
+        ...this.ensureStaffParentOps(updatedShift.staff_member_id),
+        {
+          type: 'upsert',
+          table: 'shifts',
+          values: {
+            id: updatedShift.id,
+            event_id: updatedShift.event_id,
+            staff_member_id: updatedShift.staff_member_id,
+            role_label: updatedShift.role_label || null,
+            starts_at: updatedShift.starts_at,
+            ends_at: updatedShift.ends_at,
+            attendance_status: updatedShift.attendance_status || 'pending',
+            attendance_marked_at: updatedShift.attendance_marked_at || null
+          },
+          onConflict: 'id'
+        }
+      ]);
+    }
+  }
+
+  public markEventShiftsAttendance(eventId: string, status: ShiftAttendanceStatus) {
+    const markedAt = status === 'pending' ? undefined : new Date().toISOString();
+    const updatedShifts: Shift[] = [];
+
+    this.state.shifts = this.state.shifts.map((sh) => {
+      if (sh.event_id !== eventId) return sh;
+      const next: Shift = {
+        ...sh,
+        attendance_status: status,
+        attendance_marked_at: markedAt
+      };
+      updatedShifts.push(next);
+      return next;
+    });
+
+    if (updatedShifts.length === 0) return;
+
+    const evt = this.state.events.find((e) => e.id === eventId);
+    this.logMutation({
+      entity_type: 'shift',
+      entity_id: eventId,
+      parent_event_id: eventId,
+      action: 'update',
+      summary: `Marked all ${updatedShifts.length} shifts ${status.toUpperCase()} for "${evt?.title || 'Event'}"`
+    });
+    this.save();
+
+    const ops: SqlOperation[] = [...this.ensureEventParentOps(eventId)];
+    for (const sh of updatedShifts) {
+      if (isValidUUID(sh.id) && isValidUUID(sh.staff_member_id)) {
+        ops.push(...this.ensureStaffParentOps(sh.staff_member_id));
+        ops.push({
+          type: 'upsert',
+          table: 'shifts',
+          values: {
+            id: sh.id,
+            event_id: sh.event_id,
+            staff_member_id: sh.staff_member_id,
+            role_label: sh.role_label || null,
+            starts_at: sh.starts_at,
+            ends_at: sh.ends_at,
+            attendance_status: sh.attendance_status || 'pending',
+            attendance_marked_at: sh.attendance_marked_at || null
+          },
+          onConflict: 'id'
+        });
+      }
+    }
+    this.enqueueSqlOperations('Bulk Update Event Shift Attendance', ops);
   }
 
   public removeShift(id: string) {
@@ -3730,7 +4039,7 @@ class DataStore {
     }
   }
 
-  // Staff Salary & Wage Management
+  // Staff Salary & Wage Management — STRICTLY Attendance-Gated (only 'present' shifts earn pay!)
   public calculateShiftHours(startsAt: string, endsAt: string): number {
     const startDate = new Date(startsAt);
     const endDate = new Date(endsAt);
@@ -3762,20 +4071,35 @@ class DataStore {
       .map((sh) => {
         const event = this.state.events.find((e) => e.id === sh.event_id);
         const hours = this.calculateShiftHours(sh.starts_at, sh.ends_at);
-        const earnedAmount = event?.status === 'cancelled' ? 0 : Math.round(hours * hourlyRate);
+        const attendanceStatus: ShiftAttendanceStatus =
+          sh.attendance_status === 'present' || sh.attendance_status === 'absent'
+            ? sh.attendance_status
+            : 'pending';
+        const isAttended = attendanceStatus === 'present' && event?.status !== 'cancelled';
+        // CRITICAL: Only count and expose shift pay when the staff member actually attended ('present')
+        const earnedAmount = isAttended ? Math.round(hours * hourlyRate) : 0;
         return {
           shift: sh,
           event,
           hours,
           hourlyRate,
+          attendanceStatus,
+          isAttended,
           earnedAmount
         };
       })
       .filter((item) => !item.event || item.event.status !== 'cancelled')
       .sort((a, b) => (b.event?.event_date || '').localeCompare(a.event?.event_date || ''));
 
+    const attendedShiftsCount = shiftItems.filter((item) => item.attendanceStatus === 'present').length;
+    const absentShiftsCount = shiftItems.filter((item) => item.attendanceStatus === 'absent').length;
+    const pendingShiftsCount = shiftItems.filter((item) => item.attendanceStatus === 'pending').length;
+
     const totalShiftHours = Number(
-      shiftItems.reduce((sum, item) => sum + item.hours, 0).toFixed(2)
+      shiftItems
+        .filter((item) => item.isAttended)
+        .reduce((sum, item) => sum + item.hours, 0)
+        .toFixed(2)
     );
     const shiftEarnings = shiftItems.reduce((sum, item) => sum + item.earnedAmount, 0);
 
@@ -3800,6 +4124,9 @@ class DataStore {
     return {
       staffId,
       shiftItems,
+      attendedShiftsCount,
+      absentShiftsCount,
+      pendingShiftsCount,
       totalShiftHours,
       shiftEarnings,
       extraEarnings,
@@ -4017,18 +4344,157 @@ class DataStore {
     }
   }
 
-  // Record Part-Payment directly against the same invoice
+  public inferPaymentChannel(method?: string, explicitChannel?: PaymentChannel): PaymentChannel {
+    if (explicitChannel === 'cash' || explicitChannel === 'bank') return explicitChannel;
+    if ((method || '').toLowerCase().includes('cash')) return 'cash';
+    return 'bank';
+  }
+
+  public getDefaultDestinationAccount(channel: PaymentChannel, method?: string): string {
+    if (channel === 'cash') {
+      return 'Cash in Hand (Office Counter)';
+    }
+    const s = this.state.settings;
+    const primaryBank = (s.bank_name || 'Federal Bank').split('/')[0].trim();
+    const accSuffix = s.account_number ? ` (A/c ${s.account_number})` : '';
+    const m = (method || '').toLowerCase();
+    if ((m.includes('upi') || m.includes('gpay') || m.includes('phonepe')) && s.upi_id) {
+      return `${primaryBank} — UPI (${s.upi_id})`;
+    }
+    return `${primaryBank}${accSuffix}`;
+  }
+
+  public resolveDestinationAccount(
+    payment: Pick<Payment, 'method' | 'payment_channel' | 'destination_account'>
+  ): string {
+    if (payment.destination_account && payment.destination_account.trim()) {
+      return payment.destination_account.trim();
+    }
+    const ch = this.inferPaymentChannel(payment.method, payment.payment_channel);
+    return this.getDefaultDestinationAccount(ch, payment.method);
+  }
+
+  public getPresetPaymentAccounts(channel?: PaymentChannel): { label: string; channel: PaymentChannel }[] {
+    const s = this.state.settings;
+    const primaryBank = (s.bank_name || 'Federal Bank').split('/')[0].trim();
+    const accSuffix = s.account_number ? ` (A/c ${s.account_number})` : '';
+
+    const items: { label: string; channel: PaymentChannel }[] = [
+      { label: `${primaryBank}${accSuffix}`, channel: 'bank' }
+    ];
+
+    if (s.upi_id) {
+      items.push({ label: `${primaryBank} — UPI (${s.upi_id})`, channel: 'bank' });
+    }
+    items.push(
+      { label: 'State Bank of India (Current A/c)', channel: 'bank' },
+      { label: 'HDFC Bank (Business A/c)', channel: 'bank' },
+      { label: 'Cash in Hand (Office Counter)', channel: 'cash' },
+      { label: 'Owner Cash Locker', channel: 'cash' },
+      { label: 'Petty Cash Box', channel: 'cash' }
+    );
+
+    // Include any custom destination accounts previously recorded
+    for (const p of this.state.payments) {
+      const ch = this.inferPaymentChannel(p.method, p.payment_channel);
+      const acc = (p.destination_account || '').trim();
+      if (acc && !items.some((x) => x.label.toLowerCase() === acc.toLowerCase())) {
+        items.push({ label: acc, channel: ch });
+      }
+    }
+
+    return channel ? items.filter((i) => i.channel === channel) : items;
+  }
+
+  public getInvoiceCollectionsBreakdown(eventId?: string): InvoiceCollectionsBreakdown {
+    const relevantInvoices = eventId
+      ? this.state.invoices.filter((inv) => inv.event_id === eventId && inv.status !== 'void')
+      : this.state.invoices.filter((inv) => inv.status !== 'void');
+
+    const invoiceIdSet = new Set(relevantInvoices.map((inv) => inv.id));
+    const relevantPayments = this.state.payments.filter((p) => invoiceIdSet.has(p.invoice_id));
+
+    const totalInvoiced = relevantInvoices.reduce((sum, inv) => sum + Number(inv.amount || 0), 0);
+    const totalCollected = relevantPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const totalPendingReceivable = Math.max(0, totalInvoiced - totalCollected);
+
+    let totalBankReceived = 0;
+    let totalCashReceived = 0;
+    let bankPaymentCount = 0;
+    let cashPaymentCount = 0;
+
+    const holdingsMap = new Map<string, InvoiceAccountHolding>();
+
+    for (const p of relevantPayments) {
+      const amt = Number(p.amount || 0);
+      const ch = this.inferPaymentChannel(p.method, p.payment_channel);
+      const accName = this.resolveDestinationAccount(p);
+
+      if (ch === 'cash') {
+        totalCashReceived += amt;
+        cashPaymentCount += 1;
+      } else {
+        totalBankReceived += amt;
+        bankPaymentCount += 1;
+      }
+
+      const key = `${ch}::${accName.toLowerCase()}`;
+      const existing = holdingsMap.get(key);
+      if (existing) {
+        existing.totalReceived += amt;
+        existing.paymentCount += 1;
+        if ((p.paid_at || '') > existing.lastReceivedAt) {
+          existing.lastReceivedAt = p.paid_at;
+        }
+      } else {
+        holdingsMap.set(key, {
+          accountName: accName,
+          channel: ch,
+          totalReceived: amt,
+          paymentCount: 1,
+          lastReceivedAt: p.paid_at || ''
+        });
+      }
+    }
+
+    const accountHoldings = Array.from(holdingsMap.values()).sort(
+      (a, b) => b.totalReceived - a.totalReceived
+    );
+
+    return {
+      totalInvoiced,
+      totalCollected,
+      totalPendingReceivable,
+      totalBankReceived,
+      totalCashReceived,
+      bankPaymentCount,
+      cashPaymentCount,
+      accountHoldings
+    };
+  }
+
+  // Record Part-Payment directly against the same invoice (with Bank vs Cash & Destination Account)
   public addPayment(payment: {
     invoice_id: string;
     amount: number;
     method: string;
+    payment_channel?: PaymentChannel;
+    destination_account?: string;
     note?: string;
   }) {
+    const channel = this.inferPaymentChannel(payment.method, payment.payment_channel);
+    const destinationAccount =
+      payment.destination_account && payment.destination_account.trim()
+        ? payment.destination_account.trim()
+        : this.getDefaultDestinationAccount(channel, payment.method);
+
     const newPayment: Payment = {
       id: generateUUID(),
       invoice_id: payment.invoice_id,
       amount: Number(payment.amount),
       method: payment.method,
+      payment_channel: channel,
+      destination_account: destinationAccount,
       note: payment.note || '',
       paid_at: new Date().toISOString()
     };
@@ -4051,8 +4517,8 @@ class DataStore {
       entity_id: newPayment.id,
       parent_event_id: invoice?.event_id,
       action: 'create',
-      summary: `Recorded payment ₹${newPayment.amount.toLocaleString('en-IN')} on ${invoice?.invoice_number || 'Invoice'}`,
-      details: `Method: ${newPayment.method}${newPayment.note ? ` • ${newPayment.note}` : ''}`
+      summary: `Recorded ${channel.toUpperCase()} payment ₹${newPayment.amount.toLocaleString('en-IN')} on ${invoice?.invoice_number || 'Invoice'}`,
+      details: `Account: ${destinationAccount} • Mode: ${newPayment.method}${newPayment.note ? ` • ${newPayment.note}` : ''}`
     });
     this.save();
 
@@ -4067,6 +4533,8 @@ class DataStore {
             invoice_id: newPayment.invoice_id,
             amount: newPayment.amount,
             method: newPayment.method,
+            payment_channel: newPayment.payment_channel,
+            destination_account: newPayment.destination_account,
             note: newPayment.note || null,
             paid_at: newPayment.paid_at
           },

@@ -1,7 +1,8 @@
+const { PHASE_DEVELOPMENT_SERVER } = require('next/constants');
+
 /** @type {import('next').NextConfig} */
-const nextConfig = {
+module.exports = (phase) => ({
   output: 'standalone',
   reactStrictMode: true,
-};
-
-module.exports = nextConfig;
+  distDir: phase === PHASE_DEVELOPMENT_SERVER ? 'node_modules/.cache/next-dev' : '.next',
+});

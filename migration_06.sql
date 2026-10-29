@@ -56,6 +56,8 @@ alter table staff_members
 
 alter table shifts alter column staff_id drop not null;
 alter table shifts add column if not exists staff_member_id uuid references staff_members on delete cascade;
+alter table shifts add column if not exists attendance_status text not null default 'pending';
+alter table shifts add column if not exists attendance_marked_at timestamptz;
 alter table shifts drop constraint if exists shifts_check;
 alter table shifts drop constraint if exists shifts_staff_id_fkey;
 alter table shifts add constraint shifts_staff_id_fkey
@@ -119,6 +121,8 @@ alter table invoices add constraint invoices_event_id_fkey
   foreign key (event_id) references events(id) on delete cascade;
 
 alter table payments
+  add column if not exists payment_channel text not null default 'bank',
+  add column if not exists destination_account text,
   add column if not exists note text;
 
 -- 6. Business Settings, Bank Details & Automatic Invoice Email Option
