@@ -63,7 +63,8 @@ export default function Navbar() {
     { label: 'Profit & Loss', href: '/pnl', roles: ['super_admin', 'owner'] },
     { label: 'Notifications', href: '/activity', roles: ['super_admin', 'owner'] },
     { label: 'Users & Passwords', href: '/users', roles: ['super_admin', 'owner'] },
-    { label: 'Settings', href: '/settings', roles: ['super_admin', 'owner'] }
+    { label: 'Settings', href: '/settings', roles: ['super_admin', 'owner'] },
+    { label: 'User Manuals', href: '/manuals', roles: ['super_admin', 'owner', 'manager', 'accountant', 'staff'] }
   ];
 
   const visibleNavItems = allNavItems.filter((item) => item.roles.includes(role));

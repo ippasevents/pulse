@@ -52,6 +52,7 @@ export default function MobileBottomNav() {
     if (isStaff) {
       return [
         { label: 'Duty & Salary', href: '/dashboard', icon: '📍' },
+        { label: 'Manual (മലയാളം)', href: '/manuals', icon: '📘' },
         { label: 'Install App', href: '#install', icon: '📲', isInstall: true },
         { label: 'Password', href: '#password', icon: '🔑', isPassword: true },
         { label: 'Logout', href: '#logout', icon: '🚪', isLogout: true }
@@ -112,7 +113,8 @@ export default function MobileBottomNav() {
       roles: ['super_admin', 'owner']
     },
     { label: 'User Roles & Passwords', href: '/users', icon: '🛡️', desc: 'System user accounts & passwords', roles: ['super_admin', 'owner'] },
-    { label: 'Business Settings', href: '/settings', icon: '⚙️', desc: 'Bank details & payment terms', roles: ['super_admin', 'owner'] }
+    { label: 'Business Settings', href: '/settings', icon: '⚙️', desc: 'Bank details & payment terms', roles: ['super_admin', 'owner'] },
+    { label: 'User Manuals (മലയാളം PDF)', href: '/manuals', icon: '📘', desc: 'Malayalam PDF manuals for Owner, Manager, Accountant & Staff', roles: ['super_admin', 'owner', 'manager', 'accountant'] }
   ];
 
   const visibleMoreLinks = allMoreLinks.filter((l) => l.roles.includes(role));

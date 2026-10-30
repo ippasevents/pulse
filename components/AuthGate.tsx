@@ -10,6 +10,7 @@ import { PWAInstallButton } from '@/components/PWAInstallButton';
 import DashboardPage from '@/app/dashboard/page';
 
 function isRouteAllowed(role: UserRole, pathname: string): boolean {
+  if (pathname.startsWith('/manuals')) return true;
   if (role === 'super_admin' || role === 'owner') return true;
   if (role === 'staff') {
     return pathname === '/' || pathname === '/dashboard';

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { store } from '@/lib/store';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import OwnerDatabaseExportCard from '@/components/OwnerDatabaseExportCard';
@@ -220,6 +221,21 @@ export default function SettingsPage() {
         </div>
 
         <div>
+          {/* Malayalam 4-Role PDF User Manuals Card */}
+          <div className="card" style={{ marginBottom: '1.25rem' }}>
+            <h2 className="card-title">📘 മലയാളം യൂസർ മാനുവലുകൾ (4 PDF Guides)</h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: 1.6 }}>
+              ഓണർ, മാനേജർ, അക്കൗണ്ടന്റ്, സ്റ്റാഫ് എന്നീ 4 വിഭാഗം ഉപയോക്താക്കൾക്കുമുള്ള പ്രത്യേകം മലയാളം യൂസർ മാനുവലുകൾ വായിക്കാനും ഓരോന്നും വെവ്വേറെ A4 PDF ആയി ഡൗൺലോഡ് ചെയ്യാനും ഇവിടെ ക്ലിക്ക് ചെയ്യുക.
+            </p>
+            <Link
+              href="/manuals"
+              className="btn btn-primary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontWeight: 700 }}
+            >
+              📘 മലയാളം യൂസർ മാനുവൽ PDF പേജ് തുറക്കുക &rarr;
+            </Link>
+          </div>
+
           {/* Owner-Only Full Database Download (Excel / CSV) */}
           <OwnerDatabaseExportCard role={role} />
 

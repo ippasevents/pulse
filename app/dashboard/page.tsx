@@ -155,7 +155,21 @@ export default function DashboardPage() {
               View your salary received, pending balance receivable, and upcoming catering venue assignments.
             </p>
           </div>
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <Link
+              href="/manuals"
+              className="btn btn-primary btn-sm"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                fontWeight: 700,
+                fontSize: '0.82rem',
+                padding: '0.45rem 0.85rem'
+              }}
+            >
+              📘 മലയാളം യൂസർ മാനുവൽ (PDF)
+            </Link>
             <button
               type="button"
               onClick={() => setIsChangePasswordOpen(true)}
