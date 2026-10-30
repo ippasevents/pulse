@@ -670,7 +670,7 @@ export default function InvoicesPage() {
                                   {state.settings.name || 'IPPAS FOOD SERVICE & EVENTS'}
                                 </div>
                                 <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                                  Outdoor Catering &bull; Event Management &bull; Kerala
+                                  Outdoor Catering &bull; Event Management &bull; Calicut
                                 </div>
                                 <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
                                   Phone: {state.settings.phone} &bull; Email: {state.settings.email}
@@ -717,7 +717,7 @@ export default function InvoicesPage() {
                               {client?.phone && <div style={{ fontSize: '0.85rem', color: '#334155' }}>📞 {client.phone}</div>}
                               {client?.email && <div style={{ fontSize: '0.85rem', color: '#334155' }}>✉️ {client.email}</div>}
                               <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '0.2rem' }}>
-                                📍 Venue: {evt?.venue || 'Kerala'}
+                                📍 Venue: {evt?.venue || 'Calicut'}
                               </div>
                             </div>
 

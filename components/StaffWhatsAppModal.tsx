@@ -13,6 +13,7 @@ import {
   formatStaffShiftWhatsAppMessage,
   normalizeWhatsAppPhone
 } from '@/lib/staffWhatsApp';
+import { isDesktopWebView } from '@/lib/whatsappDeviceShare';
 
 interface StaffWhatsAppModalProps {
   isOpen: boolean;
@@ -40,6 +41,7 @@ export default function StaffWhatsAppModal({
   const [copied, setCopied] = useState<boolean>(false);
   const [rosterCopied, setRosterCopied] = useState<boolean>(false);
   const [sentBanner, setSentBanner] = useState<string | null>(null);
+  const [isDesktop, setIsDesktop] = useState<boolean>(false);
 
   useEffect(() => {
     setState(store.getState());
@@ -47,6 +49,13 @@ export default function StaffWhatsAppModal({
       setState(store.getState());
     });
     return unsub;
+  }, []);
+
+  useEffect(() => {
+    const updateDevice = () => setIsDesktop(isDesktopWebView());
+    updateDevice();
+    window.addEventListener('resize', updateDevice);
+    return () => window.removeEventListener('resize', updateDevice);
   }, []);
 
   useEffect(() => {
@@ -461,14 +470,16 @@ export default function StaffWhatsAppModal({
                   <label className="form-label" style={{ fontSize: '0.8rem', fontWeight: 700, margin: 0 }}>
                     WhatsApp Message Preview
                   </label>
-                  <button
-                    type="button"
-                    onClick={handleCopyMessage}
-                    className="btn btn-secondary btn-sm"
-                    style={{ fontSize: '0.73rem', padding: '0.2rem 0.55rem' }}
-                  >
-                    {copied ? '✓ Copied!' : '📋 Copy Text'}
-                  </button>
+                  {isDesktop && (
+                    <button
+                      type="button"
+                      onClick={handleCopyMessage}
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '0.73rem', padding: '0.2rem 0.55rem' }}
+                    >
+                      {copied ? '✓ Copied!' : '📋 Copy Text'}
+                    </button>
+                  )}
                 </div>
                 <textarea
                   className="form-control"
@@ -544,7 +555,7 @@ export default function StaffWhatsAppModal({
                 <div style={{ fontSize: '0.83rem', color: '#334155' }}>
                   Tap <strong>Send WhatsApp</strong> next to each crew member to send their personalized role &amp; timing directly to their mobile number.
                 </div>
-                {eventShifts.length > 0 && (
+                {isDesktop && eventShifts.length > 0 && (
                   <button
                     type="button"
                     onClick={handleCopyFullRoster}

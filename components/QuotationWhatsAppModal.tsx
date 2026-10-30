@@ -8,6 +8,11 @@ import {
   formatWhatsAppQuotationMessage,
   shareQuotationPdfToWhatsApp
 } from '@/lib/quotationPdfGenerator';
+import {
+  isDesktopWebView,
+  openExternalUrlSafe,
+  triggerPdfBlobDownload
+} from '@/lib/whatsappDeviceShare';
 
 interface QuotationWhatsAppModalProps {
   event: EventRecord | null;
@@ -21,7 +26,14 @@ export default function QuotationWhatsAppModal({
   onClose
 }: QuotationWhatsAppModalProps) {
   const [state, setState] = useState(store.getState());
+  const [isDesktop, setIsDesktop] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPreparingPdf, setIsPreparingPdf] = useState(false);
+  const [preparedPdf, setPreparedPdf] = useState<{
+    blob: Blob;
+    file: File;
+    quoteNumber: string;
+  } | null>(null);
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'info' | 'error';
@@ -36,17 +48,80 @@ export default function QuotationWhatsAppModal({
     return unsub;
   }, []);
 
-  if (!isOpen || !event) return null;
+  useEffect(() => {
+    const updateDeviceMode = () => setIsDesktop(isDesktopWebView());
+    updateDeviceMode();
+    window.addEventListener('resize', updateDeviceMode);
+    return () => window.removeEventListener('resize', updateDeviceMode);
+  }, []);
 
-  const liveEvent = state.events.find((e) => e.id === event.id) || event;
+  const liveEvent = event
+    ? state.events.find((e) => e.id === event.id) || event
+    : null;
+  const eventId = liveEvent?.id || '';
+  const totals = liveEvent
+    ? store.getEventTotal(liveEvent.id)
+    : { menuTotal: 0, extrasTotal: 0, grandTotal: 0 };
+  const evtItemsCount = liveEvent
+    ? state.eventItems.filter((i) => i.event_id === liveEvent.id).length
+    : 0;
+  const evtExtrasCount = liveEvent
+    ? state.eventExtras.filter((x) => x.event_id === liveEvent.id).length
+    : 0;
+  const showBankDetails = liveEvent ? liveEvent.show_bank_details !== false : true;
+  const showPaymentDetails = liveEvent ? liveEvent.show_payment_details !== false : true;
+  const paymentTermsStr = liveEvent?.payment_terms || '';
+
+  // Pre-build Quotation PDF on modal open so smartphone tap shares PDF + Text synchronously inside user gesture
+  useEffect(() => {
+    if (!isOpen || !eventId) {
+      setPreparedPdf(null);
+      setIsPreparingPdf(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsPreparingPdf(true);
+    setPreparedPdf(null);
+
+    const latestState = store.getState();
+    const targetEvent = latestState.events.find((e) => e.id === eventId);
+    if (!targetEvent) {
+      setIsPreparingPdf(false);
+      return;
+    }
+
+    generateQuotationPdfBlob(targetEvent, latestState)
+      .then((res) => {
+        if (!cancelled && res) {
+          setPreparedPdf(res);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsPreparingPdf(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    eventId,
+    totals.grandTotal,
+    evtItemsCount,
+    evtExtrasCount,
+    showBankDetails,
+    showPaymentDetails,
+    paymentTermsStr
+  ]);
+
+  if (!isOpen || !liveEvent) return null;
+
   const client = state.clients.find((c) => c.id === liveEvent.client_id);
   const quoteNumber = store.getQuotationNumber(liveEvent);
-  const { menuTotal, extrasTotal, grandTotal } = store.getEventTotal(liveEvent.id);
-  const evtItemsCount = state.eventItems.filter((i) => i.event_id === liveEvent.id).length;
-  const evtExtrasCount = state.eventExtras.filter((x) => x.event_id === liveEvent.id).length;
-
-  const showBankDetails = liveEvent.show_bank_details !== false;
-  const showPaymentDetails = liveEvent.show_payment_details !== false;
+  const { menuTotal, extrasTotal, grandTotal } = totals;
 
   const rawDigits = (client?.phone || '').replace(/[^0-9]/g, '');
   const cleanPhone = rawDigits.length === 10 ? `91${rawDigits}` : rawDigits;
@@ -64,17 +139,21 @@ export default function QuotationWhatsAppModal({
     setIsGenerating(true);
     setFeedback(null);
     try {
-      const res = await shareQuotationPdfToWhatsApp(liveEvent, store.getState());
+      const res = await shareQuotationPdfToWhatsApp(
+        liveEvent,
+        store.getState(),
+        preparedPdf || undefined
+      );
       if (res.success) {
         if (res.sharedDirectlyWithFile) {
           setFeedback({
             type: 'success',
-            message: `✓ WhatsApp opened with Quotation PDF (${res.quoteNumber}.pdf) attached directly!`
+            message: `✓ WhatsApp opened with Quotation PDF (${res.quoteNumber}.pdf) and message text attached automatically!`
           });
         } else {
           setFeedback({
             type: 'info',
-            message: `✓ Quotation PDF (${res.quoteNumber}.pdf) downloaded and Client WhatsApp chat opened. Attach the downloaded PDF in chat to send.`
+            message: `✓ Quotation PDF (${res.quoteNumber}.pdf) downloaded and Client WhatsApp chat opened with message text ready. Attach the downloaded PDF in chat to send.`
           });
         }
       } else {
@@ -97,16 +176,10 @@ export default function QuotationWhatsAppModal({
     setIsGenerating(true);
     setFeedback(null);
     try {
-      const res = await generateQuotationPdfBlob(liveEvent, store.getState());
+      const res =
+        preparedPdf || (await generateQuotationPdfBlob(liveEvent, store.getState()));
       if (res) {
-        const url = URL.createObjectURL(res.blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${res.quoteNumber}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        triggerPdfBlobDownload(res.blob, `${res.quoteNumber}.pdf`);
         setFeedback({
           type: 'success',
           message: `✓ Quotation PDF (${res.quoteNumber}.pdf) downloaded successfully!`
@@ -129,7 +202,7 @@ export default function QuotationWhatsAppModal({
     const waUrl = cleanPhone
       ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}`
       : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
+    openExternalUrlSafe(waUrl);
   };
 
   const handleCopyText = async () => {
@@ -138,9 +211,11 @@ export default function QuotationWhatsAppModal({
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch {
-      // ignore
+      // ignore clipboard errors
     }
   };
+
+  const isBusy = isGenerating || (!isDesktop && isPreparingPdf);
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1260 }}>
@@ -221,28 +296,57 @@ export default function QuotationWhatsAppModal({
               marginBottom: '0.95rem'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                flexWrap: 'wrap',
+                gap: '0.5rem'
+              }}
+            >
               <div>
-                <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600 }}>
+                <div
+                  style={{
+                    fontSize: '0.72rem',
+                    textTransform: 'uppercase',
+                    color: 'var(--text-muted)',
+                    fontWeight: 600
+                  }}
+                >
                   Client WhatsApp:
                 </div>
                 <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#0f172a' }}>
                   {client?.name || 'Valued Client'}
                 </div>
-                <div style={{ fontSize: '0.8rem', color: cleanPhone ? '#15803d' : '#dc2626', fontWeight: 600 }}>
+                <div
+                  style={{
+                    fontSize: '0.8rem',
+                    color: cleanPhone ? '#15803d' : '#dc2626',
+                    fontWeight: 600
+                  }}
+                >
                   📞 {client?.phone || 'Client phone number not added yet'}
                 </div>
               </div>
 
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600 }}>
+                <div
+                  style={{
+                    fontSize: '0.72rem',
+                    textTransform: 'uppercase',
+                    color: 'var(--text-muted)',
+                    fontWeight: 600
+                  }}
+                >
                   Quotation #{quoteNumber}
                 </div>
                 <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#15803d' }}>
                   ₹{grandTotal.toLocaleString('en-IN')}
                 </div>
                 <div style={{ fontSize: '0.74rem', color: '#475569' }}>
-                  {evtItemsCount} Menu (₹{menuTotal.toLocaleString('en-IN')}) + {evtExtrasCount} Logistics/Extras (₹{extrasTotal.toLocaleString('en-IN')})
+                  {evtItemsCount} Menu (₹{menuTotal.toLocaleString('en-IN')}) + {evtExtrasCount}{' '}
+                  Logistics/Extras (₹{extrasTotal.toLocaleString('en-IN')})
                 </div>
               </div>
             </div>
@@ -267,7 +371,17 @@ export default function QuotationWhatsAppModal({
               Include in Quotation PDF &amp; Message:
             </span>
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', color: '#1e293b' }}>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  color: '#1e293b'
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={showBankDetails}
@@ -275,7 +389,17 @@ export default function QuotationWhatsAppModal({
                 />
                 🏦 Bank Details
               </label>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', color: '#1e293b' }}>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  color: '#1e293b'
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={showPaymentDetails}
@@ -290,9 +414,25 @@ export default function QuotationWhatsAppModal({
           {feedback && (
             <div
               style={{
-                background: feedback.type === 'success' ? '#dcfce7' : feedback.type === 'info' ? '#eff6ff' : '#fee2e2',
-                border: `1px solid ${feedback.type === 'success' ? '#86efac' : feedback.type === 'info' ? '#93c5fd' : '#fca5a5'}`,
-                color: feedback.type === 'success' ? '#15803d' : feedback.type === 'info' ? '#1e40af' : '#991b1b',
+                background:
+                  feedback.type === 'success'
+                    ? '#dcfce7'
+                    : feedback.type === 'info'
+                    ? '#eff6ff'
+                    : '#fee2e2',
+                border: `1px solid ${
+                  feedback.type === 'success'
+                    ? '#86efac'
+                    : feedback.type === 'info'
+                    ? '#93c5fd'
+                    : '#fca5a5'
+                }`,
+                color:
+                  feedback.type === 'success'
+                    ? '#15803d'
+                    : feedback.type === 'info'
+                    ? '#1e40af'
+                    : '#991b1b',
                 padding: '0.7rem 0.9rem',
                 borderRadius: '8px',
                 fontSize: '0.82rem',
@@ -310,7 +450,7 @@ export default function QuotationWhatsAppModal({
             <button
               type="button"
               onClick={handleShareWithPdf}
-              disabled={isGenerating}
+              disabled={isBusy}
               style={{
                 background: '#16a34a',
                 color: '#ffffff',
@@ -323,13 +463,18 @@ export default function QuotationWhatsAppModal({
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.5rem',
-                cursor: isGenerating ? 'not-allowed' : 'pointer',
+                cursor: isBusy ? 'not-allowed' : 'pointer',
+                opacity: isBusy ? 0.85 : 1,
                 boxShadow: '0 4px 6px -1px rgba(22, 163, 74, 0.25)'
               }}
             >
-              <span style={{ fontSize: '1.15rem' }}>{isGenerating ? '⏳' : '📲'}</span>
+              <span style={{ fontSize: '1.15rem' }}>{isBusy ? '⏳' : '📲'}</span>
               <span>
-                {isGenerating ? 'Preparing Quotation PDF...' : `Send Quotation PDF (${quoteNumber}) on WhatsApp`}
+                {isGenerating
+                  ? 'Sharing Quotation...'
+                  : !isDesktop && isPreparingPdf
+                  ? 'Preparing Quotation PDF & Text...'
+                  : `Send Quotation PDF & Text (${quoteNumber})`}
               </span>
             </button>
 
@@ -348,27 +493,54 @@ export default function QuotationWhatsAppModal({
                 className="btn btn-secondary btn-sm"
                 onClick={handleOpenDirectChat}
                 disabled={isGenerating}
-                style={{ padding: '0.58rem', fontWeight: 600, background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d' }}
+                style={{
+                  padding: '0.58rem',
+                  fontWeight: 600,
+                  background: '#f0fdf4',
+                  borderColor: '#bbf7d0',
+                  color: '#15803d'
+                }}
               >
                 💬 Open WhatsApp Chat
               </button>
             </div>
           </div>
 
-          {/* Message Preview */}
+          {/* Message Preview — Copy Text shown ONLY on Desktop / Laptop Web View */}
           <div style={{ marginTop: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '0.35rem',
+                gap: '0.5rem'
+              }}
+            >
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  color: '#64748b',
+                  textTransform: 'uppercase'
+                }}
+              >
                 WhatsApp Message Preview
               </span>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem' }}
-                onClick={handleCopyText}
-              >
-                {copied ? '✓ Copied!' : '📋 Copy Text'}
-              </button>
+              {isDesktop ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem' }}
+                  onClick={handleCopyText}
+                >
+                  {copied ? '✓ Copied!' : '📋 Copy Text'}
+                </button>
+              ) : (
+                <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>
+                  ✓ Auto-attached with PDF
+                </span>
+              )}
             </div>
             <pre
               style={{

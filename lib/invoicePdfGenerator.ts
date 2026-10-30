@@ -2,6 +2,7 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Invoice } from '@/lib/types';
 import { store, AppState } from '@/lib/store';
+import { sharePdfWithCaptionToWhatsApp } from '@/lib/whatsappDeviceShare';
 
 function escapeHtml(val?: string | number | null): string {
   return String(val ?? '')
@@ -79,7 +80,7 @@ export async function generateInvoicePdfBlob(
               ${escapeHtml(state.settings.name || 'IPPAS FOOD SERVICE & EVENTS')}
             </div>
             <div style="font-size: 0.8rem; color: #64748b;">
-              Outdoor Catering &bull; Event Management &bull; Kerala
+              Outdoor Catering &bull; Event Management &bull; Calicut
             </div>
             <div style="font-size: 0.75rem; color: #64748b;">
               Phone: ${escapeHtml(state.settings.phone || '+91 98470 11111')} &bull; Email: ${escapeHtml(state.settings.email || 'events@ippas.com')}
@@ -113,7 +114,7 @@ export async function generateInvoicePdfBlob(
           ${client?.phone ? `<div style="font-size: 0.85rem; color: #334155;">📞 ${escapeHtml(client.phone)}</div>` : ''}
           ${client?.email ? `<div style="font-size: 0.85rem; color: #334155;">✉️ ${escapeHtml(client.email)}</div>` : ''}
           <div style="font-size: 0.85rem; color: #64748b; margin-top: 3px;">
-            📍 Venue: ${escapeHtml(evt?.venue || 'Kerala')}
+            📍 Venue: ${escapeHtml(evt?.venue || 'Calicut')}
           </div>
         </div>
 
@@ -477,12 +478,13 @@ export function formatWhatsAppInvoiceMessage(
 }
 
 /**
- * Triggers native WhatsApp PDF document sharing on mobile/tablets via Web Share API Level 2.
- * Falls back to direct PDF download + WhatsApp chat link on desktop browsers.
+ * Triggers native WhatsApp PDF + Text sharing on smartphones via Web Share API Level 2.
+ * Falls back to PDF download + WhatsApp chat link with pre-attached text on desktop/laptop browsers.
  */
 export async function shareInvoicePdfToWhatsApp(
   invoice: Invoice,
-  state: AppState
+  state: AppState,
+  prebuiltPdf?: { blob: Blob; file: File }
 ): Promise<{
   success: boolean;
   sharedDirectlyWithFile: boolean;
@@ -495,7 +497,7 @@ export async function shareInvoicePdfToWhatsApp(
   const messageText = formatWhatsAppInvoiceMessage(liveInv, state);
   const cleanPhone = normalizeWhatsAppPhone(client?.phone);
 
-  const pdfResult = await generateInvoicePdfBlob(liveInv, state);
+  const pdfResult = prebuiltPdf || (await generateInvoicePdfBlob(liveInv, state));
   if (!pdfResult) {
     return {
       success: false,
@@ -504,41 +506,11 @@ export async function shareInvoicePdfToWhatsApp(
     };
   }
 
-  const { file, blob } = pdfResult;
-
-  if (
-    typeof navigator !== 'undefined' &&
-    typeof navigator.canShare === 'function' &&
-    navigator.canShare({ files: [file] })
-  ) {
-    try {
-      await navigator.share({
-        files: [file],
-        title: `Invoice ${liveInv.invoice_number}`,
-        text: messageText
-      });
-      return { success: true, sharedDirectlyWithFile: true, file };
-    } catch (shareErr: any) {
-      if (shareErr.name === 'AbortError') {
-        return { success: true, sharedDirectlyWithFile: true, file };
-      }
-      console.warn('Native share failed, falling back to download + WhatsApp link:', shareErr);
-    }
-  }
-
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${liveInv.invoice_number}.pdf`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-
-  const waUrl = cleanPhone
-    ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}`
-    : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
-  window.open(waUrl, '_blank', 'noopener,noreferrer');
-
-  return { success: true, sharedDirectlyWithFile: false, file };
+  return sharePdfWithCaptionToWhatsApp({
+    file: pdfResult.file,
+    blob: pdfResult.blob,
+    filename: `${liveInv.invoice_number}.pdf`,
+    messageText,
+    cleanPhone
+  });
 }

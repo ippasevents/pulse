@@ -8,6 +8,11 @@ import {
   formatWhatsAppInvoiceMessage,
   shareInvoicePdfToWhatsApp
 } from '@/lib/invoicePdfGenerator';
+import {
+  isDesktopWebView,
+  openExternalUrlSafe,
+  triggerPdfBlobDownload
+} from '@/lib/whatsappDeviceShare';
 
 interface WhatsAppShareModalProps {
   invoice: Invoice | null;
@@ -21,9 +26,15 @@ export default function WhatsAppShareModal({
   onClose
 }: WhatsAppShareModalProps) {
   const [state, setState] = useState(store.getState());
+  const [isDesktop, setIsDesktop] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPreparingPdf, setIsPreparingPdf] = useState(false);
+  const [preparedPdf, setPreparedPdf] = useState<{ blob: Blob; file: File } | null>(null);
   const [copied, setCopied] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
+  const [feedback, setFeedback] = useState<{
+    type: 'success' | 'info' | 'error';
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     setState(store.getState());
@@ -33,17 +44,81 @@ export default function WhatsAppShareModal({
     return unsub;
   }, []);
 
-  if (!isOpen || !invoice) return null;
+  useEffect(() => {
+    const updateDeviceMode = () => setIsDesktop(isDesktopWebView());
+    updateDeviceMode();
+    window.addEventListener('resize', updateDeviceMode);
+    return () => window.removeEventListener('resize', updateDeviceMode);
+  }, []);
 
-  const liveInvoice = state.invoices.find((i) => i.id === invoice.id) || invoice;
+  const liveInvoice = invoice
+    ? state.invoices.find((i) => i.id === invoice.id) || invoice
+    : null;
+  const invPayments = liveInvoice
+    ? state.payments.filter((p) => p.invoice_id === liveInvoice.id)
+    : [];
+  const paymentsForThis = invPayments.reduce((s, p) => s + p.amount, 0);
+  const showBankDetails = liveInvoice ? liveInvoice.show_bank_details !== false : true;
+  const showPaymentDetails = liveInvoice ? liveInvoice.show_payment_details !== false : true;
+  const invoiceId = liveInvoice?.id || '';
+  const liveAmount = liveInvoice?.amount || 0;
+  const liveDiscount = liveInvoice?.discount || 0;
+  const liveDiscountNote = liveInvoice?.discount_note || '';
+  const liveStatus = liveInvoice?.status || '';
+
+  // Pre-build PDF as soon as the modal opens so smartphone tap shares PDF + Text synchronously inside user gesture
+  useEffect(() => {
+    if (!isOpen || !invoiceId) {
+      setPreparedPdf(null);
+      setIsPreparingPdf(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsPreparingPdf(true);
+    setPreparedPdf(null);
+
+    const latestState = store.getState();
+    const targetInv = latestState.invoices.find((i) => i.id === invoiceId);
+    if (!targetInv) {
+      setIsPreparingPdf(false);
+      return;
+    }
+
+    generateInvoicePdfBlob(targetInv, latestState)
+      .then((res) => {
+        if (!cancelled && res) {
+          setPreparedPdf({ blob: res.blob, file: res.file });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsPreparingPdf(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    invoiceId,
+    liveAmount,
+    liveDiscount,
+    liveDiscountNote,
+    liveStatus,
+    showBankDetails,
+    showPaymentDetails,
+    paymentsForThis
+  ]);
+
+  if (!isOpen || !liveInvoice) return null;
+
   const evt = state.events.find((e) => e.id === liveInvoice.event_id);
   const client = state.clients.find((c) => c.id === evt?.client_id);
-  const invPayments = state.payments.filter((p) => p.invoice_id === liveInvoice.id);
-  const paymentsForThis = invPayments.reduce((s, p) => s + p.amount, 0);
   const balanceDue = Math.max(0, liveInvoice.amount - paymentsForThis);
-  const isFullyPaid = liveInvoice.status === 'paid' || (liveInvoice.amount > 0 && balanceDue <= 0);
-  const showBankDetails = liveInvoice.show_bank_details !== false;
-  const showPaymentDetails = liveInvoice.show_payment_details !== false;
+  const isFullyPaid =
+    liveInvoice.status === 'paid' || (liveInvoice.amount > 0 && balanceDue <= 0);
 
   const rawDigits = (client?.phone || '').replace(/[^0-9]/g, '');
   const cleanPhone = rawDigits.length === 10 ? `91${rawDigits}` : rawDigits;
@@ -62,18 +137,24 @@ export default function WhatsAppShareModal({
     setFeedback(null);
 
     try {
-      const res = await shareInvoicePdfToWhatsApp(liveInvoice, store.getState());
+      const res = await shareInvoicePdfToWhatsApp(
+        liveInvoice,
+        store.getState(),
+        preparedPdf || undefined
+      );
 
       if (res.success) {
         if (res.sharedDirectlyWithFile) {
           setFeedback({
             type: 'success',
-            message: '✓ WhatsApp opened with invoice PDF attached directly!'
+            message:
+              '✓ WhatsApp opened with Invoice PDF and message text attached automatically!'
           });
         } else {
           setFeedback({
             type: 'info',
-            message: '✓ Invoice PDF downloaded and WhatsApp opened. Click 📎 (Attach Document) in the chat to send the file.'
+            message:
+              '✓ Invoice PDF downloaded and WhatsApp opened with message text ready. Attach the downloaded PDF in chat to send.'
           });
         }
       } else {
@@ -96,16 +177,10 @@ export default function WhatsAppShareModal({
     setIsGenerating(true);
     setFeedback(null);
     try {
-      const res = await generateInvoicePdfBlob(liveInvoice, store.getState());
+      const res =
+        preparedPdf || (await generateInvoicePdfBlob(liveInvoice, store.getState()));
       if (res) {
-        const url = URL.createObjectURL(res.blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${liveInvoice.invoice_number}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        triggerPdfBlobDownload(res.blob, `${liveInvoice.invoice_number}.pdf`);
         setFeedback({
           type: 'success',
           message: `✓ Invoice PDF (${liveInvoice.invoice_number}.pdf) downloaded successfully!`
@@ -127,7 +202,7 @@ export default function WhatsAppShareModal({
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch {
-      // Fallback
+      // ignore clipboard errors
     }
   };
 
@@ -135,8 +210,10 @@ export default function WhatsAppShareModal({
     const waUrl = cleanPhone
       ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}`
       : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
+    openExternalUrlSafe(waUrl);
   };
+
+  const isBusy = isGenerating || (!isDesktop && isPreparingPdf);
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1250 }}>
@@ -150,7 +227,8 @@ export default function WhatsAppShareModal({
           borderRadius: '12px',
           overflow: 'hidden',
           border: '1px solid #86efac',
-          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
+          boxShadow:
+            '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
         }}
       >
         {/* Header */}
@@ -181,10 +259,14 @@ export default function WhatsAppShareModal({
             </div>
             <div>
               <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>
-                Share {isFullyPaid || liveInvoice.kind === 'final' ? 'Final Settlement Invoice' : 'Invoice'} on WhatsApp
+                Share{' '}
+                {isFullyPaid || liveInvoice.kind === 'final'
+                  ? 'Final Settlement Invoice'
+                  : 'Invoice'}{' '}
+                on WhatsApp
               </h2>
               <div style={{ fontSize: '0.75rem', color: '#bbf7d0', marginTop: '0.15rem' }}>
-                WhatsApp PDF Document Sharing &bull; #{liveInvoice.invoice_number}
+                PDF Document &amp; Message Auto-Attach &bull; #{liveInvoice.invoice_number}
               </div>
             </div>
           </div>
@@ -217,9 +299,24 @@ export default function WhatsAppShareModal({
               marginBottom: '0.95rem'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                flexWrap: 'wrap',
+                gap: '0.5rem'
+              }}
+            >
               <div>
-                <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600 }}>
+                <div
+                  style={{
+                    fontSize: '0.72rem',
+                    textTransform: 'uppercase',
+                    color: 'var(--text-muted)',
+                    fontWeight: 600
+                  }}
+                >
                   Client:
                 </div>
                 <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#0f172a' }}>
@@ -231,14 +328,31 @@ export default function WhatsAppShareModal({
               </div>
 
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600 }}>
-                  {isFullyPaid || liveInvoice.kind === 'final' ? 'Final Settlement Total:' : 'Invoice Total:'}
+                <div
+                  style={{
+                    fontSize: '0.72rem',
+                    textTransform: 'uppercase',
+                    color: 'var(--text-muted)',
+                    fontWeight: 600
+                  }}
+                >
+                  {isFullyPaid || liveInvoice.kind === 'final'
+                    ? 'Final Settlement Total:'
+                    : 'Invoice Total:'}
                 </div>
                 <div style={{ fontWeight: 800, fontSize: '1.1rem', color: '#15803d' }}>
                   ₹{liveInvoice.amount.toLocaleString('en-IN')}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: !isFullyPaid ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
-                  {!isFullyPaid ? `Balance Due: ₹${balanceDue.toLocaleString('en-IN')}` : '✓ Fully Paid (Payment Terms Hidden)'}
+                <div
+                  style={{
+                    fontSize: '0.75rem',
+                    color: !isFullyPaid ? '#dc2626' : '#16a34a',
+                    fontWeight: 600
+                  }}
+                >
+                  {!isFullyPaid
+                    ? `Balance Due: ₹${balanceDue.toLocaleString('en-IN')}`
+                    : '✓ Fully Paid (Payment Terms Hidden)'}
                 </div>
               </div>
             </div>
@@ -263,7 +377,17 @@ export default function WhatsAppShareModal({
               Show on Invoice PDF &amp; WA:
             </span>
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', color: '#1e293b' }}>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  color: '#1e293b'
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={showBankDetails}
@@ -271,7 +395,17 @@ export default function WhatsAppShareModal({
                 />
                 🏦 Bank Details
               </label>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', color: '#1e293b' }}>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  color: '#1e293b'
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={showPaymentDetails}
@@ -286,9 +420,25 @@ export default function WhatsAppShareModal({
           {feedback && (
             <div
               style={{
-                background: feedback.type === 'success' ? '#dcfce7' : feedback.type === 'info' ? '#eff6ff' : '#fee2e2',
-                border: `1px solid ${feedback.type === 'success' ? '#86efac' : feedback.type === 'info' ? '#93c5fd' : '#fca5a5'}`,
-                color: feedback.type === 'success' ? '#15803d' : feedback.type === 'info' ? '#1e40af' : '#991b1b',
+                background:
+                  feedback.type === 'success'
+                    ? '#dcfce7'
+                    : feedback.type === 'info'
+                    ? '#eff6ff'
+                    : '#fee2e2',
+                border: `1px solid ${
+                  feedback.type === 'success'
+                    ? '#86efac'
+                    : feedback.type === 'info'
+                    ? '#93c5fd'
+                    : '#fca5a5'
+                }`,
+                color:
+                  feedback.type === 'success'
+                    ? '#15803d'
+                    : feedback.type === 'info'
+                    ? '#1e40af'
+                    : '#991b1b',
                 padding: '0.75rem 0.9rem',
                 borderRadius: '8px',
                 fontSize: '0.82rem',
@@ -306,7 +456,7 @@ export default function WhatsAppShareModal({
             <button
               type="button"
               onClick={handleShareWithPdf}
-              disabled={isGenerating}
+              disabled={isBusy}
               style={{
                 background: '#16a34a',
                 color: '#ffffff',
@@ -319,17 +469,29 @@ export default function WhatsAppShareModal({
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.55rem',
-                cursor: isGenerating ? 'not-allowed' : 'pointer',
+                cursor: isBusy ? 'not-allowed' : 'pointer',
+                opacity: isBusy ? 0.85 : 1,
                 boxShadow: '0 4px 6px -1px rgba(22, 163, 74, 0.25)'
               }}
             >
-              <span style={{ fontSize: '1.2rem' }}>{isGenerating ? '⏳' : '📲'}</span>
+              <span style={{ fontSize: '1.2rem' }}>{isBusy ? '⏳' : '📲'}</span>
               <span>
-                {isGenerating ? 'Generating PDF...' : 'Share PDF to WhatsApp'}
+                {isGenerating
+                  ? 'Sharing to WhatsApp...'
+                  : !isDesktop && isPreparingPdf
+                  ? 'Preparing Document & Text...'
+                  : 'Share PDF & Text on WhatsApp'}
               </span>
             </button>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', marginTop: '0.2rem' }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '0.65rem',
+                marginTop: '0.2rem'
+              }}
+            >
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
@@ -370,20 +532,41 @@ export default function WhatsAppShareModal({
             </div>
           </div>
 
-          {/* Message Preview */}
+          {/* Message Preview — Copy Text shown ONLY on Desktop / Laptop Web View */}
           <div style={{ marginTop: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '0.35rem',
+                gap: '0.5rem'
+              }}
+            >
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  color: '#64748b',
+                  textTransform: 'uppercase'
+                }}
+              >
                 WhatsApp Message Preview
               </span>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem' }}
-                onClick={handleCopyText}
-              >
-                {copied ? '✓ Copied!' : '📋 Copy Text'}
-              </button>
+              {isDesktop ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem' }}
+                  onClick={handleCopyText}
+                >
+                  {copied ? '✓ Copied!' : '📋 Copy Text'}
+                </button>
+              ) : (
+                <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>
+                  ✓ Auto-attached with PDF
+                </span>
+              )}
             </div>
             <pre
               style={{

@@ -13,8 +13,6 @@ import {
   Tooltip,
   CartesianGrid
 } from 'recharts';
-import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
-import { getAuditTargetLink } from '@/components/OwnerActivityAlertModal';
 import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
 import ChangePasswordModal from '@/components/ChangePasswordModal';
@@ -24,6 +22,7 @@ export default function DashboardPage() {
   const [isMounted, setIsMounted] = useState(false);
   const [managerSearch, setManagerSearch] = useState('');
   const [accountantSearch, setAccountantSearch] = useState('');
+  const [ownerChartRange, setOwnerChartRange] = useState<'all' | '6m'>('all');
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   useEffect(() => {
@@ -1184,7 +1183,7 @@ export default function DashboardPage() {
   }
 
   // -------------------------------------------------------------------------------------
-  // 3. OWNER VIEW
+  // 3. OWNER VIEW — Simplified, Clean Executive Overview
   // -------------------------------------------------------------------------------------
   const completedOwnerEvents = state.events.filter((e) => e.status === 'completed');
   const ownerPnlTotals = completedOwnerEvents.reduce(
@@ -1198,439 +1197,807 @@ export default function DashboardPage() {
     { revenue: 0, expenditure: 0, netProfit: 0 }
   );
 
+  const collectionsBreakdown = store.getInvoiceCollectionsBreakdown();
+  const bankSharePct =
+    collectionsBreakdown.totalCollected > 0
+      ? Math.round(
+          (collectionsBreakdown.totalBankReceived / collectionsBreakdown.totalCollected) * 100
+        )
+      : 0;
+  const cashSharePct =
+    collectionsBreakdown.totalCollected > 0 ? Math.max(0, 100 - bankSharePct) : 0;
+
+  const totalPayables = totalVendorDues + totalStaffSalaryPayable;
+  const displayedChartData =
+    ownerChartRange === '6m' ? chartData.slice(-6) : chartData;
+
+  const isProfitPositive = ownerPnlTotals.netProfit >= 0;
+
+  const formatEventStatus = (status: string) => {
+    switch (status) {
+      case 'confirmed':
+        return { label: 'Confirmed', color: '#15803d' };
+      case 'quoted':
+        return { label: 'Quoted', color: '#b45309' };
+      case 'inquiry':
+        return { label: 'Inquiry', color: '#0369a1' };
+      default:
+        return { label: status, color: '#475569' };
+    }
+  };
+
   return (
-    <div>
-      <div className="page-header">
+    <div style={{ paddingBottom: '2rem' }}>
+      {/* Executive Header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '1rem',
+          marginBottom: '1.5rem',
+          paddingBottom: '1.15rem',
+          borderBottom: '1px solid #e2e8f0'
+        }}
+      >
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.25rem' }}>
-            <span
-              className="role-tag-badge"
-              style={{ background: role === 'super_admin' ? '#4f46e5' : '#e11d48', color: '#fff', fontSize: '0.75rem' }}
-            >
-              {role === 'super_admin' ? 'SUPER ADMIN MASTER DASHBOARD' : 'OWNER EXECUTIVE DASHBOARD'}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.45rem',
+              fontSize: '0.78rem',
+              color: '#64748b',
+              fontWeight: 500,
+              marginBottom: '0.35rem',
+              flexWrap: 'wrap'
+            }}
+          >
+            <span style={{ color: '#0f172a', fontWeight: 600 }}>
+              {role === 'super_admin' ? 'Super Admin' : 'Owner'}
             </span>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Logged in as: <strong>{currentUser?.full_name}</strong> {role === 'super_admin' && '(Stealth Mode)'}
-            </span>
+            <span aria-hidden="true">·</span>
+            <span>Calicut</span>
+            {currentUser?.full_name && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>{currentUser.full_name}</span>
+              </>
+            )}
           </div>
-          <h1 className="page-title">Executive Overview &amp; Control</h1>
-          <p className="page-subtitle">
-            Executive control and overview across events, sales, invoices, menus, and staff operations.
-          </p>
+          <h1
+            style={{
+              fontSize: 'clamp(1.55rem, 2.4vw, 1.95rem)',
+              fontWeight: 700,
+              color: '#0f172a',
+              letterSpacing: '-0.025em',
+              lineHeight: 1.15,
+              margin: 0
+            }}
+          >
+            Business Overview
+          </h1>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <Link href="/events" className="btn btn-primary">
-            + New Event Inquiry
-          </Link>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
           <Link
             href="/pnl"
             className="btn btn-secondary"
-            style={{ background: '#fff1f2', borderColor: '#fecdd3', color: '#be123c', fontWeight: 700 }}
+            style={{ whiteSpace: 'nowrap', fontWeight: 600 }}
           >
-            📈 Profit &amp; Loss (Owner)
+            Profit &amp; Loss
           </Link>
-          <Link href="/invoices" className="btn btn-secondary">
-            🧾 Invoices
+          <Link
+            href="/invoices"
+            className="btn btn-secondary"
+            style={{ whiteSpace: 'nowrap', fontWeight: 600 }}
+          >
+            Invoices
           </Link>
-          <Link href="/users" className="btn btn-secondary">
-            🛡️ User Logins
+          <Link
+            href="/events"
+            className="btn btn-primary"
+            style={{ whiteSpace: 'nowrap', fontWeight: 600 }}
+          >
+            + New Event
           </Link>
         </div>
       </div>
 
-      {/* PWA App Install Banner */}
+      {/* PWA Install Prompt (shows only when installable) */}
       <PWAInstallBanner />
 
-      {/* Top Executive KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
-        <div className="stats-card">
-          <span className="stats-label">Total Projected Sales</span>
-          <span className="stats-value">₹{totalSales.toLocaleString('en-IN')}</span>
-          <span className="stats-sub">Across {chartData.length} active booking months</span>
-        </div>
-
-        <div className="stats-card">
-          <span className="stats-label">Current Active Banquets</span>
-          <span className="stats-value" style={{ color: 'var(--success)' }}>
-            {activeEvents.length}
-          </span>
-          <span className="stats-sub">Confirmed &amp; in-progress functions</span>
-        </div>
-
-        <div className="stats-card">
-          <span className="stats-label">Upcoming Banquet Pipeline</span>
-          <span className="stats-value" style={{ color: 'var(--primary)' }}>
-            {upcomingEvents.length}
-          </span>
-          <span className="stats-sub">{totalUpcomingPax} total expected pax</span>
-        </div>
-
-        <div className="stats-card">
-          <span className="stats-label">Vendor Dues</span>
-          <span className="stats-value" style={{ color: totalVendorDues > 0 ? '#dc2626' : 'var(--success)' }}>
-            ₹{totalVendorDues.toLocaleString('en-IN')}
-          </span>
-          <span className="stats-sub">
-            <Link href="/stock" style={{ color: 'var(--primary)', textDecoration: 'underline' }}>
-              Manage Stock Purchases &rarr;
-            </Link>
-          </span>
-        </div>
-
-        <div className="stats-card">
-          <span className="stats-label">Staff Salary Payable</span>
-          <span className="stats-value" style={{ color: totalStaffSalaryPayable > 0 ? '#dc2626' : 'var(--success)' }}>
-            ₹{totalStaffSalaryPayable.toLocaleString('en-IN')}
-          </span>
-          <span className="stats-sub">
-            Paid: ₹{totalStaffSalaryPaid.toLocaleString('en-IN')} &bull;{' '}
-            <Link href="/staff" style={{ color: 'var(--primary)', textDecoration: 'underline' }}>
-              Staff &amp; Salary &rarr;
-            </Link>
-          </span>
-        </div>
-      </div>
-
-      {/* Owner-Only Completed Events Profit & Loss Executive Card */}
-      <div
-        className="card"
-        style={{
-          marginBottom: '1.5rem',
-          borderLeft: `4px solid ${ownerPnlTotals.netProfit >= 0 ? '#16a34a' : '#dc2626'}`,
-          background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)'
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '0.75rem',
-            flexWrap: 'wrap',
-            marginBottom: '0.85rem'
-          }}
-        >
+      {/* Row 1: 4 Streamlined KPI Cards */}
+      <div className="owner-kpi-grid">
+        {/* 1. Total Revenue */}
+        <div className="owner-kpi-card">
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <h2 className="card-title" style={{ margin: 0 }}>
-                📈 Completed Events Profit &amp; Loss Summary
-              </h2>
-              <span
-                className="badge"
-                style={{ background: '#ffe4e6', color: '#be123c', fontWeight: 800, fontSize: '0.68rem' }}
-              >
-                🔒 OWNER ONLY
-              </span>
+            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
+              Total Revenue
             </div>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>
-              Across {completedOwnerEvents.length} completed event{completedOwnerEvents.length === 1 ? '' : 's'} — includes Stock Pricing, Extras Cost, Staff Shifts + All Allowances, and Other Expenses.
-            </p>
-          </div>
-          <Link href="/pnl" className="btn btn-primary btn-sm" style={{ fontWeight: 700 }}>
-            Open Full Profit &amp; Loss Module &rarr;
-          </Link>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.85rem' }}>
-          <div style={{ padding: '0.75rem 0.9rem', background: '#ffffff', borderRadius: '8px', border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
-              Completed Event Revenue
-            </div>
-            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', marginTop: '0.2rem' }}>
-              ₹{ownerPnlTotals.revenue.toLocaleString('en-IN')}
+            <div
+              className="tabular-nums"
+              style={{
+                fontSize: '1.75rem',
+                fontWeight: 700,
+                color: '#0f172a',
+                letterSpacing: '-0.02em',
+                marginTop: '0.35rem',
+                lineHeight: 1.15
+              }}
+            >
+              ₹{totalSales.toLocaleString('en-IN')}
             </div>
           </div>
-
-          <div style={{ padding: '0.75rem 0.9rem', background: '#fff1f2', borderRadius: '8px', border: '1px solid #fecdd3' }}>
-            <div style={{ fontSize: '0.75rem', color: '#9f1239', fontWeight: 700, textTransform: 'uppercase' }}>
-              Total Spent (incl. Allowances)
-            </div>
-            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#be123c', marginTop: '0.2rem' }}>
-              ₹{ownerPnlTotals.expenditure.toLocaleString('en-IN')}
-            </div>
-          </div>
-
           <div
+            className="tabular-nums"
             style={{
-              padding: '0.75rem 0.9rem',
-              background: ownerPnlTotals.netProfit >= 0 ? '#f0fdf4' : '#fef2f2',
-              borderRadius: '8px',
-              border: `1px solid ${ownerPnlTotals.netProfit >= 0 ? '#bbf7d0' : '#fecaca'}`
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontSize: '0.78rem',
+              color: '#64748b',
+              marginTop: '0.85rem',
+              paddingTop: '0.65rem',
+              borderTop: '1px solid #f1f5f9'
             }}
           >
+            <span>Collected ₹{totalPaid.toLocaleString('en-IN')}</span>
+            <Link
+              href="/invoices"
+              style={{ color: '#0f172a', fontWeight: 600, whiteSpace: 'nowrap' }}
+            >
+              Invoices &rarr;
+            </Link>
+          </div>
+        </div>
+
+        {/* 2. Completed Events Profit & Loss (Owner-Only) */}
+        <div className="owner-kpi-card">
+          <div>
             <div
               style={{
-                fontSize: '0.75rem',
-                color: ownerPnlTotals.netProfit >= 0 ? '#166534' : '#991b1b',
-                fontWeight: 700,
-                textTransform: 'uppercase'
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '0.4rem'
               }}
             >
-              {ownerPnlTotals.netProfit >= 0 ? 'Net Profit (ലാഭം)' : 'Net Loss (നഷ്ടം)'}
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
+                Net {isProfitPositive ? 'Profit' : 'Loss'} (Completed)
+              </span>
+              <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 500 }}>
+                Owner only
+              </span>
             </div>
             <div
+              className="tabular-nums"
               style={{
-                fontSize: '1.35rem',
-                fontWeight: 800,
-                color: ownerPnlTotals.netProfit >= 0 ? '#15803d' : '#dc2626',
-                marginTop: '0.2rem'
+                fontSize: '1.75rem',
+                fontWeight: 700,
+                color: isProfitPositive ? '#15803d' : '#dc2626',
+                letterSpacing: '-0.02em',
+                marginTop: '0.35rem',
+                lineHeight: 1.15
               }}
             >
-              {ownerPnlTotals.netProfit >= 0 ? '+' : '-'}₹
+              {isProfitPositive ? '+' : '-'}₹
               {Math.abs(ownerPnlTotals.netProfit).toLocaleString('en-IN')}
             </div>
           </div>
+          <div
+            className="tabular-nums"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontSize: '0.78rem',
+              color: '#64748b',
+              marginTop: '0.85rem',
+              paddingTop: '0.65rem',
+              borderTop: '1px solid #f1f5f9'
+            }}
+          >
+            <span>
+              Spent ₹{ownerPnlTotals.expenditure.toLocaleString('en-IN')} ({completedOwnerEvents.length})
+            </span>
+            <Link
+              href="/pnl"
+              style={{ color: '#e11d48', fontWeight: 600, whiteSpace: 'nowrap' }}
+            >
+              P&amp;L report &rarr;
+            </Link>
+          </div>
+        </div>
+
+        {/* 3. Upcoming Events */}
+        <div className="owner-kpi-card">
+          <div>
+            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
+              Upcoming Events
+            </div>
+            <div
+              className="tabular-nums"
+              style={{
+                fontSize: '1.75rem',
+                fontWeight: 700,
+                color: '#0f172a',
+                letterSpacing: '-0.02em',
+                marginTop: '0.35rem',
+                lineHeight: 1.15
+              }}
+            >
+              {upcomingEvents.length}
+            </div>
+          </div>
+          <div
+            className="tabular-nums"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontSize: '0.78rem',
+              color: '#64748b',
+              marginTop: '0.85rem',
+              paddingTop: '0.65rem',
+              borderTop: '1px solid #f1f5f9'
+            }}
+          >
+            <span>
+              {activeEvents.length} confirmed · {totalUpcomingPax.toLocaleString('en-IN')} guests
+            </span>
+            <Link
+              href="/events"
+              style={{ color: '#0f172a', fontWeight: 600, whiteSpace: 'nowrap' }}
+            >
+              Schedule &rarr;
+            </Link>
+          </div>
+        </div>
+
+        {/* 4. Pending Payables (Vendors + Staff) */}
+        <div className="owner-kpi-card">
+          <div>
+            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
+              Pending Payables
+            </div>
+            <div
+              className="tabular-nums"
+              style={{
+                fontSize: '1.75rem',
+                fontWeight: 700,
+                color: totalPayables > 0 ? '#dc2626' : '#0f172a',
+                letterSpacing: '-0.02em',
+                marginTop: '0.35rem',
+                lineHeight: 1.15
+              }}
+            >
+              ₹{totalPayables.toLocaleString('en-IN')}
+            </div>
+          </div>
+          <div
+            className="tabular-nums"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontSize: '0.78rem',
+              color: '#64748b',
+              marginTop: '0.85rem',
+              paddingTop: '0.65rem',
+              borderTop: '1px solid #f1f5f9'
+            }}
+          >
+            <span>
+              Vendors ₹{totalVendorDues.toLocaleString('en-IN')} · Staff ₹
+              {totalStaffSalaryPayable.toLocaleString('en-IN')}
+            </span>
+            <Link
+              href="/staff"
+              style={{ color: '#0f172a', fontWeight: 600, whiteSpace: 'nowrap' }}
+            >
+              Payroll &rarr;
+            </Link>
+          </div>
         </div>
       </div>
 
-      {/* Bank vs Cash & Destination Account Holdings */}
-      <InvoiceCollectionsCard
-        breakdown={store.getInvoiceCollectionsBreakdown()}
-        showInvoicesLink
-      />
+      {/* Row 2: Balanced 2-Column Split — Monthly Revenue Chart + Collections & Accounts */}
+      <div className="owner-exec-split">
+        {/* Left: Monthly Revenue BarChart */}
+        <div
+          className="owner-clean-card"
+          style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: '0.75rem',
+              flexWrap: 'wrap',
+              marginBottom: '1.15rem'
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  fontSize: '1.05rem',
+                  fontWeight: 700,
+                  color: '#0f172a',
+                  margin: 0
+                }}
+              >
+                Monthly Revenue
+              </h2>
+              <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.15rem' }}>
+                Booked catering &amp; event volume in INR
+              </p>
+            </div>
 
-      {/* Monthly Total Sales Graph for Owner */}
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
+            {chartData.length > 6 && (
+              <div className="owner-segmented-group">
+                <button
+                  type="button"
+                  onClick={() => setOwnerChartRange('6m')}
+                  className={`owner-segmented-btn ${ownerChartRange === '6m' ? 'active' : ''}`}
+                >
+                  Last 6 Months
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOwnerChartRange('all')}
+                  className={`owner-segmented-btn ${ownerChartRange === 'all' ? 'active' : ''}`}
+                >
+                  All ({chartData.length})
+                </button>
+              </div>
+            )}
+          </div>
+
+          {displayedChartData.length === 0 ? (
+            <div
+              style={{
+                height: 260,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.6rem',
+                color: '#64748b',
+                fontSize: '0.88rem'
+              }}
+            >
+              <span>No catering bookings recorded yet.</span>
+              <Link href="/events" className="btn btn-primary btn-sm">
+                + Create First Event
+              </Link>
+            </div>
+          ) : !isMounted ? (
+            <div
+              style={{
+                height: 260,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#94a3b8',
+                fontSize: '0.85rem'
+              }}
+            >
+              Loading revenue chart...
+            </div>
+          ) : (
+            <div style={{ height: 265, width: '100%' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={displayedChartData}
+                  margin={{ top: 8, right: 8, left: 0, bottom: 8 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis
+                    dataKey="month"
+                    tick={{ fontSize: 12, fill: '#64748b' }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
+                    tick={{ fontSize: 12, fill: '#64748b' }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={52}
+                  />
+                  <Tooltip
+                    cursor={{ fill: '#f8fafc' }}
+                    formatter={(val: any) => [
+                      `₹${Number(val).toLocaleString('en-IN')}`,
+                      'Revenue'
+                    ]}
+                    contentStyle={{
+                      background: '#0f172a',
+                      color: '#ffffff',
+                      borderRadius: '8px',
+                      border: 'none',
+                      fontSize: '0.82rem',
+                      padding: '8px 12px'
+                    }}
+                  />
+                  <Bar dataKey="sales" fill="#e11d48" radius={[6, 6, 0, 0]} maxBarSize={44} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+
+        {/* Right: Collections & Accounts Summary */}
+        <div
+          className="owner-clean-card"
+          style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}
+        >
+          <div>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '0.9rem'
+              }}
+            >
+              <div>
+                <h2
+                  style={{
+                    fontSize: '1.05rem',
+                    fontWeight: 700,
+                    color: '#0f172a',
+                    margin: 0
+                  }}
+                >
+                  Collections &amp; Accounts
+                </h2>
+                <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.15rem' }}>
+                  Bank vs cash receipts and active balances
+                </p>
+              </div>
+              <Link
+                href="/invoices"
+                style={{ fontSize: '0.8rem', fontWeight: 600, color: '#e11d48', whiteSpace: 'nowrap' }}
+              >
+                Manage &rarr;
+              </Link>
+            </div>
+
+            {/* Total Collected Figure + Proportional Channel Bar */}
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <span
+                  className="tabular-nums"
+                  style={{ fontSize: '1.55rem', fontWeight: 700, color: '#0f172a' }}
+                >
+                  ₹{collectionsBreakdown.totalCollected.toLocaleString('en-IN')}
+                </span>
+                <span className="tabular-nums" style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                  of ₹{collectionsBreakdown.totalInvoiced.toLocaleString('en-IN')} invoiced
+                </span>
+              </div>
+
+              <div
+                style={{
+                  height: '6px',
+                  width: '100%',
+                  background: '#f1f5f9',
+                  borderRadius: '999px',
+                  overflow: 'hidden',
+                  display: 'flex',
+                  marginTop: '0.6rem'
+                }}
+              >
+                {bankSharePct > 0 && (
+                  <div style={{ width: `${bankSharePct}%`, background: '#1d4ed8' }} />
+                )}
+                {cashSharePct > 0 && (
+                  <div style={{ width: `${cashSharePct}%`, background: '#059669' }} />
+                )}
+              </div>
+            </div>
+
+            {/* Clean Hairline Breakdown Rows */}
+            <div style={{ borderTop: '1px solid #f1f5f9' }}>
+              <div
+                className="tabular-nums"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '0.55rem 0',
+                  borderBottom: '1px solid #f1f5f9',
+                  fontSize: '0.84rem'
+                }}
+              >
+                <span style={{ color: '#475569' }}>
+                  Bank Accounts ({bankSharePct}%)
+                </span>
+                <span style={{ fontWeight: 600, color: '#0f172a' }}>
+                  ₹{collectionsBreakdown.totalBankReceived.toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              <div
+                className="tabular-nums"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '0.55rem 0',
+                  borderBottom: '1px solid #f1f5f9',
+                  fontSize: '0.84rem'
+                }}
+              >
+                <span style={{ color: '#475569' }}>
+                  Cash in Hand ({cashSharePct}%)
+                </span>
+                <span style={{ fontWeight: 600, color: '#0f172a' }}>
+                  ₹{collectionsBreakdown.totalCashReceived.toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              <div
+                className="tabular-nums"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '0.55rem 0',
+                  fontSize: '0.84rem'
+                }}
+              >
+                <span style={{ color: '#475569' }}>Pending From Clients</span>
+                <span
+                  style={{
+                    fontWeight: 700,
+                    color:
+                      collectionsBreakdown.totalPendingReceivable > 0
+                        ? '#dc2626'
+                        : '#15803d'
+                  }}
+                >
+                  ₹{collectionsBreakdown.totalPendingReceivable.toLocaleString('en-IN')}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Compact Destination Account Balances */}
+          {collectionsBreakdown.accountHoldings.length > 0 && (
+            <div
+              style={{
+                marginTop: '0.85rem',
+                paddingTop: '0.75rem',
+                borderTop: '1px solid #e2e8f0'
+              }}
+            >
+              <div
+                style={{
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  color: '#64748b',
+                  marginBottom: '0.45rem'
+                }}
+              >
+                Account Balances
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                {collectionsBreakdown.accountHoldings.slice(0, 4).map((acc) => (
+                  <div
+                    key={`${acc.channel}-${acc.accountName}`}
+                    className="tabular-nums"
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      fontSize: '0.82rem'
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: '#334155',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        maxWidth: '65%'
+                      }}
+                    >
+                      {acc.accountName}
+                    </span>
+                    <span style={{ fontWeight: 600, color: '#0f172a' }}>
+                      ₹{acc.totalReceived.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Row 3: Upcoming Schedule */}
+      <div className="owner-clean-card" style={{ padding: 0, overflow: 'hidden' }}>
         <div
           style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginBottom: '1rem',
+            padding: '1.2rem 1.5rem',
+            borderBottom: '1px solid #e2e8f0',
             flexWrap: 'wrap',
-            gap: '0.5rem'
+            gap: '0.75rem'
           }}
         >
           <div>
-            <h2 className="card-title" style={{ margin: 0 }}>
-              Monthly Total Sales Amount
+            <h2
+              style={{
+                fontSize: '1.05rem',
+                fontWeight: 700,
+                color: '#0f172a',
+                margin: 0
+              }}
+            >
+              Upcoming Schedule
             </h2>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-              Monthly revenue distribution from catering orders and banquet contracts
-            </p>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                fontSize: '0.8rem',
+                color: '#64748b',
+                marginTop: '0.15rem',
+                flexWrap: 'wrap'
+              }}
+            >
+              <span>{upcomingEvents.length} scheduled events</span>
+              <span aria-hidden="true">·</span>
+              {lowStockItems.length > 0 ? (
+                <Link href="/stock" style={{ color: '#dc2626', fontWeight: 600 }}>
+                  {lowStockItems.length} low-stock item{lowStockItems.length === 1 ? '' : 's'} &rarr;
+                </Link>
+              ) : (
+                <span>Inventory healthy</span>
+              )}
+            </div>
           </div>
-          <span className="badge" style={{ background: '#f1f5f9', fontSize: '0.8rem' }}>
-            Amounts in INR (₹)
-          </span>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Link
+              href="/users"
+              className="btn btn-secondary btn-sm"
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              Team Access
+            </Link>
+            <Link
+              href="/events"
+              className="btn btn-secondary btn-sm"
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              All Events ({state.events.length}) &rarr;
+            </Link>
+          </div>
         </div>
 
-        {chartData.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No events booked yet.</p>
-        ) : !isMounted ? (
+        {upcomingEvents.length === 0 ? (
           <div
             style={{
-              height: 280,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--text-muted)'
+              padding: '2.25rem 1.5rem',
+              textAlign: 'center',
+              color: '#64748b',
+              fontSize: '0.9rem'
             }}
           >
-            Loading chart...
+            <div style={{ marginBottom: '0.75rem' }}>
+              No upcoming events scheduled at the moment.
+            </div>
+            <Link href="/events" className="btn btn-primary btn-sm">
+              + Schedule Event
+            </Link>
           </div>
         ) : (
-          <div style={{ height: 280, width: '100%' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} stroke="#64748b" />
-                <YAxis
-                  tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
-                  tick={{ fontSize: 12 }}
-                  stroke="#64748b"
-                />
-                <Tooltip
-                  formatter={(val: any) => [`₹${Number(val).toLocaleString('en-IN')}`, 'Sales Revenue']}
-                  contentStyle={{
-                    background: '#0f172a',
-                    color: '#fff',
-                    borderRadius: '8px',
-                    border: 'none',
-                    fontSize: '0.85rem'
-                  }}
-                />
-                <Bar dataKey="sales" fill="#e11d48" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          <div style={{ width: '100%', overflowX: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Event &amp; Venue</th>
+                  <th>Client</th>
+                  <th style={{ textAlign: 'right' }}>Guests</th>
+                  <th style={{ textAlign: 'right' }}>Value</th>
+                  <th style={{ textAlign: 'right' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {upcomingEvents.slice(0, 6).map((evt) => {
+                  const client = state.clients.find((c) => c.id === evt.client_id);
+                  const { grandTotal } = store.getEventTotal(evt.id);
+                  const statusMeta = formatEventStatus(evt.status);
+
+                  return (
+                    <tr key={evt.id}>
+                      <td className="tabular-nums" style={{ whiteSpace: 'nowrap' }}>
+                        <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                          {new Date(evt.event_date).toLocaleDateString('en-GB', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric'
+                          })}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                          {evt.start_time || '18:00'}
+                        </div>
+                      </td>
+                      <td>
+                        <Link
+                          href={`/events/${evt.id}`}
+                          style={{
+                            fontWeight: 600,
+                            color: '#0f172a',
+                            textDecoration: 'none'
+                          }}
+                        >
+                          {evt.title}
+                        </Link>
+                        <div style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                          {evt.venue || 'Calicut'}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 500, color: '#0f172a' }}>
+                          {client?.name || '—'}
+                        </div>
+                        {client?.phone && (
+                          <div
+                            className="tabular-nums"
+                            style={{ fontSize: '0.75rem', color: '#64748b' }}
+                          >
+                            {client.phone}
+                          </div>
+                        )}
+                      </td>
+                      <td
+                        className="tabular-nums"
+                        style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}
+                      >
+                        {evt.guest_count.toLocaleString('en-IN')}
+                      </td>
+                      <td
+                        className="tabular-nums"
+                        style={{ textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}
+                      >
+                        ₹{grandTotal.toLocaleString('en-IN')}
+                      </td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <span
+                          style={{
+                            fontSize: '0.8rem',
+                            fontWeight: 600,
+                            color: statusMeta.color
+                          }}
+                        >
+                          {statusMeta.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
 
-      {/* Financial Overview (Invoicing & Settlements) */}
-      <div className="grid-3" style={{ marginBottom: '1.5rem' }}>
-        <div className="stats-card">
-          <span className="stats-label">Total Invoiced Amount</span>
-          <span className="stats-value">₹{totalInvoiced.toLocaleString('en-IN')}</span>
-          <span className="stats-sub">{state.invoices.length} invoices generated</span>
-        </div>
-        <div className="stats-card">
-          <span className="stats-label">Payments Reconciled</span>
-          <span className="stats-value" style={{ color: 'var(--success)' }}>
-            ₹{totalPaid.toLocaleString('en-IN')}
-          </span>
-          <span className="stats-sub">Deposited to bank &amp; cash</span>
-        </div>
-        <div className="stats-card">
-          <span className="stats-label">Pending Receivables</span>
-          <span className="stats-value" style={{ color: totalPending > 0 ? 'var(--danger)' : 'var(--text-main)' }}>
-            ₹{totalPending.toLocaleString('en-IN')}
-          </span>
-          <span className="stats-sub">Outstanding balance to collect</span>
-        </div>
-      </div>
-
-      {/* Upcoming Events for Owner */}
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <div>
-            <h2 className="card-title" style={{ margin: 0 }}>
-              📅 Upcoming Scheduled Banquets
-            </h2>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-              Confirmed and pending banquet bookings with guest counts and venues
-            </p>
-          </div>
-          <Link href="/events" className="btn btn-secondary btn-sm">
-            View All ({state.events.length}) &rarr;
-          </Link>
-        </div>
-
-        <div className="data-table-container">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Event Date</th>
-                <th>Title &amp; Venue</th>
-                <th>Client</th>
-                <th style={{ textAlign: 'center' }}>Pax Count</th>
-                <th style={{ textAlign: 'right' }}>Total Value</th>
-                <th style={{ textAlign: 'center' }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {upcomingEvents.slice(0, 5).map((evt) => {
-                const client = state.clients.find((c) => c.id === evt.client_id);
-                const { grandTotal } = store.getEventTotal(evt.id);
-                const latestEvtAudit = store.getEventAuditSummary(evt.id).latestAudit;
-
-                return (
-                  <tr key={evt.id}>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>
-                        {new Date(evt.event_date).toLocaleDateString('en-US', {
-                          weekday: 'short',
-                          day: 'numeric',
-                          month: 'short'
-                        })}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        {evt.start_time || '18:00'}
-                      </div>
-                    </td>
-                    <td>
-                      <Link href={`/events/${evt.id}`} style={{ fontWeight: 600, color: 'var(--primary)', textDecoration: 'underline' }}>
-                        {evt.title}
-                      </Link>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        📍 {evt.venue || 'Venue TBD'}
-                      </div>
-                    </td>
-                    <td>
-                      <div>{client?.name}</div>
-                      {client?.phone && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {client.phone}
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ textAlign: 'center', fontWeight: 600 }}>
-                      {evt.guest_count} Pax
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                      ₹{grandTotal.toLocaleString('en-IN')}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span className={`badge badge-${evt.status}`}>{evt.status}</span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Role Access Information */}
-      <div className="card">
-        <h2 className="card-title">🛡️ System Modules &amp; Permissions</h2>
-        <div className={role === 'super_admin' ? 'grid-4' : 'grid-3'}>
-          {role === 'super_admin' && (
-            <div
-              style={{
-                padding: '0.85rem',
-                border: '1.5px solid #4f46e5',
-                borderRadius: '8px',
-                background: '#eef2ff'
-              }}
-            >
-              <div style={{ fontWeight: 700, color: '#4f46e5', marginBottom: '0.25rem' }}>
-                ⚡ Super Admin (Stealth Mode)
-              </div>
-              <p style={{ fontSize: '0.8rem', color: '#3730a3' }}>
-                Supreme system control. Invisible to Owner, Manager, and Staff. Full authority over user credentials, records, and database audits.
-              </p>
-            </div>
-          )}
-
-          <div
-            style={{
-              padding: '0.85rem',
-              border: '1px solid var(--border)',
-              borderRadius: '8px',
-              background: '#fff'
-            }}
-          >
-            <div style={{ fontWeight: 700, color: '#e11d48', marginBottom: '0.25rem' }}>
-              👑 1. Owner
-            </div>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Full administrative access across all modules: sales reports, invoices, pricing, stock, staff, and system user passwords.
-            </p>
-          </div>
-
-          <div
-            style={{
-              padding: '0.85rem',
-              border: '1px solid var(--border)',
-              borderRadius: '8px',
-              background: '#fff'
-            }}
-          >
-            <div style={{ fontWeight: 700, color: '#2563eb', marginBottom: '0.25rem' }}>
-              📋 2. Manager
-            </div>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Dedicated operational dashboard focusing on upcoming banquet events, pax scheduling, menu items, raw stock inventory, and staff crew.
-            </p>
-          </div>
-
-          <div
-            style={{
-              padding: '0.85rem',
-              border: '1px solid var(--border)',
-              borderRadius: '8px',
-              background: '#fff'
-            }}
-          >
-            <div style={{ fontWeight: 700, color: '#059669', marginBottom: '0.25rem' }}>
-              💼 3. Accountant
-            </div>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              Dedicated financial dashboard displaying total monthly sales, payment collections, outstanding balances, and upcoming works billing details.
-            </p>
-          </div>
-        </div>
-      </div>
       <ChangePasswordModal
         isOpen={isChangePasswordOpen}
         onClose={() => setIsChangePasswordOpen(false)}

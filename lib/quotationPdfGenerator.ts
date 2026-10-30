@@ -2,6 +2,7 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { EventRecord } from '@/lib/types';
 import { store, AppState } from '@/lib/store';
+import { sharePdfWithCaptionToWhatsApp } from '@/lib/whatsappDeviceShare';
 
 function escapeHtml(val?: string | number | null): string {
   return String(val ?? '')
@@ -63,7 +64,7 @@ export async function generateQuotationPdfBlob(
               ${escapeHtml(state.settings.name || 'IPPAS FOOD SERVICE & EVENTS')}
             </div>
             <div style="font-size: 0.8rem; color: #64748b;">
-              ${escapeHtml(state.settings.address || 'Outdoor Catering • Event Management • Kerala')}
+              ${escapeHtml(state.settings.address || 'Outdoor Catering • Event Management • Calicut')}
             </div>
             <div style="font-size: 0.75rem; color: #64748b;">
               Phone: ${escapeHtml(state.settings.phone || '+91 98470 11111')} &bull; Email: ${escapeHtml(state.settings.email || 'events@ippas.com')}
@@ -396,12 +397,13 @@ export function formatWhatsAppQuotationMessage(
 }
 
 /**
- * Shares Quotation A4 PDF directly to Client's WhatsApp (attaches PDF via Web Share API on mobile,
- * or downloads PDF + opens WhatsApp chat on desktop).
+ * Shares Quotation A4 PDF + formatted text caption directly to Client's WhatsApp on smartphones,
+ * or downloads PDF + opens WhatsApp chat with text pre-attached on desktop/laptop browsers.
  */
 export async function shareQuotationPdfToWhatsApp(
   event: EventRecord,
-  state: AppState
+  state: AppState,
+  prebuiltPdf?: { blob: Blob; file: File; quoteNumber: string }
 ): Promise<{
   success: boolean;
   sharedDirectlyWithFile: boolean;
@@ -411,11 +413,11 @@ export async function shareQuotationPdfToWhatsApp(
 }> {
   const liveEvent = state.events.find((e) => e.id === event.id) || event;
   const client = state.clients.find((c) => c.id === liveEvent.client_id);
-  const quoteNumber = store.getQuotationNumber(liveEvent);
+  const quoteNumber = prebuiltPdf?.quoteNumber || store.getQuotationNumber(liveEvent);
   const messageText = formatWhatsAppQuotationMessage(liveEvent, state);
   const cleanPhone = normalizeWhatsAppPhone(client?.phone);
 
-  const pdfResult = await generateQuotationPdfBlob(liveEvent, state);
+  const pdfResult = prebuiltPdf || (await generateQuotationPdfBlob(liveEvent, state));
   if (!pdfResult) {
     return {
       success: false,
@@ -425,46 +427,21 @@ export async function shareQuotationPdfToWhatsApp(
     };
   }
 
-  // Mark inquiry as 'quoted' when sending quotation to client
+  const shareOutcome = await sharePdfWithCaptionToWhatsApp({
+    file: pdfResult.file,
+    blob: pdfResult.blob,
+    filename: `${quoteNumber}.pdf`,
+    messageText,
+    cleanPhone
+  });
+
+  // Mark inquiry as 'quoted' after initiating client quotation share
   if (liveEvent.status === 'inquiry') {
     store.updateEvent(liveEvent.id, { status: 'quoted' });
   }
 
-  const { file, blob } = pdfResult;
-
-  if (
-    typeof navigator !== 'undefined' &&
-    typeof navigator.canShare === 'function' &&
-    navigator.canShare({ files: [file] })
-  ) {
-    try {
-      await navigator.share({
-        files: [file],
-        title: `Quotation ${quoteNumber}`,
-        text: messageText
-      });
-      return { success: true, sharedDirectlyWithFile: true, quoteNumber, file };
-    } catch (shareErr: any) {
-      if (shareErr?.name === 'AbortError') {
-        return { success: true, sharedDirectlyWithFile: true, quoteNumber, file };
-      }
-      console.warn('Native share failed, falling back to download + WhatsApp link:', shareErr);
-    }
-  }
-
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${quoteNumber}.pdf`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-
-  const waUrl = cleanPhone
-    ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}`
-    : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
-  window.open(waUrl, '_blank', 'noopener,noreferrer');
-
-  return { success: true, sharedDirectlyWithFile: false, quoteNumber, file };
+  return {
+    ...shareOutcome,
+    quoteNumber
+  };
 }

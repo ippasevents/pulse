@@ -343,7 +343,7 @@ export function buildStaffSalarySlipHtml(
                 ${escapeHtml(businessName)}
               </div>
               <div style="font-size: 0.78rem; color: #475569;">
-                ${escapeHtml(state.settings.address || 'Outdoor Catering & Event Management • Kerala')}
+                ${escapeHtml(state.settings.address || 'Outdoor Catering • Event Management • Calicut')}
               </div>
               <div style="font-size: 0.74rem; color: #64748b;">
                 Phone: ${escapeHtml(state.settings.phone || '+91 98470 11111')} &bull; Email: ${escapeHtml(state.settings.email || 'events@ippas.com')}
