@@ -6,14 +6,59 @@ import { store } from '@/lib/store';
 import { Ingredient, StockPurchase, StockPaymentStatus, StockPurchaseItem } from '@/lib/types';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 
+const NEAR_EXPIRY_DAYS = 14;
+
+function getIngredientExpiryStatus(expiryDate?: string): {
+  status: 'none' | 'expired' | 'expiring_soon' | 'fresh';
+  daysUntil: number | null;
+  formattedDate: string;
+} {
+  if (!expiryDate || !expiryDate.trim()) {
+    return { status: 'none', daysUntil: null, formattedDate: '—' };
+  }
+  const clean = expiryDate.trim().slice(0, 10);
+  const parts = clean.split('-').map(Number);
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) {
+    return { status: 'none', daysUntil: null, formattedDate: clean };
+  }
+  const [y, m, d] = parts;
+  const expDateObj = new Date(y, m - 1, d);
+  const now = new Date();
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const daysUntil = Math.round((expDateObj.getTime() - todayMidnight) / 86400000);
+  const formattedDate = expDateObj.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
+
+  if (daysUntil < 0) {
+    return { status: 'expired', daysUntil, formattedDate };
+  }
+  if (daysUntil <= NEAR_EXPIRY_DAYS) {
+    return { status: 'expiring_soon', daysUntil, formattedDate };
+  }
+  return { status: 'fresh', daysUntil, formattedDate };
+}
+
 export default function StockPage() {
   const [state, setState] = useState(store.getState());
   const [activeTab, setActiveTab] = useState<'inventory' | 'purchases'>('inventory');
 
   // Search & Filter state
   const [search, setSearch] = useState('');
+  const [inventoryFilter, setInventoryFilter] = useState<'all' | 'low_stock' | 'expiring'>('all');
   const [purchaseStatusFilter, setPurchaseStatusFilter] = useState<'all' | 'unpaid' | 'partially_paid' | 'paid'>('all');
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
+
+  // Bulk Update state
+  const [selectedIngIds, setSelectedIngIds] = useState<string[]>([]);
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkDirection, setBulkDirection] = useState<'add' | 'deduct'>('add');
+  const [bulkAmount, setBulkAmount] = useState<number>(10);
+  const [bulkModalSearch, setBulkModalSearch] = useState('');
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkFeedback, setBulkFeedback] = useState<string | null>(null);
 
   // Ingredient modal state
   const [isIngModalOpen, setIsIngModalOpen] = useState(false);
@@ -23,7 +68,8 @@ export default function StockPage() {
     unit: 'kg',
     cost_per_unit: 100,
     stock_qty: 50,
-    low_stock_level: 15
+    low_stock_level: 15,
+    expiry_date: ''
   });
 
   // Purchase modal state
@@ -82,10 +128,30 @@ export default function StockPage() {
   const canManageStock = role === 'owner' || role === 'manager' || role === 'super_admin';
 
   // Calculations for Inventory
-  const filteredIngredients = state.ingredients.filter((i) =>
-    i.name.toLowerCase().includes(search.toLowerCase())
-  );
   const lowStockItems = state.ingredients.filter((i) => i.stock_qty <= i.low_stock_level);
+  const expiringItems = state.ingredients
+    .filter((i) => {
+      const exp = getIngredientExpiryStatus(i.expiry_date);
+      return exp.status === 'expired' || exp.status === 'expiring_soon';
+    })
+    .sort((a, b) => (a.expiry_date || '').localeCompare(b.expiry_date || ''));
+
+  const filteredIngredients = state.ingredients.filter((i) => {
+    const matchesSearch = i.name.toLowerCase().includes(search.toLowerCase());
+    if (!matchesSearch) return false;
+    if (inventoryFilter === 'low_stock') {
+      return i.stock_qty <= i.low_stock_level;
+    }
+    if (inventoryFilter === 'expiring') {
+      const exp = getIngredientExpiryStatus(i.expiry_date);
+      return exp.status === 'expired' || exp.status === 'expiring_soon';
+    }
+    return true;
+  });
+
+  const allVisibleSelected =
+    filteredIngredients.length > 0 &&
+    filteredIngredients.every((item) => selectedIngIds.includes(item.id));
 
   // Calculations for Purchases
   const purchasesList = state.stockPurchases || [];
@@ -113,17 +179,72 @@ export default function StockPage() {
     if (!ingFormData.name) return;
 
     if (editingIng) {
-      store.updateIngredient(editingIng.id, ingFormData);
+      store.updateIngredient(editingIng.id, {
+        ...ingFormData,
+        expiry_date: ingFormData.expiry_date.trim()
+      });
     } else {
-      store.addIngredient(ingFormData);
+      store.addIngredient({
+        ...ingFormData,
+        expiry_date: ingFormData.expiry_date.trim() || undefined
+      });
     }
     setIsIngModalOpen(false);
     setEditingIng(null);
-    setIngFormData({ name: '', unit: 'kg', cost_per_unit: 100, stock_qty: 50, low_stock_level: 15 });
+    setIngFormData({
+      name: '',
+      unit: 'kg',
+      cost_per_unit: 100,
+      stock_qty: 50,
+      low_stock_level: 15,
+      expiry_date: ''
+    });
   };
 
   const handleAdjust = (id: string, delta: number) => {
     store.adjustStock(id, delta);
+  };
+
+  const toggleSelectIngredient = (id: string) => {
+    setSelectedIngIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+    setBulkError(null);
+  };
+
+  const toggleSelectAllVisible = () => {
+    const visibleIds = filteredIngredients.map((i) => i.id);
+    if (allVisibleSelected) {
+      setSelectedIngIds((prev) => prev.filter((id) => !visibleIds.includes(id)));
+    } else {
+      setSelectedIngIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    }
+    setBulkError(null);
+  };
+
+  const handleApplyBulkUpdate = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const validIds = selectedIngIds.filter((id) =>
+      state.ingredients.some((ing) => ing.id === id)
+    );
+    if (validIds.length === 0) {
+      setBulkError('Please select at least one ingredient to update.');
+      return;
+    }
+    const rawAmt = Math.abs(Number(bulkAmount));
+    if (!Number.isFinite(rawAmt) || rawAmt <= 0) {
+      setBulkError('Please enter a stock adjustment amount greater than 0.');
+      return;
+    }
+
+    const signedDelta = bulkDirection === 'deduct' ? -rawAmt : rawAmt;
+    const updatedCount = store.bulkAdjustStock(validIds, signedDelta);
+    setBulkError(null);
+    setIsBulkModalOpen(false);
+    setSelectedIngIds([]);
+    setBulkFeedback(
+      `✓ Bulk update applied (${signedDelta > 0 ? `+${signedDelta}` : signedDelta}) across ${updatedCount} ingredient${updatedCount === 1 ? '' : 's'}.`
+    );
   };
 
   // Handlers for Purchases
@@ -265,16 +386,58 @@ export default function StockPage() {
           {canManageStock && (
             <>
               {activeTab === 'inventory' ? (
-                <button
-                  onClick={() => {
-                    setEditingIng(null);
-                    setIngFormData({ name: '', unit: 'kg', cost_per_unit: 100, stock_qty: 50, low_stock_level: 15 });
-                    setIsIngModalOpen(true);
-                  }}
-                  className="btn btn-primary"
-                >
-                  + Add Raw Ingredient
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkError(null);
+                      setBulkModalSearch('');
+                      setIsBulkModalOpen(true);
+                    }}
+                    className="btn btn-secondary"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      fontWeight: 700,
+                      borderColor: selectedIngIds.length > 0 ? '#6366f1' : undefined,
+                      background: selectedIngIds.length > 0 ? '#eef2ff' : undefined,
+                      color: selectedIngIds.length > 0 ? '#3730a3' : undefined
+                    }}
+                  >
+                    ⚡ Bulk Update
+                    {selectedIngIds.length > 0 && (
+                      <span
+                        style={{
+                          background: '#4f46e5',
+                          color: '#ffffff',
+                          fontSize: '0.72rem',
+                          padding: '1px 7px',
+                          borderRadius: '10px'
+                        }}
+                      >
+                        {selectedIngIds.length}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingIng(null);
+                      setIngFormData({
+                        name: '',
+                        unit: 'kg',
+                        cost_per_unit: 100,
+                        stock_qty: 50,
+                        low_stock_level: 15,
+                        expiry_date: ''
+                      });
+                      setIsIngModalOpen(true);
+                    }}
+                    className="btn btn-primary"
+                  >
+                    + Add Raw Ingredient
+                  </button>
+                </>
               ) : (
                 <button
                   onClick={() => setIsPurchaseModalOpen(true)}
@@ -290,7 +453,7 @@ export default function StockPage() {
       </div>
 
       {/* Tabs navigation */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', borderBottom: '2px solid #e2e8f0', paddingBottom: '0.5rem' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', borderBottom: '2px solid #e2e8f0', paddingBottom: '0.5rem', flexWrap: 'wrap' }}>
         <button
           onClick={() => setActiveTab('inventory')}
           style={{
@@ -309,6 +472,11 @@ export default function StockPage() {
           {lowStockItems.length > 0 && (
             <span style={{ marginLeft: '0.5rem', background: '#ef4444', color: '#fff', fontSize: '0.72rem', padding: '2px 7px', borderRadius: '10px' }}>
               {lowStockItems.length} Low
+            </span>
+          )}
+          {expiringItems.length > 0 && (
+            <span style={{ marginLeft: '0.4rem', background: '#ea580c', color: '#fff', fontSize: '0.72rem', padding: '2px 7px', borderRadius: '10px' }}>
+              {expiringItems.length} Expiring
             </span>
           )}
         </button>
@@ -341,6 +509,84 @@ export default function StockPage() {
       {/* ========================================================================= */}
       {activeTab === 'inventory' && (
         <div>
+          {bulkFeedback && (
+            <div
+              style={{
+                background: '#dcfce7',
+                border: '1px solid #86efac',
+                color: '#166534',
+                borderRadius: '8px',
+                padding: '0.75rem 1rem',
+                marginBottom: '1rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '0.75rem',
+                fontSize: '0.88rem',
+                fontWeight: 600
+              }}
+            >
+              <span>{bulkFeedback}</span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setBulkFeedback(null)}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {expiringItems.length > 0 && (
+            <div
+              style={{
+                background: '#fff7ed',
+                border: '1px solid #fdba74',
+                borderRadius: '8px',
+                padding: '1rem',
+                marginBottom: '1rem'
+              }}
+            >
+              <div style={{ fontWeight: 700, color: '#9a3412', marginBottom: '0.3rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <span>
+                  ⏳ Expiration Alert ({expiringItems.length} item{expiringItems.length === 1 ? '' : 's'} expired or nearing expiration within {NEAR_EXPIRY_DAYS} days)
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setInventoryFilter(inventoryFilter === 'expiring' ? 'all' : 'expiring')
+                  }
+                  style={{
+                    background: inventoryFilter === 'expiring' ? '#9a3412' : '#ffedd5',
+                    color: inventoryFilter === 'expiring' ? '#ffffff' : '#9a3412',
+                    border: '1px solid #fb923c',
+                    borderRadius: '6px',
+                    padding: '3px 10px',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {inventoryFilter === 'expiring' ? 'Show All Items' : 'Filter Expiring Items'}
+                </button>
+              </div>
+              <div style={{ fontSize: '0.85rem', color: '#c2410c' }}>
+                {expiringItems
+                  .map((i) => {
+                    const exp = getIngredientExpiryStatus(i.expiry_date);
+                    const statusNote =
+                      exp.status === 'expired'
+                        ? `EXPIRED ${Math.abs(exp.daysUntil || 0)}d ago (${exp.formattedDate})`
+                        : exp.daysUntil === 0
+                        ? `EXPIRES TODAY (${exp.formattedDate})`
+                        : `in ${exp.daysUntil}d (${exp.formattedDate})`;
+                    return `${i.name} — ${i.stock_qty} ${i.unit} [${statusNote}]`;
+                  })
+                  .join(' • ')}
+              </div>
+            </div>
+          )}
+
           {lowStockItems.length > 0 && (
             <div
               style={{
@@ -360,25 +606,188 @@ export default function StockPage() {
             </div>
           )}
 
-          <div className="card" style={{ marginBottom: '1.25rem', padding: '1rem' }}>
-            <input
-              type="text"
-              placeholder="Search pantry ingredients (e.g. Basmati, Mutton, Ghee)..."
-              className="form-control"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+          <div
+            className="card"
+            style={{
+              marginBottom: '1.25rem',
+              padding: '1rem',
+              display: 'flex',
+              gap: '0.75rem',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}
+          >
+            <div style={{ flex: '1', minWidth: '240px' }}>
+              <input
+                type="text"
+                placeholder="Search pantry ingredients (e.g. Basmati, Mutton, Ghee)..."
+                className="form-control"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>Show:</span>
+              <button
+                type="button"
+                onClick={() => setInventoryFilter('all')}
+                style={{
+                  padding: '5px 11px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: inventoryFilter === 'all' ? '#0f172a' : '#ffffff',
+                  color: inventoryFilter === 'all' ? '#ffffff' : '#334155',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                All ({state.ingredients.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setInventoryFilter('low_stock')}
+                style={{
+                  padding: '5px 11px',
+                  borderRadius: '6px',
+                  border: '1px solid #fde68a',
+                  background: inventoryFilter === 'low_stock' ? '#d97706' : '#fffbeb',
+                  color: inventoryFilter === 'low_stock' ? '#ffffff' : '#92400e',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                ⚠️ Low Stock ({lowStockItems.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setInventoryFilter('expiring')}
+                style={{
+                  padding: '5px 11px',
+                  borderRadius: '6px',
+                  border: '1px solid #fdba74',
+                  background: inventoryFilter === 'expiring' ? '#ea580c' : '#fff7ed',
+                  color: inventoryFilter === 'expiring' ? '#ffffff' : '#9a3412',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                ⏳ Nearing Expiry ({expiringItems.length})
+              </button>
+            </div>
           </div>
+
+          {canManageStock && selectedIngIds.length > 0 && (
+            <div
+              className="card"
+              style={{
+                marginBottom: '1rem',
+                padding: '0.85rem 1rem',
+                background: '#eef2ff',
+                border: '1.5px solid #818cf8',
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    background: '#4f46e5',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                    fontSize: '0.8rem',
+                    padding: '0.25rem 0.65rem',
+                    borderRadius: '6px'
+                  }}
+                >
+                  {selectedIngIds.length} Selected
+                </span>
+                <span style={{ fontSize: '0.86rem', fontWeight: 700, color: '#1e1b4b' }}>
+                  Bulk Stock Adjustment:
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <select
+                  className="form-control"
+                  style={{ width: 'auto', padding: '0.38rem 0.6rem', fontSize: '0.84rem', fontWeight: 600 }}
+                  value={bulkDirection}
+                  onChange={(e) => setBulkDirection(e.target.value as 'add' | 'deduct')}
+                >
+                  <option value="add">+ Add Stock</option>
+                  <option value="deduct">− Deduct Stock</option>
+                </select>
+
+                <input
+                  type="number"
+                  min="0.01"
+                  step="any"
+                  className="form-control"
+                  style={{ width: '110px', padding: '0.38rem 0.6rem', fontSize: '0.86rem', fontWeight: 700 }}
+                  placeholder="Qty"
+                  value={bulkAmount || ''}
+                  onChange={(e) => setBulkAmount(parseFloat(e.target.value) || 0)}
+                />
+
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  style={{ fontWeight: 700 }}
+                  onClick={() => handleApplyBulkUpdate()}
+                >
+                  ⚡ Apply ({bulkDirection === 'deduct' ? '-' : '+'}{Math.abs(Number(bulkAmount) || 0)})
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setBulkError(null);
+                    setIsBulkModalOpen(true);
+                  }}
+                >
+                  Preview
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setSelectedIngIds([])}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="data-table-container">
             <table className="data-table">
               <thead>
                 <tr>
+                  {canManageStock && (
+                    <th style={{ width: '42px', textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        onChange={toggleSelectAllVisible}
+                        title="Select all visible ingredients for Bulk Update"
+                        style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                      />
+                    </th>
+                  )}
                   <th>Ingredient Name</th>
                   <th>Unit</th>
                   <th style={{ textAlign: 'right' }}>Cost / Unit</th>
                   <th style={{ textAlign: 'right' }}>Current Stock</th>
                   <th style={{ textAlign: 'right' }}>Low Stock Alert Level</th>
+                  <th style={{ textAlign: 'center' }}>Expiry Date</th>
                   <th style={{ textAlign: 'center' }}>Stock Health</th>
                   {canManageStock && <th style={{ textAlign: 'center' }}>Quick Adjust</th>}
                   {canManageStock && <th style={{ textAlign: 'center' }}>Edit</th>}
@@ -387,15 +796,38 @@ export default function StockPage() {
               <tbody>
                 {filteredIngredients.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                      No ingredients found in stock.
+                    <td colSpan={canManageStock ? 10 : 7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                      No matching ingredients found in stock.
                     </td>
                   </tr>
                 ) : (
                   filteredIngredients.map((item) => {
                     const isLow = item.stock_qty <= item.low_stock_level;
+                    const exp = getIngredientExpiryStatus(item.expiry_date);
+                    const isSelected = selectedIngIds.includes(item.id);
+                    const rowBg = isSelected
+                      ? '#eef2ff'
+                      : exp.status === 'expired'
+                      ? '#fef2f2'
+                      : exp.status === 'expiring_soon'
+                      ? '#fff7ed'
+                      : isLow
+                      ? '#fffbeb'
+                      : 'transparent';
+
                     return (
-                      <tr key={item.id} style={{ background: isLow ? '#fffbeb' : 'transparent' }}>
+                      <tr key={item.id} style={{ background: rowBg }}>
+                        {canManageStock && (
+                          <td style={{ textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelectIngredient(item.id)}
+                              aria-label={`Select ${item.name}`}
+                              style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                            />
+                          </td>
+                        )}
                         <td>
                           <div style={{ fontWeight: 600 }}>{item.name}</div>
                           {role === 'owner' && (
@@ -413,6 +845,46 @@ export default function StockPage() {
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>
                           {item.low_stock_level} {item.unit}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {exp.status === 'none' ? (
+                            <span style={{ color: '#94a3b8', fontSize: '0.82rem' }}>—</span>
+                          ) : exp.status === 'expired' ? (
+                            <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                              <span
+                                className="badge"
+                                style={{ background: '#fee2e2', color: '#991b1b', fontWeight: 700 }}
+                              >
+                                🚨 Expired ({Math.abs(exp.daysUntil || 0)}d ago)
+                              </span>
+                              <span style={{ fontSize: '0.73rem', color: '#b91c1c', fontWeight: 600 }}>
+                                {exp.formattedDate}
+                              </span>
+                            </div>
+                          ) : exp.status === 'expiring_soon' ? (
+                            <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                              <span
+                                className="badge"
+                                style={{ background: '#ffedd5', color: '#c2410c', fontWeight: 700 }}
+                              >
+                                {exp.daysUntil === 0
+                                  ? '⚠️ Expires Today'
+                                  : `⏳ Expiring in ${exp.daysUntil}d`}
+                              </span>
+                              <span style={{ fontSize: '0.73rem', color: '#9a3412', fontWeight: 600 }}>
+                                {exp.formattedDate}
+                              </span>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '1px' }}>
+                              <span style={{ fontSize: '0.83rem', fontWeight: 600, color: '#0f172a' }}>
+                                {exp.formattedDate}
+                              </span>
+                              <span style={{ fontSize: '0.72rem', color: '#15803d' }}>
+                                ✓ {exp.daysUntil}d left
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           {isLow ? (
@@ -470,7 +942,8 @@ export default function StockPage() {
                                   unit: item.unit,
                                   cost_per_unit: item.cost_per_unit,
                                   stock_qty: item.stock_qty,
-                                  low_stock_level: item.low_stock_level
+                                  low_stock_level: item.low_stock_level,
+                                  expiry_date: item.expiry_date || ''
                                 });
                                 setIsIngModalOpen(true);
                               }}
@@ -830,12 +1303,347 @@ export default function StockPage() {
                 </div>
               </div>
 
+              <div className="form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label className="form-label">Expiry Date (Optional)</label>
+                  {ingFormData.expiry_date && (
+                    <button
+                      type="button"
+                      onClick={() => setIngFormData({ ...ingFormData, expiry_date: '' })}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#dc2626',
+                        fontSize: '0.76rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        padding: 0
+                      }}
+                    >
+                      Clear Date
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={ingFormData.expiry_date}
+                  onChange={(e) => setIngFormData({ ...ingFormData, expiry_date: e.target.value })}
+                />
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+                  Items within {NEAR_EXPIRY_DAYS} days of expiry are automatically flagged in the inventory table.
+                </div>
+              </div>
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsIngModalOpen(false)}>
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary">
                   {editingIng ? 'Update Stock Item' : 'Add to Warehouse'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: BULK UPDATE STOCK QUANTITIES                                       */}
+      {/* ========================================================================= */}
+      {isBulkModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsBulkModalOpen(false)}>
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '640px', width: '96%', maxHeight: '90vh', overflowY: 'auto' }}
+          >
+            <div className="modal-header">
+              <div>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                  ⚡ Bulk Update Warehouse Stock
+                </h2>
+                <p style={{ fontSize: '0.82rem', color: '#64748b', margin: '0.2rem 0 0 0' }}>
+                  Select multiple ingredients and apply a uniform stock adjustment amount at once.
+                </p>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => setIsBulkModalOpen(false)}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleApplyBulkUpdate}>
+              {bulkError && (
+                <div
+                  style={{
+                    background: '#fee2e2',
+                    border: '1px solid #fca5a5',
+                    color: '#991b1b',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '6px',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    marginBottom: '0.85rem'
+                  }}
+                >
+                  {bulkError}
+                </div>
+              )}
+
+              {/* Step 1: Uniform Stock Adjustment Controls */}
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  padding: '0.95rem 1rem',
+                  marginBottom: '1rem'
+                }}
+              >
+                <div className="grid-2" style={{ gap: '0.75rem' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label">Adjustment Type *</label>
+                    <select
+                      className="form-control"
+                      value={bulkDirection}
+                      onChange={(e) => setBulkDirection(e.target.value as 'add' | 'deduct')}
+                    >
+                      <option value="add">+ Add to Current Stock</option>
+                      <option value="deduct">− Deduct from Current Stock</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label">Uniform Adjustment Amount *</label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="any"
+                      className="form-control"
+                      value={bulkAmount || ''}
+                      onChange={(e) => {
+                        setBulkAmount(parseFloat(e.target.value) || 0);
+                        setBulkError(null);
+                      }}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.65rem', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, marginRight: '0.2rem' }}>
+                    Quick presets:
+                  </span>
+                  {[
+                    { dir: 'add' as const, amt: 5, label: '+5' },
+                    { dir: 'add' as const, amt: 10, label: '+10' },
+                    { dir: 'add' as const, amt: 25, label: '+25' },
+                    { dir: 'add' as const, amt: 50, label: '+50' },
+                    { dir: 'deduct' as const, amt: 1, label: '-1' },
+                    { dir: 'deduct' as const, amt: 5, label: '-5' },
+                    { dir: 'deduct' as const, amt: 10, label: '-10' }
+                  ].map((preset) => {
+                    const isActive = bulkDirection === preset.dir && Number(bulkAmount) === preset.amt;
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => {
+                          setBulkDirection(preset.dir);
+                          setBulkAmount(preset.amt);
+                        }}
+                        style={{
+                          padding: '3px 9px',
+                          borderRadius: '6px',
+                          border: isActive ? '1px solid #4f46e5' : '1px solid #cbd5e1',
+                          background: isActive ? '#4f46e5' : '#ffffff',
+                          color: isActive ? '#ffffff' : '#334155',
+                          fontSize: '0.76rem',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Step 2: Select Multiple Ingredients */}
+              <div style={{ marginBottom: '1rem' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem',
+                    marginBottom: '0.5rem'
+                  }}
+                >
+                  <label className="form-label" style={{ margin: 0, fontWeight: 700 }}>
+                    Select Ingredients ({selectedIngIds.length} of {state.ingredients.length} selected)
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+                      onClick={() => {
+                        setSelectedIngIds(state.ingredients.map((i) => i.id));
+                        setBulkError(null);
+                      }}
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+                      onClick={() => {
+                        setSelectedIngIds(lowStockItems.map((i) => i.id));
+                        setBulkError(null);
+                      }}
+                    >
+                      Select Low Stock ({lowStockItems.length})
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+                      onClick={() => setSelectedIngIds([])}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Filter ingredients inside list..."
+                  style={{ marginBottom: '0.5rem', fontSize: '0.84rem', padding: '0.45rem 0.65rem' }}
+                  value={bulkModalSearch}
+                  onChange={(e) => setBulkModalSearch(e.target.value)}
+                />
+
+                <div
+                  style={{
+                    maxHeight: '260px',
+                    overflowY: 'auto',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '8px',
+                    background: '#ffffff'
+                  }}
+                >
+                  {state.ingredients
+                    .filter((ing) =>
+                      ing.name.toLowerCase().includes(bulkModalSearch.toLowerCase())
+                    )
+                    .map((ing) => {
+                      const checked = selectedIngIds.includes(ing.id);
+                      const delta =
+                        bulkDirection === 'deduct'
+                          ? -Math.abs(Number(bulkAmount) || 0)
+                          : Math.abs(Number(bulkAmount) || 0);
+                      const nextStock = Math.max(0, Number((ing.stock_qty + delta).toFixed(3)));
+                      const exp = getIngredientExpiryStatus(ing.expiry_date);
+
+                      return (
+                        <label
+                          key={ing.id}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: '0.65rem',
+                            padding: '0.55rem 0.75rem',
+                            borderBottom: '1px solid #f1f5f9',
+                            background: checked ? '#eef2ff' : '#ffffff',
+                            cursor: 'pointer',
+                            fontSize: '0.85rem'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleSelectIngredient(ing.id)}
+                              style={{ width: '16px', height: '16px' }}
+                            />
+                            <div>
+                              <span style={{ fontWeight: 700, color: '#0f172a' }}>{ing.name}</span>
+                              {ing.stock_qty <= ing.low_stock_level && (
+                                <span
+                                  style={{
+                                    marginLeft: '0.45rem',
+                                    fontSize: '0.7rem',
+                                    background: '#fef3c7',
+                                    color: '#b45309',
+                                    padding: '1px 6px',
+                                    borderRadius: '8px',
+                                    fontWeight: 600
+                                  }}
+                                >
+                                  Low
+                                </span>
+                              )}
+                              {(exp.status === 'expired' || exp.status === 'expiring_soon') && (
+                                <span
+                                  style={{
+                                    marginLeft: '0.35rem',
+                                    fontSize: '0.7rem',
+                                    background: exp.status === 'expired' ? '#fee2e2' : '#ffedd5',
+                                    color: exp.status === 'expired' ? '#991b1b' : '#c2410c',
+                                    padding: '1px 6px',
+                                    borderRadius: '8px',
+                                    fontWeight: 600
+                                  }}
+                                >
+                                  {exp.status === 'expired' ? 'Expired' : `Exp ${exp.daysUntil}d`}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div style={{ textAlign: 'right', fontSize: '0.82rem' }}>
+                            <span style={{ color: '#64748b' }}>
+                              {ing.stock_qty} {ing.unit}
+                            </span>
+                            {checked && delta !== 0 && (
+                              <span
+                                style={{
+                                  marginLeft: '0.4rem',
+                                  fontWeight: 800,
+                                  color: delta > 0 ? '#15803d' : '#dc2626'
+                                }}
+                              >
+                                &rarr; {nextStock} {ing.unit}
+                              </span>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsBulkModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ fontWeight: 700 }}
+                  disabled={selectedIngIds.length === 0 || !(Number(bulkAmount) > 0)}
+                >
+                  ⚡ Apply Bulk Update ({selectedIngIds.length} Item{selectedIngIds.length === 1 ? '' : 's'})
                 </button>
               </div>
             </form>

@@ -48,6 +48,7 @@ export interface Ingredient {
   cost_per_unit: number;
   stock_qty: number;
   low_stock_level: number;
+  expiry_date?: string;
 }
 
 export type StockPaymentStatus = 'paid' | 'partially_paid' | 'unpaid';

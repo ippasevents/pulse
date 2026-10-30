@@ -134,12 +134,14 @@ create table if not exists ingredients (
   unit text not null default 'kg',
   cost_per_unit numeric(10,2) not null default 0,
   stock_qty numeric(12,3) not null default 0,
-  low_stock_level numeric(12,3) not null default 0
+  low_stock_level numeric(12,3) not null default 0,
+  expiry_date date
 );
 
 alter table ingredients
   add column if not exists stock_qty numeric(12,3) not null default 0,
-  add column if not exists low_stock_level numeric(12,3) not null default 0;
+  add column if not exists low_stock_level numeric(12,3) not null default 0,
+  add column if not exists expiry_date date;
 
 create table if not exists menu_items (
   id uuid primary key default gen_random_uuid(),

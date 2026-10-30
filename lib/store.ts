@@ -1300,8 +1300,24 @@ class DataStore {
       unit: i.unit || 'kg',
       cost_per_unit: Number(i.cost_per_unit || 0),
       stock_qty: Number(i.stock_qty || 0),
-      low_stock_level: Number(i.low_stock_level || 0)
+      low_stock_level: Number(i.low_stock_level || 0),
+      expiry_date: i.expiry_date || null
     };
+  }
+
+  private resolveIngredientExpiryFromLogs(
+    ingredientId: string,
+    logs: AuditLogEntry[]
+  ): string | null | undefined {
+    for (const log of logs) {
+      if (log.entity_id === ingredientId && log.details) {
+        const match = log.details.match(/Expiry:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|None)/i);
+        if (match) {
+          return match[1].toLowerCase() === 'none' ? null : match[1];
+        }
+      }
+    }
+    return undefined;
   }
 
   private toMenuItemSqlRow(m: MenuItem) {
@@ -2148,14 +2164,45 @@ class DataStore {
           notes: c.notes || '',
           created_at: c.created_at || new Date().toISOString()
         })),
-        ingredients: (ingredientsRes?.data || []).map((i: any) => ({
-          id: i.id,
-          name: i.name,
-          unit: i.unit || 'kg',
-          cost_per_unit: Number(i.cost_per_unit || 0),
-          stock_qty: Number(i.stock_qty || 0),
-          low_stock_level: Number(i.low_stock_level || 0)
-        })),
+        ingredients: (ingredientsRes?.data || []).map((i: any) => {
+          const existingLocal = this.state.ingredients.find((old) => old.id === i.id);
+          const rawDbExpiry = i.expiry_date ? String(i.expiry_date).slice(0, 10) : undefined;
+          let resolvedExpiry = rawDbExpiry;
+          if (!resolvedExpiry && !activityLogsRes?.error) {
+            const rawLogs = (activityLogsRes?.data || []) as any[];
+            for (const al of rawLogs) {
+              if (String(al.entity_id || '') === String(i.id) && al.details) {
+                const m = String(al.details).match(/Expiry:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|None)/i);
+                if (m) {
+                  resolvedExpiry = m[1].toLowerCase() === 'none' ? undefined : m[1];
+                  break;
+                }
+              }
+            }
+          }
+          if (resolvedExpiry === undefined && rawDbExpiry === undefined) {
+            const localAuditCheck = this.resolveIngredientExpiryFromLogs(
+              i.id,
+              (this.state.auditLogs || []).filter(
+                (localLog) => Date.now() - new Date(localLog.created_at).getTime() < 10000
+              )
+            );
+            if (localAuditCheck !== undefined) {
+              resolvedExpiry = localAuditCheck || undefined;
+            } else if (existingLocal?.expiry_date) {
+              resolvedExpiry = existingLocal.expiry_date;
+            }
+          }
+          return {
+            id: i.id,
+            name: i.name,
+            unit: i.unit || 'kg',
+            cost_per_unit: Number(i.cost_per_unit || 0),
+            stock_qty: Number(i.stock_qty || 0),
+            low_stock_level: Number(i.low_stock_level || 0),
+            expiry_date: resolvedExpiry
+          };
+        }),
         menuItems: (menuItemsRes?.data || []).map((m: any) => {
           const unitPrice = Number(m.price_per_unit ?? m.price_per_guest ?? 0);
           return {
@@ -3560,14 +3607,19 @@ class DataStore {
 
   // Stock / Ingredients
   public addIngredient(ing: Omit<Ingredient, 'id'>) {
-    const newIng: Ingredient = { ...ing, id: generateUUID() };
+    const cleanExpiry = ing.expiry_date ? ing.expiry_date.trim() : undefined;
+    const newIng: Ingredient = {
+      ...ing,
+      expiry_date: cleanExpiry || undefined,
+      id: generateUUID()
+    };
     this.state.ingredients.push(newIng);
     this.logMutation({
       entity_type: 'stock',
       entity_id: newIng.id,
       action: 'create',
       summary: `Added stock item "${newIng.name}" (${newIng.stock_qty} ${newIng.unit})`,
-      details: `Unit Cost: ₹${newIng.cost_per_unit}/${newIng.unit}`
+      details: `Unit Cost: ₹${newIng.cost_per_unit}/${newIng.unit} • Expiry: ${newIng.expiry_date || 'None'}`
     });
     this.save();
 
@@ -3582,7 +3634,11 @@ class DataStore {
     let updatedIng: Ingredient | undefined;
     this.state.ingredients = this.state.ingredients.map((i) => {
       if (i.id !== id) return i;
-      updatedIng = { ...i, ...updates };
+      const nextExpiry =
+        updates.expiry_date !== undefined
+          ? updates.expiry_date.trim() || undefined
+          : i.expiry_date;
+      updatedIng = { ...i, ...updates, expiry_date: nextExpiry };
       return updatedIng;
     });
     if (updatedIng) {
@@ -3591,7 +3647,7 @@ class DataStore {
         entity_id: id,
         action: 'update',
         summary: `Updated stock item "${updatedIng.name}"`,
-        details: `Qty: ${updatedIng.stock_qty} ${updatedIng.unit} • Cost: ₹${updatedIng.cost_per_unit}`
+        details: `Qty: ${updatedIng.stock_qty} ${updatedIng.unit} • Cost: ₹${updatedIng.cost_per_unit} • Expiry: ${updatedIng.expiry_date || 'None'}`
       });
     }
     this.save();
@@ -3647,6 +3703,59 @@ class DataStore {
         { type: 'upsert', table: 'ingredients', values: this.toIngredientSqlRow(updatedIng), onConflict: 'id' }
       ]);
     }
+  }
+
+  public bulkAdjustStock(ids: string[], delta: number): number {
+    if (!ids || ids.length === 0 || !Number.isFinite(delta) || delta === 0) {
+      return 0;
+    }
+    const targetSet = new Set(ids);
+    const updatedItems: Ingredient[] = [];
+
+    this.state.ingredients = this.state.ingredients.map((i) => {
+      if (!targetSet.has(i.id)) return i;
+      const next = Math.max(0, Number((i.stock_qty + delta).toFixed(3)));
+      const updated = { ...i, stock_qty: next };
+      updatedItems.push(updated);
+      this.recentLocalMutations.set(i.id, Date.now());
+      return updated;
+    });
+
+    if (updatedItems.length === 0) return 0;
+
+    const signLabel = delta >= 0 ? `+${delta}` : `${delta}`;
+    const previewNames = updatedItems
+      .slice(0, 5)
+      .map((it) => `${it.name} (${it.stock_qty} ${it.unit})`)
+      .join(', ');
+    const moreSuffix =
+      updatedItems.length > 5 ? ` +${updatedItems.length - 5} more` : '';
+
+    this.logMutation({
+      entity_type: 'stock',
+      entity_id: updatedItems.length === 1 ? updatedItems[0].id : 'bulk_stock',
+      action: 'update',
+      summary: `Bulk adjusted stock (${signLabel}) across ${updatedItems.length} ingredient${updatedItems.length === 1 ? '' : 's'}`,
+      details: `Updated balances: ${previewNames}${moreSuffix}`
+    });
+    this.save();
+
+    const validRows = updatedItems
+      .filter((it) => isValidUUID(it.id))
+      .map((it) => this.toIngredientSqlRow(it));
+
+    if (validRows.length > 0) {
+      this.enqueueSqlOperations('Bulk Adjust Stock Quantity', [
+        {
+          type: 'upsert',
+          table: 'ingredients',
+          values: validRows,
+          onConflict: 'id'
+        }
+      ]);
+    }
+
+    return updatedItems.length;
   }
 
   // Stock Purchases & Vendor Dues Tracking

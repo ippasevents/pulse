@@ -356,6 +356,7 @@ function buildDatasetSheets() {
     Unit: i.unit,
     'Current Stock': i.stock_qty,
     'Low Stock Alert Level': i.low_stock_level,
+    'Expiry Date': i.expiry_date || '—',
     'Cost Per Unit (INR)': i.cost_per_unit,
     'Stock Valuation (INR)': Math.round(i.stock_qty * i.cost_per_unit),
     Status: i.stock_qty <= i.low_stock_level ? 'LOW STOCK' : 'OK'
