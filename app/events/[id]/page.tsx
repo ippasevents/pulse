@@ -13,6 +13,7 @@ import QuotationWhatsAppModal from '@/components/QuotationWhatsAppModal';
 import StaffWhatsAppModal from '@/components/StaffWhatsAppModal';
 import { Shift } from '@/lib/types';
 import { formatDisplayWhatsAppPhone } from '@/lib/staffWhatsApp';
+import { exportEventStockShortageCsv } from '@/lib/inventoryCsvExport';
 
 export default function EventDetailPage() {
   const params = useParams();
@@ -753,6 +754,23 @@ export default function EventDetailPage() {
             <button
               type="button"
               className="btn btn-secondary btn-sm"
+              style={{ background: '#ffffff', borderColor: '#fca5a5', color: '#b91c1c', fontWeight: 700 }}
+              onClick={() => {
+                const res = exportEventStockShortageCsv(event.id);
+                if (res) {
+                  setStatusBanner({
+                    type: 'success',
+                    message: `📥 Exported "${res.filename}" (${res.shortageCount} shortage items for vendor ordering).`
+                  });
+                }
+              }}
+              title="Export Event Stock & Vendor Shortage List as CSV"
+            >
+              📥 Export Shortage CSV
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
               style={{ fontWeight: 600 }}
               onClick={() => setActiveTab('stock')}
             >
@@ -1380,6 +1398,33 @@ export default function EventDetailPage() {
                     onClick={handleOpenShortageOrderModal}
                   >
                     📦 Place Purchase Order
+                  </button>
+                )}
+                {stockEst.items.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontWeight: 700,
+                      background: '#f0fdf4',
+                      borderColor: '#86efac',
+                      color: '#15803d'
+                    }}
+                    onClick={() => {
+                      const res = exportEventStockShortageCsv(event.id);
+                      if (res) {
+                        setStatusBanner({
+                          type: 'success',
+                          message: `📥 Exported "${res.filename}" (${res.totalItems} items, ${res.shortageCount} shortage items).`
+                        });
+                      }
+                    }}
+                    title="Export Event Stock & Vendor Shortage List as CSV"
+                  >
+                    📥 Export Inventory &amp; Shortage CSV
                   </button>
                 )}
                 <button

@@ -7,12 +7,13 @@
 -- 1. ENUM TYPES (IDEMPOTENT)
 -- ============================================================================
 do $$ begin
-  create type user_role as enum ('owner', 'chef', 'staff', 'manager', 'accountant');
+  create type user_role as enum ('owner', 'chef', 'staff', 'manager', 'accountant', 'super_admin');
 exception when duplicate_object then null;
 end $$;
 
 alter type user_role add value if not exists 'manager';
 alter type user_role add value if not exists 'accountant';
+alter type user_role add value if not exists 'super_admin';
 
 do $$ begin
   create type event_status as enum ('inquiry', 'quoted', 'confirmed', 'completed', 'cancelled');
@@ -63,9 +64,9 @@ alter table business_settings
   add column if not exists auto_email_invoices boolean default true,
   add column if not exists invoice_notification_email text default 'ippasevents@gmail.com';
 
-insert into business_settings (id, name, auto_email_invoices, invoice_notification_email)
-values (1, 'IPPAS Food Service & Events', true, 'ippasevents@gmail.com')
-on conflict (id) do nothing;
+insert into business_settings (id, name)
+values (1, 'IPPAS Food Service & Events')
+on conflict do nothing;
 
 -- Profiles (decoupled from auth.users so custom Username & Password accounts sync cleanly)
 create table if not exists profiles (
@@ -87,12 +88,13 @@ alter table profiles
   add column if not exists role_title text,
   add column if not exists hourly_rate numeric(8,2);
 
+-- Bare "on conflict do nothing" prevents duplicate key errors on BOTH id (profiles_pkey) AND username (profiles_username_key)
 insert into profiles (id, username, password, full_name, role, phone)
 values
   ('00000000-0000-4000-8000-000000000001', 'owner', 'owner123', 'Fazil (Owner)', 'owner', '+91 98470 11111'),
   ('00000000-0000-4000-8000-000000000002', 'manager', 'manager123', 'Aisha (Manager)', 'manager', '+91 98470 22222'),
   ('00000000-0000-4000-8000-000000000003', 'accountant', 'accountant123', 'Rahul (Accountant)', 'accountant', '+91 98470 33333')
-on conflict (username) do nothing;
+on conflict do nothing;
 
 -- ============================================================================
 -- 3. CLIENTS & EVENTS
@@ -236,12 +238,16 @@ create table if not exists shifts (
   role_label text,
   starts_at timestamptz not null,
   ends_at timestamptz not null,
+  duty_note text,
+  whatsapp_notified_at timestamptz,
   attendance_status text not null default 'pending' check (attendance_status in ('pending', 'present', 'absent')),
   attendance_marked_at timestamptz
 );
 
 alter table shifts alter column staff_id drop not null;
 alter table shifts add column if not exists staff_member_id uuid references staff_members(id) on delete cascade;
+alter table shifts add column if not exists duty_note text;
+alter table shifts add column if not exists whatsapp_notified_at timestamptz;
 alter table shifts add column if not exists attendance_status text not null default 'pending';
 alter table shifts add column if not exists attendance_marked_at timestamptz;
 alter table shifts drop constraint if exists shifts_check;
@@ -361,7 +367,8 @@ create table if not exists stock_purchase_payments (
 -- ============================================================================
 -- 8. REPORTING VIEWS
 -- ============================================================================
-create or replace view event_totals as
+drop view if exists event_totals cascade;
+create view event_totals as
 select
   e.id as event_id,
   coalesce(
@@ -378,7 +385,8 @@ from events e
 left join event_items ei on ei.event_id = e.id
 group by e.id, e.guest_count;
 
-create or replace view event_ingredient_needs as
+drop view if exists event_ingredient_needs cascade;
+create view event_ingredient_needs as
 select
   ei.event_id,
   i.id as ingredient_id,

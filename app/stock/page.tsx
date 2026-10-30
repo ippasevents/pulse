@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { store } from '@/lib/store';
 import { Ingredient, StockPurchase, StockPaymentStatus, StockPurchaseItem } from '@/lib/types';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
+import { exportWarehouseInventoryAndShortageCsv } from '@/lib/inventoryCsvExport';
 
 const NEAR_EXPIRY_DAYS = 14;
 
@@ -247,6 +248,15 @@ export default function StockPage() {
     );
   };
 
+  const handleExportInventoryCsv = (shortageOnly = false) => {
+    const res = exportWarehouseInventoryAndShortageCsv({ shortageOnly });
+    setBulkFeedback(
+      shortageOnly
+        ? `📥 Downloaded "${res.filename}" (${res.shortageCount} shortage / vendor reorder item${res.shortageCount === 1 ? '' : 's'}).`
+        : `📥 Downloaded "${res.filename}" (${res.inventoryCount} inventory items + ${res.shortageCount} shortage / reorder item${res.shortageCount === 1 ? '' : 's'}).`
+    );
+  };
+
   // Handlers for Purchases
   const handleAddItemRow = () => {
     setPurchaseItems([
@@ -383,6 +393,25 @@ export default function StockPage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {activeTab === 'inventory' && (
+            <button
+              type="button"
+              onClick={() => handleExportInventoryCsv(false)}
+              className="btn btn-secondary"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                fontWeight: 700,
+                background: '#f0fdf4',
+                borderColor: '#86efac',
+                color: '#15803d'
+              }}
+              title="Export current warehouse inventory and vendor shortage / reorder list as CSV"
+            >
+              📥 Export Inventory &amp; Shortage CSV
+            </button>
+          )}
           {canManageStock && (
             <>
               {activeTab === 'inventory' ? (
@@ -597,8 +626,27 @@ export default function StockPage() {
                 marginBottom: '1.25rem'
               }}
             >
-              <div style={{ fontWeight: 700, color: '#92400e', marginBottom: '0.25rem' }}>
-                ⚠️ Low Stock Alert ({lowStockItems.length} items below minimum safety stock)
+              <div style={{ fontWeight: 700, color: '#92400e', marginBottom: '0.3rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <span>
+                  ⚠️ Low Stock Alert ({lowStockItems.length} items below minimum safety stock)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleExportInventoryCsv(true)}
+                  style={{
+                    background: '#fef3c7',
+                    color: '#92400e',
+                    border: '1px solid #f59e0b',
+                    borderRadius: '6px',
+                    padding: '3px 10px',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Download Vendor Shortage & Reorder List as CSV"
+                >
+                  📥 Export Shortage Order CSV
+                </button>
               </div>
               <div style={{ fontSize: '0.85rem', color: '#b45309' }}>
                 {lowStockItems.map((i) => `${i.name} (${i.stock_qty} ${i.unit} left, threshold ${i.low_stock_level} ${i.unit})`).join(' • ')}
@@ -677,6 +725,23 @@ export default function StockPage() {
                 }}
               >
                 ⏳ Nearing Expiry ({expiringItems.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => handleExportInventoryCsv(true)}
+                style={{
+                  padding: '5px 11px',
+                  borderRadius: '6px',
+                  border: '1px solid #86efac',
+                  background: '#f0fdf4',
+                  color: '#15803d',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+                title="Download Shortage & Reorder List Only (CSV)"
+              >
+                📥 Shortage CSV
               </button>
             </div>
           </div>

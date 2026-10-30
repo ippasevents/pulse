@@ -38,7 +38,7 @@ values
   ('00000000-0000-4000-8000-000000000001', 'owner', 'owner123', 'Fazil (Owner)', 'owner', '+91 98470 11111'),
   ('00000000-0000-4000-8000-000000000002', 'manager', 'manager123', 'Aisha (Manager)', 'manager', '+91 98470 22222'),
   ('00000000-0000-4000-8000-000000000003', 'accountant', 'accountant123', 'Rahul (Accountant)', 'accountant', '+91 98470 33333')
-on conflict (username) do nothing;
+on conflict do nothing;
 
 -- 3. Staff Members Phone Login Password & Staff Salary Records
 create table if not exists staff_members (
