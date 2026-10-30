@@ -48,6 +48,7 @@ export default function StockPage() {
 
   // Search & Filter state
   const [search, setSearch] = useState('');
+  const [lowStockOnly, setLowStockOnly] = useState(false);
   const [inventoryFilter, setInventoryFilter] = useState<'all' | 'low_stock' | 'expiring'>('all');
   const [purchaseStatusFilter, setPurchaseStatusFilter] = useState<'all' | 'unpaid' | 'partially_paid' | 'paid'>('all');
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
@@ -137,15 +138,19 @@ export default function StockPage() {
     })
     .sort((a, b) => (a.expiry_date || '').localeCompare(b.expiry_date || ''));
 
+  const isLowStockFilterActive = lowStockOnly || inventoryFilter === 'low_stock';
+
   const filteredIngredients = state.ingredients.filter((i) => {
     const matchesSearch = i.name.toLowerCase().includes(search.toLowerCase());
     if (!matchesSearch) return false;
-    if (inventoryFilter === 'low_stock') {
-      return i.stock_qty <= i.low_stock_level;
+    if (isLowStockFilterActive && i.stock_qty > i.low_stock_level) {
+      return false;
     }
     if (inventoryFilter === 'expiring') {
       const exp = getIngredientExpiryStatus(i.expiry_date);
-      return exp.status === 'expired' || exp.status === 'expiring_soon';
+      if (exp.status !== 'expired' && exp.status !== 'expiring_soon') {
+        return false;
+      }
     }
     return true;
   });
@@ -666,27 +671,79 @@ export default function StockPage() {
               justifyContent: 'space-between'
             }}
           >
-            <div style={{ flex: '1', minWidth: '240px' }}>
-              <input
-                type="text"
-                placeholder="Search pantry ingredients (e.g. Basmati, Mutton, Ghee)..."
-                className="form-control"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', flex: '1', minWidth: '260px' }}>
+              <div style={{ flex: '1', minWidth: '220px' }}>
+                <input
+                  type="text"
+                  placeholder="Search pantry ingredients (e.g. Basmati, Mutton, Ghee)..."
+                  className="form-control"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  border: isLowStockFilterActive ? '1.5px solid #d97706' : '1px solid #cbd5e1',
+                  background: isLowStockFilterActive ? '#fffbeb' : '#f8fafc',
+                  color: isLowStockFilterActive ? '#92400e' : '#0f172a',
+                  fontSize: '0.84rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  whiteSpace: 'nowrap'
+                }}
+                title="Display only ingredients at or below their minimum safety stock threshold"
+              >
+                <input
+                  type="checkbox"
+                  checked={isLowStockFilterActive}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setLowStockOnly(checked);
+                    if (checked && inventoryFilter === 'all') {
+                      setInventoryFilter('low_stock');
+                    } else if (!checked && inventoryFilter === 'low_stock') {
+                      setInventoryFilter('all');
+                    }
+                  }}
+                  style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#d97706' }}
+                />
+                <span>Low Stock Only</span>
+                <span
+                  style={{
+                    background: isLowStockFilterActive ? '#d97706' : '#e2e8f0',
+                    color: isLowStockFilterActive ? '#ffffff' : '#334155',
+                    fontSize: '0.72rem',
+                    padding: '1px 7px',
+                    borderRadius: '10px',
+                    fontWeight: 700
+                  }}
+                >
+                  {lowStockItems.length}
+                </span>
+              </label>
             </div>
 
             <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>Show:</span>
               <button
                 type="button"
-                onClick={() => setInventoryFilter('all')}
+                onClick={() => {
+                  setInventoryFilter('all');
+                  setLowStockOnly(false);
+                }}
                 style={{
                   padding: '5px 11px',
                   borderRadius: '6px',
                   border: '1px solid #cbd5e1',
-                  background: inventoryFilter === 'all' ? '#0f172a' : '#ffffff',
-                  color: inventoryFilter === 'all' ? '#ffffff' : '#334155',
+                  background: inventoryFilter === 'all' && !lowStockOnly ? '#0f172a' : '#ffffff',
+                  color: inventoryFilter === 'all' && !lowStockOnly ? '#ffffff' : '#334155',
                   fontSize: '0.8rem',
                   fontWeight: 600,
                   cursor: 'pointer'
@@ -696,13 +753,21 @@ export default function StockPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setInventoryFilter('low_stock')}
+                onClick={() => {
+                  if (inventoryFilter === 'low_stock' && lowStockOnly) {
+                    setInventoryFilter('all');
+                    setLowStockOnly(false);
+                  } else {
+                    setInventoryFilter('low_stock');
+                    setLowStockOnly(true);
+                  }
+                }}
                 style={{
                   padding: '5px 11px',
                   borderRadius: '6px',
                   border: '1px solid #fde68a',
-                  background: inventoryFilter === 'low_stock' ? '#d97706' : '#fffbeb',
-                  color: inventoryFilter === 'low_stock' ? '#ffffff' : '#92400e',
+                  background: isLowStockFilterActive ? '#d97706' : '#fffbeb',
+                  color: isLowStockFilterActive ? '#ffffff' : '#92400e',
                   fontSize: '0.8rem',
                   fontWeight: 600,
                   cursor: 'pointer'
@@ -712,7 +777,9 @@ export default function StockPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setInventoryFilter('expiring')}
+                onClick={() =>
+                  setInventoryFilter(inventoryFilter === 'expiring' ? (lowStockOnly ? 'low_stock' : 'all') : 'expiring')
+                }
                 style={{
                   padding: '5px 11px',
                   borderRadius: '6px',
@@ -862,7 +929,25 @@ export default function StockPage() {
                 {filteredIngredients.length === 0 ? (
                   <tr>
                     <td colSpan={canManageStock ? 10 : 7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                      No matching ingredients found in stock.
+                      <div>
+                        {isLowStockFilterActive && !search
+                          ? '✓ All pantry ingredients are currently above their safety stock threshold.'
+                          : 'No matching ingredients found in stock.'}
+                      </div>
+                      {(isLowStockFilterActive || inventoryFilter !== 'all' || search) && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ marginTop: '0.65rem' }}
+                          onClick={() => {
+                            setLowStockOnly(false);
+                            setInventoryFilter('all');
+                            setSearch('');
+                          }}
+                        >
+                          Show All Ingredients
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ) : (
