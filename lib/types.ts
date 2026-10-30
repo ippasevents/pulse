@@ -206,9 +206,29 @@ export interface BusinessSettings {
   payment_terms?: string;
 }
 
+export type EventExpenseCategory =
+  | 'stock_pricing'
+  | 'extras_cost'
+  | 'staff_expense'
+  | 'other_expense';
+
+export interface EventExpense {
+  id: string;
+  event_id: string;
+  category: EventExpenseCategory;
+  description: string;
+  amount: number;
+  expense_date: string;
+  notes?: string;
+  created_by_role?: UserRole;
+  created_by_name?: string;
+  created_at: string;
+}
+
 export type AuditEntityType =
   | 'event'
   | 'quotation'
+  | 'event_expense'
   | 'invoice'
   | 'payment'
   | 'client'
@@ -242,4 +262,5 @@ export interface AuditLogEntry {
   is_read_by_owner: boolean;
   created_at: string;
 }
+
 

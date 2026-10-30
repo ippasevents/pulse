@@ -6,6 +6,7 @@ import { store } from '@/lib/store';
 import { Ingredient, StockPurchase, StockPaymentStatus, StockPurchaseItem } from '@/lib/types';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import { exportWarehouseInventoryAndShortageCsv } from '@/lib/inventoryCsvExport';
+import { printElementById } from '@/lib/printDocument';
 
 const NEAR_EXPIRY_DAYS = 14;
 
@@ -1337,6 +1338,23 @@ export default function StockPage() {
                             )}
 
                             <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              title="Print ONLY this Purchase Bill document"
+                              onClick={() => {
+                                setViewingPurchase(purchase);
+                                setTimeout(() => {
+                                  printElementById('purchase-bill-printable-area', {
+                                    title: `Purchase Bill - ${purchase.bill_number || purchase.vendor_name}`,
+                                    orientation: 'portrait'
+                                  });
+                                }, 140);
+                              }}
+                            >
+                              🖨️ Print
+                            </button>
+
+                            <button
                               className="btn btn-secondary btn-sm"
                               title="View Purchase Details & Receipts"
                               onClick={() => setViewingPurchase(purchase)}
@@ -2248,7 +2266,7 @@ export default function StockPage() {
       {viewingPurchase && (
         <div className="modal-overlay" onClick={() => setViewingPurchase(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '580px', width: '95%' }}>
-            <div className="modal-header">
+            <div className="modal-header no-print">
               <div>
                 <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>
                   📜 Purchase Bill &amp; Payment History
@@ -2257,12 +2275,41 @@ export default function StockPage() {
                   {viewingPurchase.vendor_name} &bull; {viewingPurchase.vendor_location}
                 </p>
               </div>
-              <button className="btn btn-secondary btn-sm" onClick={() => setViewingPurchase(null)}>
-                ✕
-              </button>
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() =>
+                    printElementById('purchase-bill-printable-area', {
+                      title: `Purchase Bill - ${viewingPurchase.bill_number || viewingPurchase.vendor_name}`,
+                      orientation: 'portrait'
+                    })
+                  }
+                >
+                  🖨️ Print Bill
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setViewingPurchase(null)}>
+                  ✕
+                </button>
+              </div>
             </div>
 
-            <div style={{ background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '1.25rem' }}>
+            <div id="purchase-bill-printable-area" style={{ background: '#ffffff', padding: '0.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '0.75rem', marginBottom: '0.9rem' }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '1rem', color: '#0f172a' }}>
+                    {state.settings.name || 'IPPAS FOOD SERVICE & EVENTS'}
+                  </div>
+                  <div style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                    Vendor Purchase Voucher &bull; {viewingPurchase.vendor_name} ({viewingPurchase.vendor_location})
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', fontSize: '0.8rem', fontWeight: 700, color: '#0f172a' }}>
+                  PURCHASE BILL
+                </div>
+              </div>
+
+              <div style={{ background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem', fontSize: '0.88rem' }}>
                 <span>Bill Number:</span>
                 <strong>{viewingPurchase.bill_number || 'N/A'}</strong>
@@ -2368,8 +2415,21 @@ export default function StockPage() {
                 </div>
               );
             })()}
+            </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
+            <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() =>
+                  printElementById('purchase-bill-printable-area', {
+                    title: `Purchase Bill - ${viewingPurchase.bill_number || viewingPurchase.vendor_name}`,
+                    orientation: 'portrait'
+                  })
+                }
+              >
+                🖨️ Print Bill Only
+              </button>
               <button className="btn btn-secondary btn-sm" onClick={() => setViewingPurchase(null)}>
                 Close
               </button>

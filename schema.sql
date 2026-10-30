@@ -214,6 +214,19 @@ create table if not exists event_extras (
   amount numeric(10,2) not null default 0
 );
 
+create table if not exists event_expenses (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid not null references events(id) on delete cascade,
+  category text not null default 'other_expense' check (category in ('stock_pricing', 'extras_cost', 'staff_expense', 'other_expense')),
+  description text not null,
+  amount numeric(12,2) not null default 0,
+  expense_date date not null default current_date,
+  notes text,
+  created_by_role text,
+  created_by_name text,
+  created_at timestamptz not null default now()
+);
+
 -- ============================================================================
 -- 5. STAFF MEMBERS, SHIFTS & SALARY LEDGER
 -- ============================================================================
@@ -617,6 +630,7 @@ begin
     'menu_item_ingredients',
     'event_items',
     'event_extras',
+    'event_expenses',
     'staff_members',
     'shifts',
     'staff_salary_records',

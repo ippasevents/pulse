@@ -1,5 +1,6 @@
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import { printElementById } from './printDocument';
 
 export interface PdfOptions {
   orientation?: 'landscape' | 'portrait';
@@ -70,8 +71,8 @@ export async function downloadElementAsPdf(
     return true;
   } catch (error) {
     console.error('Error generating PDF with html2canvas/jsPDF:', error);
-    // Fallback to native print dialog
-    window.print();
+    // Fallback to isolated document-only print dialog (never prints surrounding webpage)
+    printElementById(elementId, { title: filename, orientation });
     return false;
   }
 }

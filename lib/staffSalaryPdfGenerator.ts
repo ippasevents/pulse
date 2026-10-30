@@ -2,6 +2,7 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { AppState, store } from '@/lib/store';
 import { EventRecord, Shift, ShiftAttendanceStatus, StaffMember, StaffSalaryRecord } from '@/lib/types';
+import { printHtmlDocument } from '@/lib/printDocument';
 
 function escapeHtml(val?: string | number | null): string {
   return String(val ?? '')
@@ -667,6 +668,22 @@ export async function downloadSingleStaffSalarySlipPdf(
 }
 
 /**
+ * Prints ONLY a single staff member's official A4 Salary Slip document (excluding webpage UI).
+ */
+export function printSingleStaffSalarySlip(
+  row: StaffPeriodReportRow,
+  startDate: string,
+  endDate: string,
+  state: AppState
+): boolean {
+  const html = buildStaffSalarySlipHtml(row, startDate, endDate, state);
+  return printHtmlDocument(html, {
+    title: `Salary Slip - ${row.staff.name}`,
+    orientation: 'portrait'
+  });
+}
+
+/**
  * Exports a multi-page A4 PDF containing individual Staff Salary Slips for all provided staff rows.
  */
 export async function downloadBatchStaffSalarySlipsPdf(
@@ -701,18 +718,13 @@ export async function downloadBatchStaffSalarySlipsPdf(
   }
 }
 
-/**
- * Exports a consolidated A4 Master Staff Payroll & Earnings Summary PDF for the selected date range.
- */
-export async function downloadStaffPayrollSummaryPdf(
+function buildStaffPayrollSummaryHtml(
   rows: StaffPeriodReportRow[],
   totals: StaffPeriodReportTotals,
   startDate: string,
   endDate: string,
   state: AppState
-): Promise<boolean> {
-  if (typeof window === 'undefined') return false;
-
+): string {
   const periodLabel = formatPeriodLabel(startDate, endDate);
   const issueDate = formatDisplayDate(new Date().toISOString().slice(0, 10));
   const businessName = state.settings.name || 'IPPAS FOOD SERVICE & EVENTS';
@@ -863,6 +875,38 @@ export async function downloadStaffPayrollSummaryPdf(
       </div>
     </div>
   `;
+  return html;
+}
+
+/**
+ * Prints ONLY the standalone A4 Staff Payroll Summary Report (excluding webpage UI).
+ */
+export function printStaffPayrollSummaryReport(
+  rows: StaffPeriodReportRow[],
+  totals: StaffPeriodReportTotals,
+  startDate: string,
+  endDate: string,
+  state: AppState
+): boolean {
+  const html = buildStaffPayrollSummaryHtml(rows, totals, startDate, endDate, state);
+  return printHtmlDocument(html, {
+    title: `Staff Payroll Report - ${formatPeriodLabel(startDate, endDate)}`,
+    orientation: 'portrait'
+  });
+}
+
+/**
+ * Exports a consolidated A4 Master Staff Payroll & Earnings Summary PDF for the selected date range.
+ */
+export async function downloadStaffPayrollSummaryPdf(
+  rows: StaffPeriodReportRow[],
+  totals: StaffPeriodReportTotals,
+  startDate: string,
+  endDate: string,
+  state: AppState
+): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  const html = buildStaffPayrollSummaryHtml(rows, totals, startDate, endDate, state);
 
   try {
     const pdf = new jsPDF({

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { store } from '@/lib/store';
 import { Invoice, Payment, PaymentChannel } from '@/lib/types';
 import { downloadElementAsPdf } from '@/lib/downloadPdf';
+import { printElementById } from '@/lib/printDocument';
 import EditBankDetailsModal from '@/components/EditBankDetailsModal';
 import { getMaxDueDate, getDefaultDueDate, clampDueDate } from '@/lib/dateUtils';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
@@ -311,11 +312,29 @@ export default function InvoicesPage() {
                       <td style={{ textAlign: 'center' }}>
                         <div style={{ display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
                           <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ fontWeight: 700 }}
+                            title="Print ONLY this Invoice document (excludes webpage)"
+                            onClick={() => {
+                              setSelectedInvoiceForPrint(inv);
+                              setTimeout(() => {
+                                printElementById('invoice-printable-area', {
+                                  title: inv.invoice_number,
+                                  orientation: 'portrait'
+                                });
+                              }, 140);
+                            }}
+                          >
+                            🖨️ Print
+                          </button>
+
+                          <button
                             className="btn btn-primary btn-sm"
-                            title="Print / Save Standard A4 PDF"
+                            title="View & Download Standard A4 PDF"
                             onClick={() => setSelectedInvoiceForPrint(inv)}
                           >
-                            🖨️ A4 PDF
+                            📄 A4 PDF
                           </button>
 
                           <button
@@ -523,12 +542,15 @@ export default function InvoicesPage() {
                       </button>
                       <button
                         className="btn btn-secondary btn-sm"
+                        style={{ fontWeight: 700 }}
                         onClick={() => {
-                          document.body.classList.add('print-portrait-mode');
-                          window.print();
+                          printElementById('invoice-printable-area', {
+                            title: livePrintInv.invoice_number,
+                            orientation: 'portrait'
+                          });
                         }}
                       >
-                        🖨️ Print A4
+                        🖨️ Print Invoice Only
                       </button>
                       <button
                         type="button"

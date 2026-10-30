@@ -3,15 +3,28 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { store, StockEstimationItem } from '@/lib/store';
-import { EventRecord, EventStatus, MenuItem, Invoice, Payment, PaymentChannel, PricingType, ShiftAttendanceStatus } from '@/lib/types';
+import { store, StockEstimationItem, EVENT_EXPENSE_CATEGORY_LABELS } from '@/lib/store';
+import {
+  EventRecord,
+  EventStatus,
+  MenuItem,
+  Invoice,
+  Payment,
+  PaymentChannel,
+  PricingType,
+  ShiftAttendanceStatus,
+  EventExpense,
+  EventExpenseCategory,
+  Shift
+} from '@/lib/types';
 import { downloadElementAsPdf } from '@/lib/downloadPdf';
+import { printElementById } from '@/lib/printDocument';
+import { parseAuditDetails } from '@/lib/auditDiff';
 import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
 import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
 import WhatsAppShareModal from '@/components/WhatsAppShareModal';
 import QuotationWhatsAppModal from '@/components/QuotationWhatsAppModal';
 import StaffWhatsAppModal from '@/components/StaffWhatsAppModal';
-import { Shift } from '@/lib/types';
 import { formatDisplayWhatsAppPhone } from '@/lib/staffWhatsApp';
 import { exportEventStockShortageCsv } from '@/lib/inventoryCsvExport';
 
@@ -21,8 +34,9 @@ export default function EventDetailPage() {
   const eventId = params?.id as string;
 
   const [state, setState] = useState(store.getState());
-  const [activeTab, setActiveTab] = useState<'quote' | 'stock' | 'shifts' | 'invoices' | 'details'>('quote');
+  const [activeTab, setActiveTab] = useState<'quote' | 'stock' | 'shifts' | 'expenses' | 'invoices' | 'details'>('quote');
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [autoPrintTarget, setAutoPrintTarget] = useState<'quote' | 'stock' | 'invoice' | null>(null);
 
   // Print & WhatsApp Modals - Standard A4 Portrait Only
   const [isPrintQuoteOpen, setIsPrintQuoteOpen] = useState(false);
@@ -112,6 +126,20 @@ export default function EventDetailPage() {
   const [shortageCustomAccount, setShortageCustomAccount] = useState('');
   const [shortageNotes, setShortageNotes] = useState('');
 
+  // Event Extra Expenses state (Owner, Accountant & Manager)
+  const [expCategory, setExpCategory] = useState<EventExpenseCategory>('stock_pricing');
+  const [expDesc, setExpDesc] = useState('');
+  const [expAmount, setExpAmount] = useState<number>(0);
+  const [expDate, setExpDate] = useState('');
+  const [expNotes, setExpNotes] = useState('');
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+
+  // Event-linked Staff Allowance quick entry state
+  const [allowanceStaffId, setAllowanceStaffId] = useState('');
+  const [allowanceAmount, setAllowanceAmount] = useState<number>(0);
+  const [allowanceMethod, setAllowanceMethod] = useState('Duty Allowance');
+  const [allowanceNote, setAllowanceNote] = useState('');
+
   useEffect(() => {
     setState(store.getState());
     const unsub = store.subscribe(() => {
@@ -119,6 +147,31 @@ export default function EventDetailPage() {
     });
     return unsub;
   }, []);
+
+  // Trigger isolated document-only print when direct Print icon is clicked
+  useEffect(() => {
+    if (!autoPrintTarget) return;
+    const timer = setTimeout(() => {
+      if (autoPrintTarget === 'quote') {
+        printElementById('quotation-printable-area', {
+          title: 'Catering-Quotation',
+          orientation: 'portrait'
+        });
+      } else if (autoPrintTarget === 'stock') {
+        printElementById('stock-estimation-printable-area', {
+          title: 'Stock-Requisition-Sheet',
+          orientation: 'portrait'
+        });
+      } else if (autoPrintTarget === 'invoice') {
+        printElementById('event-invoice-printable-area', {
+          title: 'Event-Invoice',
+          orientation: 'portrait'
+        });
+      }
+      setAutoPrintTarget(null);
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [autoPrintTarget]);
 
   const event = state.events.find((e) => e.id === eventId);
   const client = state.clients.find((c) => c.id === event?.client_id);
@@ -196,13 +249,17 @@ export default function EventDetailPage() {
   }
 
   const role = state.currentRole;
+  const isOwnerOnly = role === 'owner' || role === 'super_admin';
   const canEditOps = role === 'owner' || role === 'manager' || role === 'super_admin';
   const isFinance = role === 'owner' || role === 'accountant' || role === 'super_admin';
+  const canManageEventExpenses =
+    role === 'owner' || role === 'accountant' || role === 'manager' || role === 'super_admin';
   const canEditQuote = canEditOps || isFinance;
-  const auditSummary = (role === 'owner' || role === 'super_admin') ? store.getEventAuditSummary(event.id) : null;
+  const auditSummary = isOwnerOnly ? store.getEventAuditSummary(event.id) : null;
 
   const { menuTotal, extrasTotal, grandTotal } = store.getEventTotal(event.id);
   const displayTotal = isFinance ? grandTotal : menuTotal;
+  const finSummary = store.getEventFinancialSummary(event.id);
 
   // Selected items
   const eventItems = state.eventItems.filter((ei) => ei.event_id === event.id);
@@ -391,6 +448,79 @@ export default function EventDetailPage() {
     store.addEventExtra(event.id, extraDesc, extraAmount);
     setExtraDesc('');
     setExtraAmount(0);
+  };
+
+  const handleSaveEventExpense = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!expDesc.trim() || expAmount <= 0) return;
+
+    if (editingExpenseId) {
+      store.updateEventExpense(editingExpenseId, {
+        category: expCategory,
+        description: expDesc.trim(),
+        amount: expAmount,
+        expense_date: expDate || event.event_date,
+        notes: expNotes.trim()
+      });
+      setEditingExpenseId(null);
+      setStatusBanner({
+        type: 'success',
+        message: '✓ Event expense entry updated.'
+      });
+    } else {
+      store.addEventExpense({
+        event_id: event.id,
+        category: expCategory,
+        description: expDesc.trim(),
+        amount: expAmount,
+        expense_date: expDate || event.event_date,
+        notes: expNotes.trim()
+      });
+      setStatusBanner({
+        type: 'success',
+        message: `✓ Added ${EVENT_EXPENSE_CATEGORY_LABELS[expCategory].short} (₹${expAmount.toLocaleString('en-IN')}) to event expenses.`
+      });
+    }
+
+    setExpDesc('');
+    setExpAmount(0);
+    setExpNotes('');
+  };
+
+  const handleStartEditExpense = (exp: EventExpense) => {
+    setEditingExpenseId(exp.id);
+    setExpCategory(exp.category);
+    setExpDesc(exp.description);
+    setExpAmount(exp.amount);
+    setExpDate(exp.expense_date || event.event_date);
+    setExpNotes(exp.notes || '');
+  };
+
+  const handleCancelEditExpense = () => {
+    setEditingExpenseId(null);
+    setExpDesc('');
+    setExpAmount(0);
+    setExpNotes('');
+  };
+
+  const handleAddEventAllowance = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!allowanceStaffId || allowanceAmount <= 0) return;
+    const staffMember = state.staff.find((s) => s.id === allowanceStaffId);
+    store.addStaffSalaryRecord({
+      staff_member_id: allowanceStaffId,
+      event_id: event.id,
+      record_type: 'earning',
+      amount: allowanceAmount,
+      method: allowanceMethod || 'Duty Allowance',
+      note: allowanceNote.trim() || `${event.title} allowance`
+    });
+    setAllowanceAmount(0);
+    setAllowanceNote('');
+    setStatusBanner({
+      type: 'success',
+      message: `✓ Added ₹${allowanceAmount.toLocaleString('en-IN')} ${allowanceMethod} for ${staffMember?.name || 'Staff'} (included in Event Total Expenditure & Staff Salary).`
+    });
   };
 
   const handleAddShift = (e: React.FormEvent) => {
@@ -704,6 +834,18 @@ export default function EventDetailPage() {
             >
               📄 A4 Quotation PDF
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsPrintQuoteOpen(true);
+                setAutoPrintTarget('quote');
+              }}
+              className="btn btn-secondary btn-sm"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 700 }}
+              title="Print ONLY Quotation Document (excludes webpage)"
+            >
+              🖨️ Print Quote
+            </button>
           </div>
 
           <div style={{ textAlign: 'right', marginTop: '0.25rem' }}>
@@ -807,35 +949,118 @@ export default function EventDetailPage() {
         </div>
       )}
 
-      {/* Owner & Super Admin Event & Quotation Login ID Attribution Banner */}
-      {(role === 'owner' || role === 'super_admin') && (auditSummary?.eventAudit || auditSummary?.quoteAudit) && (
+      {/* Completed Event Total Expenditure Banner (Incl. All Allowances) + Strictly Owner-Only P&L */}
+      {canManageEventExpenses && (event.status === 'completed' || finSummary.totalExpenditure > 0) && (
         <div
           className="no-print"
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))',
-            gap: '0.75rem',
-            marginBottom: '1.15rem'
+            background: event.status === 'completed' ? '#f8fafc' : '#ffffff',
+            border: `1.5px solid ${event.status === 'completed' ? '#94a3b8' : 'var(--border)'}`,
+            borderLeft: `5px solid ${
+              isOwnerOnly
+                ? finSummary.netProfit >= 0
+                  ? '#16a34a'
+                  : '#dc2626'
+                : '#2563eb'
+            }`,
+            borderRadius: '10px',
+            padding: '0.95rem 1.15rem',
+            marginBottom: '1.25rem'
           }}
         >
-          {auditSummary?.eventAudit && (
-            <OwnerAuditBadge
-              role={role}
-              entry={auditSummary.eventAudit}
-              prefixLabel="Event last updated by"
-              variant="banner"
-              showSummary
-            />
-          )}
-          {auditSummary?.quoteAudit && (
-            <OwnerAuditBadge
-              role={role}
-              entry={auditSummary.quoteAudit}
-              prefixLabel="Quotation last edited by"
-              variant="banner"
-              showSummary
-            />
-          )}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.85rem',
+              flexWrap: 'wrap'
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 800, fontSize: '0.98rem', color: '#0f172a' }}>
+                  {event.status === 'completed'
+                    ? '🏁 Event Completed — Total Expenditure (Including All Allowances)'
+                    : '💸 Event Expenditure Logged So Far (Including All Allowances)'}
+                </span>
+                <span
+                  className="badge"
+                  style={{ background: '#fee2e2', color: '#be123c', fontWeight: 800, fontSize: '0.8rem' }}
+                >
+                  Total Spent: ₹{finSummary.totalExpenditure.toLocaleString('en-IN')}
+                </span>
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '0.9rem',
+                  flexWrap: 'wrap',
+                  fontSize: '0.8rem',
+                  color: '#475569',
+                  marginTop: '0.35rem'
+                }}
+              >
+                <span>
+                  📦 Stock Pricing: <strong>₹{finSummary.stockPricingCost.toLocaleString('en-IN')}</strong>
+                </span>
+                <span>
+                  🚚 Extras Taken: <strong>₹{finSummary.extrasTakenCost.toLocaleString('en-IN')}</strong>
+                </span>
+                <span>
+                  👥 Staff Shifts + Allowances + Expenses:{' '}
+                  <strong>₹{finSummary.totalStaffCost.toLocaleString('en-IN')}</strong>
+                </span>
+                <span>
+                  🧾 Other Expenses: <strong>₹{finSummary.otherExpenseCost.toLocaleString('en-IN')}</strong>
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              {isOwnerOnly && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.65rem',
+                    padding: '0.45rem 0.75rem',
+                    borderRadius: '8px',
+                    background: finSummary.netProfit >= 0 ? '#f0fdf4' : '#fef2f2',
+                    border: `1px solid ${finSummary.netProfit >= 0 ? '#86efac' : '#fca5a5'}`
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.66rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
+                      🔒 Owner P&amp;L ({finSummary.marginPercent}%)
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '1.05rem',
+                        fontWeight: 800,
+                        color: finSummary.netProfit >= 0 ? '#15803d' : '#dc2626'
+                      }}
+                    >
+                      {finSummary.netProfit >= 0 ? 'Profit +' : 'Loss -'}₹
+                      {Math.abs(finSummary.netProfit).toLocaleString('en-IN')}
+                    </div>
+                  </div>
+                  <Link href="/pnl" className="btn btn-secondary btn-sm" style={{ fontSize: '0.75rem', fontWeight: 700 }}>
+                    P&amp;L Module &rarr;
+                  </Link>
+                </div>
+              )}
+
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                style={{ fontWeight: 700 }}
+                onClick={() => setActiveTab('expenses')}
+              >
+                💸 {activeTab === 'expenses' ? 'Viewing Expenses' : 'Add / View Extra Expenses'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -864,6 +1089,15 @@ export default function EventDetailPage() {
             onClick={() => setActiveTab('shifts')}
           >
             👥 Staff Shifts ({shifts.length})
+          </button>
+        )}
+        {canManageEventExpenses && (
+          <button
+            className={`btn ${activeTab === 'expenses' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
+            onClick={() => setActiveTab('expenses')}
+          >
+            💸 Event Expenses (₹{finSummary.totalExpenditure.toLocaleString('en-IN')})
           </button>
         )}
         {isFinance && (
@@ -1433,7 +1667,19 @@ export default function EventDetailPage() {
                   style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600 }}
                   onClick={() => setIsPrintStockOpen(true)}
                 >
-                  🖨️ Print / Download A4 Sheet
+                  📄 A4 Sheet Preview
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 700 }}
+                  onClick={() => {
+                    setIsPrintStockOpen(true);
+                    setAutoPrintTarget('stock');
+                  }}
+                  title="Print ONLY Stock Estimation Sheet (excludes webpage)"
+                >
+                  🖨️ Print Stock Sheet
                 </button>
                 <Link href="/stock" className="btn btn-secondary btn-sm">
                   Warehouse Stock &rarr;
@@ -1853,6 +2099,531 @@ export default function EventDetailPage() {
       )}
 
       {/* ----------------------------------------------------------------------------------- */}
+      {/* TAB 3B: EVENT EXTRA EXPENSES & TOTAL EXPENDITURE (Owner, Accountant, Manager) */}
+      {/* ----------------------------------------------------------------------------------- */}
+      {activeTab === 'expenses' && canManageEventExpenses && (
+        <div>
+          {/* Printable Event Expense Sheet Area */}
+          <div id="event-expenses-printable-area">
+            {/* Top 4 Category + Total Expenditure Summary */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(205px, 1fr))',
+                gap: '0.9rem',
+                marginBottom: '1.25rem'
+              }}
+            >
+              <div className="stats-card" style={{ borderLeft: '4px solid #2563eb' }}>
+                <span className="stats-label">1. Stock Pricing (സ്റ്റോക്കിന്റെ പ്രൈസിങ്)</span>
+                <span className="stats-value" style={{ color: '#0f172a' }}>
+                  ₹{finSummary.stockPricingCost.toLocaleString('en-IN')}
+                </span>
+                <span className="stats-sub">
+                  Recipe Est: ₹{finSummary.recipeStockEstimate.toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              <div className="stats-card" style={{ borderLeft: '4px solid #d97706' }}>
+                <span className="stats-label">2. Extras Cost (എക്സ്ട്രാസ് ചെലവുകൾ)</span>
+                <span className="stats-value" style={{ color: '#0f172a' }}>
+                  ₹{finSummary.extrasTakenCost.toLocaleString('en-IN')}
+                </span>
+                <span className="stats-sub">Extras taken, rentals &amp; transport</span>
+              </div>
+
+              <div className="stats-card" style={{ borderLeft: '4px solid #7c3aed' }}>
+                <span className="stats-label">3. Staff + Allowances (സ്റ്റാഫിന്റെ ചെലവുകൾ)</span>
+                <span className="stats-value" style={{ color: '#0f172a' }}>
+                  ₹{finSummary.totalStaffCost.toLocaleString('en-IN')}
+                </span>
+                <span className="stats-sub">
+                  Shifts: ₹{finSummary.staffShiftWages.toLocaleString('en-IN')} &bull; Allow: ₹
+                  {finSummary.staffAllowances.toLocaleString('en-IN')} &bull; Extra: ₹
+                  {finSummary.staffExpenseCost.toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              <div className="stats-card" style={{ borderLeft: '4px solid #475569' }}>
+                <span className="stats-label">4. Other Expenses (മറ്റ് ചെലവുകൾ)</span>
+                <span className="stats-value" style={{ color: '#0f172a' }}>
+                  ₹{finSummary.otherExpenseCost.toLocaleString('en-IN')}
+                </span>
+                <span className="stats-sub">Fuel, ice, cleaning &amp; misc</span>
+              </div>
+
+              <div
+                className="stats-card"
+                style={{ borderLeft: '4px solid #e11d48', background: '#fff1f2' }}
+              >
+                <span className="stats-label" style={{ color: '#9f1239', fontWeight: 700 }}>
+                  Total Event Expenditure (incl. Allowances)
+                </span>
+                <span className="stats-value" style={{ color: '#be123c' }}>
+                  ₹{finSummary.totalExpenditure.toLocaleString('en-IN')}
+                </span>
+                <span className="stats-sub" style={{ color: '#881337' }}>
+                  All 4 heads + shifts + all allowances
+                </span>
+              </div>
+            </div>
+
+            {/* Strictly Owner-Only Profit & Loss Card (NEVER visible to Accountant, Manager, or Staff) */}
+            {isOwnerOnly && (
+              <div
+                className="card no-print"
+                style={{
+                  marginBottom: '1.25rem',
+                  borderLeft: `4px solid ${finSummary.netProfit >= 0 ? '#16a34a' : '#dc2626'}`,
+                  background: finSummary.netProfit >= 0 ? '#f0fdf4' : '#fef2f2'
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '0.75rem'
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>
+                        📈 Event Profit &amp; Loss Analysis
+                      </h3>
+                      <span
+                        className="badge"
+                        style={{ background: '#ffe4e6', color: '#be123c', fontWeight: 800, fontSize: '0.68rem' }}
+                      >
+                        🔒 OWNER ONLY
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#334155', marginTop: '0.3rem' }}>
+                      Contract / Invoiced Revenue: <strong>₹{finSummary.contractRevenue.toLocaleString('en-IN')}</strong>{' '}
+                      &minus; Total Expenditure (incl. Allowances):{' '}
+                      <strong>₹{finSummary.totalExpenditure.toLocaleString('en-IN')}</strong>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>
+                        {finSummary.netProfit >= 0 ? 'Net Profit (ലാഭം)' : 'Net Loss (നഷ്ടം)'}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: '1.45rem',
+                          fontWeight: 800,
+                          color: finSummary.netProfit >= 0 ? '#15803d' : '#dc2626'
+                        }}
+                      >
+                        {finSummary.netProfit >= 0 ? '+' : '-'}₹
+                        {Math.abs(finSummary.netProfit).toLocaleString('en-IN')}{' '}
+                        <span style={{ fontSize: '0.82rem' }}>({finSummary.marginPercent}%)</span>
+                      </div>
+                    </div>
+                    <Link href="/pnl" className="btn btn-secondary btn-sm" style={{ fontWeight: 700 }}>
+                      Full P&amp;L Module &rarr;
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid-2" style={{ marginBottom: '1.25rem', alignItems: 'start' }}>
+              {/* Left: Extra Expense Entry Form (Owner, Accountant, Manager) */}
+              <div className="card no-print">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                  <div>
+                    <h2 className="card-title" style={{ margin: 0 }}>
+                      {editingExpenseId ? '✏️ Edit Event Extra Expense' : '➕ Add Event Extra Expense'}
+                    </h2>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>
+                      Available to Owner, Accountant &amp; Manager — log Stock Pricing, Extras Taken, Staff Expenses, or Other Expenses.
+                    </p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleSaveEventExpense}>
+                  <div className="form-group">
+                    <label className="form-label">Expense Category *</label>
+                    <select
+                      className="form-control"
+                      value={expCategory}
+                      onChange={(e) => setExpCategory(e.target.value as EventExpenseCategory)}
+                    >
+                      <option value="stock_pricing">
+                        📦 Stock Pricing — സ്റ്റോക്കിന്റെ പ്രൈസിങ്
+                      </option>
+                      <option value="extras_cost">
+                        🚚 Extras Taken Cost — എക്സ്ട്രാസ് കൊണ്ടുപോയതിന്റെ ചെലവുകൾ
+                      </option>
+                      <option value="staff_expense">
+                        👥 Staff Extra Expenses — സ്റ്റാഫിന്റെ ചെലവുകൾ
+                      </option>
+                      <option value="other_expense">
+                        🧾 Other Expenses — മറ്റ് ചെലവുകൾ
+                      </option>
+                    </select>
+                  </div>
+
+                  {expCategory === 'stock_pricing' && finSummary.recipeStockEstimate > 0 && (
+                    <div
+                      style={{
+                        background: '#eff6ff',
+                        border: '1px solid #bfdbfe',
+                        borderRadius: '6px',
+                        padding: '0.5rem 0.7rem',
+                        marginBottom: '0.75rem',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        flexWrap: 'wrap',
+                        fontSize: '0.78rem'
+                      }}
+                    >
+                      <span style={{ color: '#1e3a8a' }}>
+                        Recipe Raw Material Estimate: <strong>₹{finSummary.recipeStockEstimate.toLocaleString('en-IN')}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem', fontWeight: 700 }}
+                        onClick={() => {
+                          setExpDesc(`Kitchen Stock & Raw Materials (${event.guest_count} Pax)`);
+                          setExpAmount(finSummary.recipeStockEstimate);
+                        }}
+                      >
+                        ⚡ Auto-Fill ₹{finSummary.recipeStockEstimate.toLocaleString('en-IN')}
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label className="form-label">Particulars / Description *</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder={
+                        expCategory === 'stock_pricing'
+                          ? 'e.g. Basmati rice, meat, spices & vegetables used'
+                          : expCategory === 'extras_cost'
+                          ? 'e.g. Chafing dishes, extra tables, vehicle transport'
+                          : expCategory === 'staff_expense'
+                          ? 'e.g. Crew food, tea/snacks, night cab return'
+                          : 'e.g. Generator fuel, ice blocks, banana leaves'
+                      }
+                      value={expDesc}
+                      onChange={(e) => setExpDesc(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label className="form-label">Amount (₹) *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        className="form-control"
+                        placeholder="0"
+                        value={expAmount || ''}
+                        onChange={(e) => setExpAmount(parseFloat(e.target.value) || 0)}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Expense Date</label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={expDate || event.event_date}
+                        onChange={(e) => setExpDate(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Notes / Vendor / Bill Ref (Optional)</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. Paid via Cash / Vendor receipt #104"
+                      value={expNotes}
+                      onChange={(e) => setExpNotes(e.target.value)}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button type="submit" className="btn btn-primary" style={{ flex: 1, fontWeight: 700 }}>
+                      {editingExpenseId ? '✓ Save Expense Update' : '+ Add Event Expense'}
+                    </button>
+                    {editingExpenseId && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={handleCancelEditExpense}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+
+              {/* Right: Logged Event Extra Expenses Table */}
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                  <div>
+                    <h2 className="card-title" style={{ margin: 0 }}>
+                      Logged Extra Expenses ({finSummary.expenses.length})
+                    </h2>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>
+                      Direct cost entries recorded for <strong>{event.title}</strong>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm no-print"
+                    style={{ fontWeight: 700 }}
+                    onClick={() =>
+                      printElementById('event-expenses-printable-area', {
+                        title: `Event-Expenses-${event.title.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                        orientation: 'portrait'
+                      })
+                    }
+                    title="Print ONLY this Event Expense Sheet"
+                  >
+                    🖨️ Print Expense Sheet
+                  </button>
+                </div>
+
+                {finSummary.expenses.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.86rem' }}>
+                    No extra expenses added yet. Use the form to record Stock Pricing, Extras Taken, Staff Expenses, or Other Expenses.
+                  </p>
+                ) : (
+                  <div className="data-table-container">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Category</th>
+                          <th>Particulars</th>
+                          <th style={{ textAlign: 'right' }}>Amount</th>
+                          <th className="no-print" style={{ textAlign: 'center' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {finSummary.expenses.map((exp) => {
+                          const cat = EVENT_EXPENSE_CATEGORY_LABELS[exp.category];
+                          return (
+                            <tr key={exp.id}>
+                              <td>
+                                <span
+                                  className="badge"
+                                  style={{
+                                    background: '#f1f5f9',
+                                    color: '#0f172a',
+                                    fontWeight: 700,
+                                    fontSize: '0.72rem'
+                                  }}
+                                >
+                                  {cat.short}
+                                </span>
+                                <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '2px' }}>
+                                  {cat.ml}
+                                </div>
+                              </td>
+                              <td>
+                                <div style={{ fontWeight: 600 }}>{exp.description}</div>
+                                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                                  {exp.expense_date}
+                                  {exp.notes ? ` • ${exp.notes}` : ''}
+                                  {exp.created_by_name ? ` • By ${exp.created_by_name}` : ''}
+                                </div>
+                              </td>
+                              <td style={{ textAlign: 'right', fontWeight: 700, color: '#be123c' }}>
+                                ₹{exp.amount.toLocaleString('en-IN')}
+                              </td>
+                              <td className="no-print" style={{ textAlign: 'center' }}>
+                                <div style={{ display: 'flex', gap: '0.3rem', justifyContent: 'center' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => handleStartEditExpense(exp)}
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger btn-sm"
+                                    onClick={() => {
+                                      if (confirm(`Delete expense "${exp.description}"?`)) {
+                                        store.deleteEventExpense(exp.id);
+                                      }
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Staff Shift Wages + Event Allowances Section (Included in Total Event Expenditure) */}
+            <div className="card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.85rem' }}>
+                <div>
+                  <h2 className="card-title" style={{ margin: 0 }}>
+                    👥 Event Staff Shift Wages &amp; Allowances (Included in Event Total)
+                  </h2>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>
+                    Attended Shifts ({finSummary.attendedShiftCount}): <strong>₹{finSummary.staffShiftWages.toLocaleString('en-IN')}</strong> &bull; Event Allowances: <strong>₹{finSummary.staffAllowances.toLocaleString('en-IN')}</strong> &bull; Staff Extra Expenses: <strong>₹{finSummary.staffExpenseCost.toLocaleString('en-IN')}</strong>
+                  </p>
+                </div>
+                <span className="badge" style={{ background: '#ede9fe', color: '#5b21b6', fontWeight: 800 }}>
+                  Total Staff Cost: ₹{finSummary.totalStaffCost.toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              {/* Quick Add Event Staff Allowance Form */}
+              <form
+                onSubmit={handleAddEventAllowance}
+                className="no-print"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                  gap: '0.65rem',
+                  alignItems: 'end',
+                  background: '#f8fafc',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  padding: '0.75rem 0.9rem',
+                  marginBottom: '0.9rem'
+                }}
+              >
+                <div>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Staff Member *</label>
+                  <select
+                    className="form-control"
+                    value={allowanceStaffId}
+                    onChange={(e) => setAllowanceStaffId(e.target.value)}
+                    required
+                  >
+                    <option value="">Select staff...</option>
+                    {state.staff.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.name} ({st.role_title || 'Crew'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Allowance Type</label>
+                  <select
+                    className="form-control"
+                    value={allowanceMethod}
+                    onChange={(e) => setAllowanceMethod(e.target.value)}
+                  >
+                    <option value="Duty Allowance">Duty Allowance</option>
+                    <option value="Travel / Bata">Travel / Bata</option>
+                    <option value="Overtime Bonus">Overtime Bonus</option>
+                    <option value="Captain / Chef Allowance">Captain / Chef Allowance</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Allowance Amount (₹) *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="form-control"
+                    placeholder="0"
+                    value={allowanceAmount || ''}
+                    onChange={(e) => setAllowanceAmount(parseFloat(e.target.value) || 0)}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Note (Optional)</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Outstation night allowance"
+                    value={allowanceNote}
+                    onChange={(e) => setAllowanceNote(e.target.value)}
+                  />
+                </div>
+
+                <button type="submit" className="btn btn-primary btn-sm" style={{ height: '38px', fontWeight: 700 }}>
+                  + Add Allowance
+                </button>
+              </form>
+
+              {finSummary.allowanceRecords.length > 0 && (
+                <div className="data-table-container">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Staff Member</th>
+                        <th>Allowance Type</th>
+                        <th>Notes</th>
+                        <th style={{ textAlign: 'right' }}>Allowance Amount</th>
+                        <th className="no-print" style={{ textAlign: 'center' }}>Remove</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {finSummary.allowanceRecords.map((sr) => {
+                        const st = state.staff.find((s) => s.id === sr.staff_member_id);
+                        return (
+                          <tr key={sr.id}>
+                            <td style={{ fontWeight: 600 }}>{st?.name || 'Staff Member'}</td>
+                            <td>{sr.method}</td>
+                            <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                              {sr.note || '—'}
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: '#5b21b6' }}>
+                              ₹{sr.amount.toLocaleString('en-IN')}
+                            </td>
+                            <td className="no-print" style={{ textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                onClick={() => {
+                                  if (confirm('Remove this allowance entry?')) {
+                                    store.deleteStaffSalaryRecord(sr.id);
+                                  }
+                                }}
+                              >
+                                ✕
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------------------------------------------------------------------------- */}
       {/* TAB 4: INVOICES & PART-PAYMENTS ON SAME INVOICE (With Discounts) */}
       {/* ----------------------------------------------------------------------------------- */}
       {activeTab === 'invoices' && (
@@ -2017,10 +2788,23 @@ export default function EventDetailPage() {
                               <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
                                 <button
                                   className="btn btn-primary btn-sm"
-                                  title="Print or Download Standard A4 PDF"
+                                  title="Preview or Download Standard A4 PDF"
                                   onClick={() => setSelectedInvoiceForPrint(inv)}
                                 >
-                                  🖨️ A4 PDF
+                                  📄 A4 PDF
+                                </button>
+
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ fontWeight: 700 }}
+                                  title="Print ONLY this Invoice Document (excludes webpage)"
+                                  onClick={() => {
+                                    setSelectedInvoiceForPrint(inv);
+                                    setAutoPrintTarget('invoice');
+                                  }}
+                                >
+                                  🖨️ Print
                                 </button>
 
                                 <button
@@ -2422,18 +3206,18 @@ export default function EventDetailPage() {
             </form>
           </div>
 
-          {role === 'owner' && (
-            <div className="card" style={{ borderLeft: '4px solid #e11d48' }}>
+          {isOwnerOnly && (
+            <div className="card" style={{ borderLeft: '4px solid #64748b' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
                 <div>
                   <h2 className="card-title" style={{ margin: 0 }}>
-                    🛡️ Event &amp; Quotation Audit Trail
+                    🔔 Event Edit History (Previous &rarr; New)
                   </h2>
                   <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                    Visible exclusively to Owner — exact Login IDs for every event, quote, shift, or invoice change.
+                    Quiet edit log showing exact Previous Data &rarr; New Data changes on this event.
                   </p>
                 </div>
-                <span className="badge" style={{ background: '#ffe4e6', color: '#be123c', fontWeight: 800, fontSize: '0.68rem' }}>
+                <span className="badge" style={{ background: '#f1f5f9', color: '#334155', fontWeight: 700, fontSize: '0.68rem' }}>
                   OWNER ONLY
                 </span>
               </div>
@@ -2446,12 +3230,13 @@ export default function EventDetailPage() {
                 <div style={{ maxHeight: '520px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
                   {auditSummary.history.map((log) => {
                     const meta = getActorRoleStyle(log.actor_role);
+                    const parsed = parseAuditDetails(log.details);
                     return (
                       <div
                         key={log.id}
                         style={{
-                          background: meta.bg,
-                          border: `1px solid ${meta.border}`,
+                          background: '#f8fafc',
+                          border: '1px solid #e2e8f0',
                           borderRadius: '8px',
                           padding: '0.65rem 0.8rem'
                         }}
@@ -2470,23 +3255,63 @@ export default function EventDetailPage() {
                             >
                               {meta.label}
                             </span>
-                            <strong style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: '#0f172a' }}>
-                              {log.source === 'database' ? 'supabase_db' : `@${log.actor_username}`}
+                            <strong style={{ fontSize: '0.8rem', color: '#0f172a' }}>
+                              {log.actor_name}
                             </strong>
-                            <span style={{ fontSize: '0.75rem', color: '#475569' }}>
-                              ({log.actor_name})
-                            </span>
                           </div>
                           <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>
                             {formatAuditTimestamp(log.created_at)}
                           </span>
                         </div>
-                        <div style={{ fontWeight: 700, fontSize: '0.84rem', color: '#0f172a' }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.83rem', color: '#0f172a' }}>
                           {log.summary}
                         </div>
-                        {log.details && (
-                          <div style={{ fontSize: '0.75rem', color: '#475569', marginTop: '0.12rem' }}>
-                            {log.details}
+
+                        {parsed.changes.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.35rem' }}>
+                            {parsed.changes.map((chg, idx) => (
+                              <div
+                                key={`${log.id}-chg-${idx}`}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem',
+                                  flexWrap: 'wrap',
+                                  fontSize: '0.75rem'
+                                }}
+                              >
+                                <span style={{ fontWeight: 700, color: '#334155' }}>{chg.field}:</span>
+                                <span
+                                  style={{
+                                    background: '#fee2e2',
+                                    color: '#991b1b',
+                                    padding: '0.05rem 0.38rem',
+                                    borderRadius: '4px',
+                                    textDecoration: 'line-through'
+                                  }}
+                                >
+                                  {chg.before}
+                                </span>
+                                <span style={{ color: '#64748b', fontWeight: 700 }}>&rarr;</span>
+                                <span
+                                  style={{
+                                    background: '#dcfce7',
+                                    color: '#166534',
+                                    padding: '0.05rem 0.38rem',
+                                    borderRadius: '4px',
+                                    fontWeight: 700
+                                  }}
+                                >
+                                  {chg.after}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {parsed.changes.length === 0 && parsed.cleanNote && (
+                          <div style={{ fontSize: '0.75rem', color: '#475569', marginTop: '0.15rem' }}>
+                            {parsed.cleanNote}
                           </div>
                         )}
                       </div>
@@ -2566,7 +3391,10 @@ export default function EventDetailPage() {
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => {
-                    window.print();
+                    printElementById('quotation-printable-area', {
+                      title: `${quoteNumber}-${event.title}`,
+                      orientation: 'portrait'
+                    });
                   }}
                 >
                   🖨️ Print A4
@@ -2800,7 +3628,10 @@ export default function EventDetailPage() {
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => {
-                    window.print();
+                    printElementById('stock-estimation-printable-area', {
+                      title: `Stock-Estimation-${event.title}`,
+                      orientation: 'portrait'
+                    });
                   }}
                 >
                   🖨️ Print A4
@@ -3017,7 +3848,10 @@ export default function EventDetailPage() {
                   <button
                     className="btn btn-secondary btn-sm"
                     onClick={() => {
-                      window.print();
+                      printElementById('event-invoice-printable-area', {
+                        title: `${liveInv.invoice_number}`,
+                        orientation: 'portrait'
+                      });
                     }}
                   >
                     🖨️ Print A4

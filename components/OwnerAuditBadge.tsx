@@ -3,6 +3,7 @@
 import React from 'react';
 import { AuditLogEntry, UserRole } from '@/lib/types';
 import { store } from '@/lib/store';
+import { parseAuditDetails } from '@/lib/auditDiff';
 
 interface OwnerAuditBadgeProps {
   entry?: AuditLogEntry;
@@ -81,10 +82,10 @@ export function getActorRoleStyle(actorRole: UserRole | 'database'): {
       };
     default:
       return {
-        bg: '#fff1f2',
-        text: '#881337',
-        border: '#fecdd3',
-        badgeBg: '#e11d48',
+        bg: '#f8fafc',
+        text: '#334155',
+        border: '#e2e8f0',
+        badgeBg: '#475569',
         badgeText: '#ffffff',
         label: 'OWNER'
       };
@@ -111,90 +112,63 @@ export default function OwnerAuditBadge({
     return null;
   }
 
+  // Simplified UX: Keep all compact table rows clean — activity history lives quietly in Notifications
+  if (variant === 'compact') {
+    return null;
+  }
+
   const styleMeta = getActorRoleStyle(entry.actor_role);
   const loginDisplay =
     entry.source === 'database' ? 'supabase_db' : `@${entry.actor_username}`;
-
-  if (variant === 'banner') {
-    return (
-      <div
-        style={{
-          background: styleMeta.bg,
-          border: `1px solid ${styleMeta.border}`,
-          color: styleMeta.text,
-          borderRadius: '8px',
-          padding: '0.55rem 0.85rem',
-          fontSize: '0.8rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '0.65rem',
-          flexWrap: 'wrap'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 700 }}>🛡️ {prefixLabel}:</span>
-          <span
-            style={{
-              background: styleMeta.badgeBg,
-              color: styleMeta.badgeText,
-              padding: '0.1rem 0.45rem',
-              borderRadius: '4px',
-              fontSize: '0.68rem',
-              fontWeight: 800,
-              letterSpacing: '0.02em'
-            }}
-          >
-            {styleMeta.label}
-          </span>
-          <strong style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>
-            {loginDisplay}
-          </strong>
-          <span style={{ opacity: 0.9 }}>({entry.actor_name})</span>
-          {showSummary && entry.summary && (
-            <span style={{ opacity: 0.85 }}>— {entry.summary}</span>
-          )}
-        </div>
-        <span style={{ fontSize: '0.74rem', fontWeight: 600, opacity: 0.85 }}>
-          🕒 {formatAuditTimestamp(entry.created_at)}
-        </span>
-      </div>
-    );
-  }
+  const parsed = parseAuditDetails(entry.details);
 
   return (
     <div
+      className="no-print"
       style={{
-        display: 'inline-flex',
+        background: '#f8fafc',
+        border: '1px solid #e2e8f0',
+        color: '#334155',
+        borderRadius: '8px',
+        padding: '0.5rem 0.85rem',
+        fontSize: '0.78rem',
+        display: 'flex',
         alignItems: 'center',
-        gap: '0.35rem',
-        flexWrap: 'wrap',
-        background: styleMeta.bg,
-        border: `1px solid ${styleMeta.border}`,
-        color: styleMeta.text,
-        borderRadius: '6px',
-        padding: '0.2rem 0.5rem',
-        fontSize: '0.72rem',
-        lineHeight: 1.35,
-        marginTop: '0.25rem'
+        justifyContent: 'space-between',
+        gap: '0.65rem',
+        flexWrap: 'wrap'
       }}
-      title={`${entry.summary}${entry.details ? ` | ${entry.details}` : ''} (${formatAuditTimestamp(entry.created_at)})`}
     >
-      <span
-        style={{
-          background: styleMeta.badgeBg,
-          color: styleMeta.badgeText,
-          padding: '0.05rem 0.35rem',
-          borderRadius: '3px',
-          fontSize: '0.62rem',
-          fontWeight: 800
-        }}
-      >
-        {styleMeta.label}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 600, color: '#64748b' }}>{prefixLabel}:</span>
+        <span
+          style={{
+            background: styleMeta.badgeBg,
+            color: styleMeta.badgeText,
+            padding: '0.08rem 0.42rem',
+            borderRadius: '4px',
+            fontSize: '0.66rem',
+            fontWeight: 700
+          }}
+        >
+          {styleMeta.label}
+        </span>
+        <strong style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: '#0f172a' }}>
+          {loginDisplay}
+        </strong>
+        {showSummary && parsed.changes.length > 0 && (
+          <span style={{ color: '#475569' }}>
+            • {parsed.changes[0].field}:{' '}
+            <span style={{ textDecoration: 'line-through', color: '#94a3b8' }}>
+              {parsed.changes[0].before}
+            </span>{' '}
+            &rarr; <strong style={{ color: '#059669' }}>{parsed.changes[0].after}</strong>
+          </span>
+        )}
+      </div>
+      <span style={{ fontSize: '0.73rem', color: '#64748b' }}>
+        {formatAuditTimestamp(entry.created_at)}
       </span>
-      <span style={{ fontWeight: 600 }}>{prefixLabel}:</span>
-      <strong style={{ fontFamily: 'monospace' }}>{loginDisplay}</strong>
-      <span style={{ opacity: 0.85 }}>• {formatAuditTimestamp(entry.created_at)}</span>
     </div>
   );
 }

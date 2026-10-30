@@ -1186,7 +1186,17 @@ export default function DashboardPage() {
   // -------------------------------------------------------------------------------------
   // 3. OWNER VIEW
   // -------------------------------------------------------------------------------------
-  const unreadOwnerAlerts = store.getUnreadOwnerAlerts();
+  const completedOwnerEvents = state.events.filter((e) => e.status === 'completed');
+  const ownerPnlTotals = completedOwnerEvents.reduce(
+    (acc, evt) => {
+      const fin = store.getEventFinancialSummary(evt.id);
+      acc.revenue += fin.contractRevenue;
+      acc.expenditure += fin.totalExpenditure;
+      acc.netProfit += fin.netProfit;
+      return acc;
+    },
+    { revenue: 0, expenditure: 0, netProfit: 0 }
+  );
 
   return (
     <div>
@@ -1212,6 +1222,13 @@ export default function DashboardPage() {
           <Link href="/events" className="btn btn-primary">
             + New Event Inquiry
           </Link>
+          <Link
+            href="/pnl"
+            className="btn btn-secondary"
+            style={{ background: '#fff1f2', borderColor: '#fecdd3', color: '#be123c', fontWeight: 700 }}
+          >
+            📈 Profit &amp; Loss (Owner)
+          </Link>
           <Link href="/invoices" className="btn btn-secondary">
             🧾 Invoices
           </Link>
@@ -1225,7 +1242,7 @@ export default function DashboardPage() {
       <PWAInstallBanner />
 
       {/* Top Executive KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
         <div className="stats-card">
           <span className="stats-label">Total Projected Sales</span>
           <span className="stats-value">₹{totalSales.toLocaleString('en-IN')}</span>
@@ -1271,6 +1288,98 @@ export default function DashboardPage() {
               Staff &amp; Salary &rarr;
             </Link>
           </span>
+        </div>
+      </div>
+
+      {/* Owner-Only Completed Events Profit & Loss Executive Card */}
+      <div
+        className="card"
+        style={{
+          marginBottom: '1.5rem',
+          borderLeft: `4px solid ${ownerPnlTotals.netProfit >= 0 ? '#16a34a' : '#dc2626'}`,
+          background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)'
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '0.75rem',
+            flexWrap: 'wrap',
+            marginBottom: '0.85rem'
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <h2 className="card-title" style={{ margin: 0 }}>
+                📈 Completed Events Profit &amp; Loss Summary
+              </h2>
+              <span
+                className="badge"
+                style={{ background: '#ffe4e6', color: '#be123c', fontWeight: 800, fontSize: '0.68rem' }}
+              >
+                🔒 OWNER ONLY
+              </span>
+            </div>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>
+              Across {completedOwnerEvents.length} completed event{completedOwnerEvents.length === 1 ? '' : 's'} — includes Stock Pricing, Extras Cost, Staff Shifts + All Allowances, and Other Expenses.
+            </p>
+          </div>
+          <Link href="/pnl" className="btn btn-primary btn-sm" style={{ fontWeight: 700 }}>
+            Open Full Profit &amp; Loss Module &rarr;
+          </Link>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.85rem' }}>
+          <div style={{ padding: '0.75rem 0.9rem', background: '#ffffff', borderRadius: '8px', border: '1px solid var(--border)' }}>
+            <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
+              Completed Event Revenue
+            </div>
+            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', marginTop: '0.2rem' }}>
+              ₹{ownerPnlTotals.revenue.toLocaleString('en-IN')}
+            </div>
+          </div>
+
+          <div style={{ padding: '0.75rem 0.9rem', background: '#fff1f2', borderRadius: '8px', border: '1px solid #fecdd3' }}>
+            <div style={{ fontSize: '0.75rem', color: '#9f1239', fontWeight: 700, textTransform: 'uppercase' }}>
+              Total Spent (incl. Allowances)
+            </div>
+            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#be123c', marginTop: '0.2rem' }}>
+              ₹{ownerPnlTotals.expenditure.toLocaleString('en-IN')}
+            </div>
+          </div>
+
+          <div
+            style={{
+              padding: '0.75rem 0.9rem',
+              background: ownerPnlTotals.netProfit >= 0 ? '#f0fdf4' : '#fef2f2',
+              borderRadius: '8px',
+              border: `1px solid ${ownerPnlTotals.netProfit >= 0 ? '#bbf7d0' : '#fecaca'}`
+            }}
+          >
+            <div
+              style={{
+                fontSize: '0.75rem',
+                color: ownerPnlTotals.netProfit >= 0 ? '#166534' : '#991b1b',
+                fontWeight: 700,
+                textTransform: 'uppercase'
+              }}
+            >
+              {ownerPnlTotals.netProfit >= 0 ? 'Net Profit (ലാഭം)' : 'Net Loss (നഷ്ടം)'}
+            </div>
+            <div
+              style={{
+                fontSize: '1.35rem',
+                fontWeight: 800,
+                color: ownerPnlTotals.netProfit >= 0 ? '#15803d' : '#dc2626',
+                marginTop: '0.2rem'
+              }}
+            >
+              {ownerPnlTotals.netProfit >= 0 ? '+' : '-'}₹
+              {Math.abs(ownerPnlTotals.netProfit).toLocaleString('en-IN')}
+            </div>
+          </div>
         </div>
       </div>
 

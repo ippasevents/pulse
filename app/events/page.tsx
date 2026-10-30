@@ -194,14 +194,14 @@ export default function EventsPage() {
               <th>Guests</th>
               <th>Status</th>
               <th style={{ textAlign: 'right' }}>Total Quote</th>
-              {role === 'owner' && <th>Last Updated By (Login ID)</th>}
+              {role !== 'staff' && <th style={{ textAlign: 'right' }}>Total Spent (incl. Allowances)</th>}
               <th style={{ textAlign: 'center' }}>Action</th>
             </tr>
           </thead>
           <tbody>
             {filteredEvents.length === 0 ? (
               <tr>
-                <td colSpan={role === 'owner' ? 9 : 8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                <td colSpan={role !== 'staff' ? 9 : 8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
                   No catering events matching criteria.
                 </td>
               </tr>
@@ -210,7 +210,8 @@ export default function EventsPage() {
                 const client = state.clients.find((c) => c.id === evt.client_id);
                 const { grandTotal, menuTotal } = store.getEventTotal(evt.id);
                 const displayTotal = isFinance ? grandTotal : menuTotal;
-                const auditSummary = role === 'owner' ? store.getEventAuditSummary(evt.id) : null;
+                const finSummary = role !== 'staff' ? store.getEventFinancialSummary(evt.id) : null;
+                const isOwnerView = role === 'owner' || role === 'super_admin';
 
                 const quoteNo = store.getQuotationNumber(evt);
                 const eventInvoice = state.invoices.find((i) => i.event_id === evt.id && i.status !== 'void');
@@ -255,37 +256,29 @@ export default function EventsPage() {
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>
                       ₹{displayTotal.toLocaleString('en-IN')}
                     </td>
-                    {role === 'owner' && (
-                      <td>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.15rem' }}>
-                          {auditSummary?.eventAudit && (
-                            <OwnerAuditBadge
-                              role={role}
-                              entry={auditSummary.eventAudit}
-                              prefixLabel="Event"
-                            />
-                          )}
-                          {auditSummary?.quoteAudit && (
-                            <OwnerAuditBadge
-                              role={role}
-                              entry={auditSummary.quoteAudit}
-                              prefixLabel="Quote"
-                            />
-                          )}
-                          {!auditSummary?.eventAudit && !auditSummary?.quoteAudit && (
-                            auditSummary?.latestAudit ? (
-                              <OwnerAuditBadge
-                                role={role}
-                                entry={auditSummary.latestAudit}
-                                prefixLabel="Updated"
-                              />
-                            ) : (
-                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                Initial record
-                              </span>
-                            )
-                          )}
-                        </div>
+                    {role !== 'staff' && finSummary && (
+                      <td style={{ textAlign: 'right' }}>
+                        {evt.status === 'completed' || finSummary.totalExpenditure > 0 ? (
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                              ₹{finSummary.totalExpenditure.toLocaleString('en-IN')}
+                            </div>
+                            {isOwnerView && evt.status === 'completed' && (
+                              <div
+                                style={{
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700,
+                                  color: finSummary.netProfit >= 0 ? '#059669' : '#dc2626'
+                                }}
+                              >
+                                {finSummary.netProfit >= 0 ? 'Profit' : 'Loss'}: ₹
+                                {Math.abs(finSummary.netProfit).toLocaleString('en-IN')}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>—</span>
+                        )}
                       </td>
                     )}
                     <td style={{ textAlign: 'center' }}>
@@ -300,7 +293,7 @@ export default function EventsPage() {
                           💬 Quote WA
                         </button>
                         <Link href={`/events/${evt.id}`} className="btn btn-secondary btn-sm">
-                          View Details &amp; Quote &rarr;
+                          View Details &amp; Costs &rarr;
                         </Link>
                       </div>
                     </td>

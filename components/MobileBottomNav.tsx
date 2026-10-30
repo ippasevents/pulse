@@ -98,10 +98,17 @@ export default function MobileBottomNav() {
     { label: 'Staff & Salary Management', href: '/staff', icon: '🧑‍🍳', desc: 'Crew wages, paid salary & pending balances', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
     { label: 'Invoices & Receipts', href: '/invoices', icon: '🧾', desc: 'Billing, A4 prints & payments', roles: ['super_admin', 'owner', 'accountant'] },
     {
-      label: unreadAuditCount > 0 ? `Activity & Audit (${unreadAuditCount} New)` : 'Activity & Audit Log',
+      label: 'Profit & Loss (P&L)',
+      href: '/pnl',
+      icon: '📈',
+      desc: 'Event expenditure, allowances & net profit (Owner Only)',
+      roles: ['super_admin', 'owner']
+    },
+    {
+      label: unreadAuditCount > 0 ? `Notifications (${unreadAuditCount} Unread)` : 'Notifications & Edit History',
       href: '/activity',
-      icon: '🕵️',
-      desc: 'Track user login IDs & live database updates',
+      icon: '🔔',
+      desc: 'Check edited fields (Previous → New data) anytime',
       roles: ['super_admin', 'owner']
     },
     { label: 'User Roles & Passwords', href: '/users', icon: '🛡️', desc: 'System user accounts & passwords', roles: ['super_admin', 'owner'] },

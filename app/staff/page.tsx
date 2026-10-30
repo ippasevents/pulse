@@ -13,6 +13,8 @@ import {
   downloadStaffPayrollSummaryPdf,
   formatDisplayDate,
   formatPeriodLabel,
+  printSingleStaffSalarySlip,
+  printStaffPayrollSummaryReport,
   StaffPeriodReportRow
 } from '@/lib/staffSalaryPdfGenerator';
 
@@ -514,6 +516,21 @@ export default function StaffPage() {
                     </button>
                     <button
                       type="button"
+                      className="btn btn-secondary"
+                      style={{ fontWeight: 700 }}
+                      onClick={() =>
+                        printSingleStaffSalarySlip(
+                          visibleReportRows[0],
+                          reportStartDate,
+                          reportEndDate,
+                          state
+                        )
+                      }
+                    >
+                      🖨️ Print Slip
+                    </button>
+                    <button
+                      type="button"
                       className="btn btn-primary"
                       style={{ fontWeight: 700 }}
                       disabled={pdfBusyKey !== null}
@@ -526,6 +543,24 @@ export default function StaffPage() {
                   </>
                 ) : (
                   <>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontWeight: 700 }}
+                      disabled={visibleReportRows.length === 0}
+                      onClick={() =>
+                        printStaffPayrollSummaryReport(
+                          visibleReportRows,
+                          visibleReportTotals,
+                          reportStartDate,
+                          reportEndDate,
+                          state
+                        )
+                      }
+                      title="Print standalone Payroll Summary Report without surrounding webpage"
+                    >
+                      🖨️ Print Summary
+                    </button>
                     <button
                       type="button"
                       className="btn btn-secondary"
@@ -868,10 +903,20 @@ export default function StaffPage() {
                             <button
                               type="button"
                               className="btn btn-secondary btn-sm"
+                              onClick={() =>
+                                printSingleStaffSalarySlip(row, reportStartDate, reportEndDate, state)
+                              }
+                              title="Print ONLY this staff member's official A4 Salary Slip"
+                            >
+                              🖨️ Print
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
                               onClick={() => setPreviewSlipStaffId(row.staff.id)}
                               title="Preview itemized salary slip for this period"
                             >
-                              👁 Preview Slip
+                              👁 Preview
                             </button>
                             <button
                               type="button"
@@ -880,7 +925,7 @@ export default function StaffPage() {
                               onClick={() => handleDownloadSingleSlip(row)}
                               title="Download official A4 Salary Slip PDF"
                             >
-                              {pdfBusyKey === `slip-${row.staff.id}` ? '⏳...' : '📥 PDF Slip'}
+                              {pdfBusyKey === `slip-${row.staff.id}` ? '⏳...' : '📥 PDF'}
                             </button>
                           </div>
                         </td>
@@ -1905,6 +1950,16 @@ export default function StaffPage() {
                     💸 Record Payment
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontWeight: 700 }}
+                  onClick={() =>
+                    printSingleStaffSalarySlip(previewSlipRow, reportStartDate, reportEndDate, state)
+                  }
+                >
+                  🖨️ Print Salary Slip
+                </button>
                 <button
                   type="button"
                   className="btn btn-primary"

@@ -60,7 +60,8 @@ export default function Navbar() {
     { label: 'Stock & Inventory', href: '/stock', roles: ['super_admin', 'owner', 'manager'] },
     { label: 'Staff & Salary', href: '/staff', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
     { label: 'Invoices & Billing', href: '/invoices', roles: ['super_admin', 'owner', 'accountant'] },
-    { label: 'Activity & Audit', href: '/activity', roles: ['super_admin', 'owner'] },
+    { label: 'Profit & Loss', href: '/pnl', roles: ['super_admin', 'owner'] },
+    { label: 'Notifications', href: '/activity', roles: ['super_admin', 'owner'] },
     { label: 'Users & Passwords', href: '/users', roles: ['super_admin', 'owner'] },
     { label: 'Settings', href: '/settings', roles: ['super_admin', 'owner'] }
   ];
@@ -136,37 +137,37 @@ export default function Navbar() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            {/* Activity Alerts for Owner and Super Admin */}
+            {/* Calm Activity Notifications for Owner and Super Admin */}
             {(role === 'owner' || role === 'super_admin') && (
               <button
                 type="button"
                 onClick={() => setIsAuditModalOpen(true)}
                 style={{
-                  background: unreadAuditCount > 0 ? '#e11d48' : '#1e293b',
+                  background: unreadAuditCount > 0 ? '#1d4ed8' : '#1e293b',
                   color: '#ffffff',
-                  border: unreadAuditCount > 0 ? '1px solid #fda4af' : '1px solid #475569',
+                  border: unreadAuditCount > 0 ? '1px solid #93c5fd' : '1px solid #475569',
                   borderRadius: '6px',
                   padding: '0.25rem 0.65rem',
                   fontSize: '0.8rem',
                   cursor: 'pointer',
-                  fontWeight: 700,
+                  fontWeight: 600,
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '0.4rem',
                   transition: 'all 0.15s ease'
                 }}
-                title="Activity & Database Alerts"
+                title="View recent edits & activity notifications"
               >
-                <span>🛡️</span>
-                <span>Activity Alerts</span>
+                <span>🔔</span>
+                <span>Notifications</span>
                 {unreadAuditCount > 0 && (
                   <span
                     style={{
                       background: '#ffffff',
-                      color: '#be123c',
+                      color: '#1d4ed8',
                       padding: '0.08rem 0.42rem',
                       borderRadius: '10px',
-                      fontSize: '0.74rem',
+                      fontSize: '0.73rem',
                       fontWeight: 800
                     }}
                   >
@@ -176,7 +177,7 @@ export default function Navbar() {
               </button>
             )}
 
-            {/* Stock Notification Bell with Badge (only for non-staff) */}
+            {/* Stock Low Notification Button (only for non-staff) */}
             {!isStaff && (
               <button
                 type="button"
@@ -195,10 +196,10 @@ export default function Navbar() {
                   gap: '0.4rem',
                   transition: 'all 0.15s ease'
                 }}
-                title="Stock Alerts & Exhaustion Notifications"
+                title="Low Stock Notifications"
               >
-                <span>🔔</span>
-                <span>Stock Alert</span>
+                <span>📦</span>
+                <span>Low Stock</span>
                 {lowStockCount > 0 && (
                   <span
                     style={{
@@ -302,20 +303,20 @@ export default function Navbar() {
                 type="button"
                 onClick={() => setIsAuditModalOpen(true)}
                 style={{
-                  background: unreadAuditCount > 0 ? '#ffe4e6' : '#f1f5f9',
-                  color: unreadAuditCount > 0 ? '#be123c' : '#334155',
-                  border: `1px solid ${unreadAuditCount > 0 ? '#fda4af' : 'var(--border)'}`,
+                  background: unreadAuditCount > 0 ? '#eff6ff' : '#f1f5f9',
+                  color: unreadAuditCount > 0 ? '#1d4ed8' : '#334155',
+                  border: `1px solid ${unreadAuditCount > 0 ? '#93c5fd' : 'var(--border)'}`,
                   borderRadius: '6px',
                   padding: '0.25rem 0.5rem',
                   fontSize: '0.75rem',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '0.25rem',
-                  fontWeight: 800
+                  fontWeight: 700
                 }}
-                title="Activity & Database Alerts"
+                title="Notifications & Edit History"
               >
-                🛡️ {unreadAuditCount > 0 ? unreadAuditCount : ''}
+                🔔 {unreadAuditCount > 0 ? unreadAuditCount : ''}
               </button>
             )}
 
@@ -335,8 +336,9 @@ export default function Navbar() {
                   gap: '0.25rem',
                   fontWeight: 700
                 }}
+                title="Low Stock Items"
               >
-                🔔 {lowStockCount > 0 ? lowStockCount : ''}
+                📦 {lowStockCount > 0 ? lowStockCount : ''}
               </button>
             )}
 

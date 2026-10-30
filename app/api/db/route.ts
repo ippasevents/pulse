@@ -53,6 +53,7 @@ const ALLOWED_TABLES = new Set([
   'events',
   'event_items',
   'event_extras',
+  'event_expenses',
   'staff_members',
   'shifts',
   'staff_salary_records',
@@ -63,6 +64,16 @@ const ALLOWED_TABLES = new Set([
   'stock_purchase_payments',
   'activity_logs'
 ]);
+
+function isMissingTableError(msg: string): boolean {
+  const lower = (msg || '').toLowerCase();
+  return (
+    lower.includes('does not exist') ||
+    lower.includes('could not find the table') ||
+    lower.includes('schema cache') ||
+    lower.includes('pgrst205')
+  );
+}
 
 function isCloudSqlConfigured(): boolean {
   return Boolean(
@@ -201,7 +212,11 @@ async function runSingleCloudSqlOperation(
 
     return { error: null };
   } catch (err: any) {
-    return { error: { message: err?.message || String(err) } };
+    const msg = err?.message || String(err);
+    if (op.table === 'event_expenses' && isMissingTableError(msg)) {
+      return { error: null };
+    }
+    return { error: { message: msg } };
   }
 }
 
@@ -232,6 +247,9 @@ async function runSingleSupabaseOperation(
       .from(op.table)
       .delete()
       .neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error && op.table === 'event_expenses' && isMissingTableError(String(error.message || ''))) {
+      return { error: null };
+    }
     return { error };
   }
 
@@ -241,6 +259,9 @@ async function runSingleSupabaseOperation(
       query = query.eq(k, v);
     }
     const { error } = await query;
+    if (error && op.table === 'event_expenses' && isMissingTableError(String(error.message || ''))) {
+      return { error: null };
+    }
     return { error };
   }
 
@@ -254,7 +275,11 @@ async function runSingleSupabaseOperation(
       const { error } = await query;
       if (!error) return { error: null };
 
-      const missingCol = extractMissingColumn(String(error.message || ''));
+      const msg = String(error.message || '');
+      if (op.table === 'event_expenses' && isMissingTableError(msg)) {
+        return { error: null };
+      }
+      const missingCol = extractMissingColumn(msg);
       if (missingCol && missingCol in currentValues) {
         delete currentValues[missingCol];
         if (Object.keys(currentValues).length === 0) return { error: null };
@@ -281,6 +306,9 @@ async function runSingleSupabaseOperation(
     if (!error) return { error: null };
 
     const msg = String(error.message || '');
+    if (op.table === 'event_expenses' && isMissingTableError(msg)) {
+      return { error: null };
+    }
     const missingCol = extractMissingColumn(msg);
     if (missingCol) {
       currentValues = stripColumn(currentValues, missingCol);
@@ -420,7 +448,8 @@ export async function GET(req: NextRequest) {
         purchasesRes,
         purchaseItemsRes,
         purchasePaymentsRes,
-        activityLogsRes
+        activityLogsRes,
+        eventExpensesRes
       ] = await Promise.all([
         pool.query('SELECT * FROM business_settings WHERE id = 1 LIMIT 1'),
         pool.query('SELECT * FROM profiles ORDER BY full_name ASC'),
@@ -439,7 +468,8 @@ export async function GET(req: NextRequest) {
         pool.query('SELECT * FROM stock_purchases ORDER BY created_at DESC'),
         pool.query('SELECT * FROM stock_purchase_items'),
         pool.query('SELECT * FROM stock_purchase_payments ORDER BY paid_at DESC'),
-        pool.query('SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 400')
+        pool.query('SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 400'),
+        pool.query('SELECT * FROM event_expenses ORDER BY created_at DESC').catch(() => ({ rows: [], tableMissing: true }))
       ]);
 
       return NextResponse.json({
@@ -455,6 +485,10 @@ export async function GET(req: NextRequest) {
           eventsRes: { data: eventsRes.rows },
           eventItemsRes: { data: eventItemsRes.rows },
           eventExtrasRes: { data: eventExtrasRes.rows },
+          eventExpensesRes: {
+            data: eventExpensesRes.rows,
+            tableMissing: Boolean((eventExpensesRes as any).tableMissing)
+          },
           staffRes: { data: staffRes.rows },
           shiftsRes: { data: shiftsRes.rows },
           salaryRecordsRes: { data: salaryRecordsRes.rows },
@@ -491,6 +525,7 @@ export async function GET(req: NextRequest) {
         eventsRes,
         eventItemsRes,
         eventExtrasRes,
+        eventExpensesRes,
         staffRes,
         shiftsRes,
         salaryRecordsRes,
@@ -510,6 +545,7 @@ export async function GET(req: NextRequest) {
         sb.from('events').select('*').order('event_date', { ascending: true }),
         sb.from('event_items').select('*'),
         sb.from('event_extras').select('*'),
+        sb.from('event_expenses').select('*').order('created_at', { ascending: false }),
         sb.from('staff_members').select('*').order('name', { ascending: true }),
         sb.from('shifts').select('*'),
         sb.from('staff_salary_records').select('*').order('recorded_at', { ascending: false }),
@@ -535,6 +571,7 @@ export async function GET(req: NextRequest) {
             eventsRes,
             eventItemsRes,
             eventExtrasRes,
+            eventExpensesRes,
             staffRes,
             shiftsRes,
             salaryRecordsRes,

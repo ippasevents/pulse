@@ -587,6 +587,11 @@ button, input, select, textarea {
   .top-navbar, .role-switcher-banner, .mobile-bottom-nav, .btn, .no-print, header, nav {
     display: none !important;
   }
+
+  body:has(.modal-overlay .print-page) .main-content > *:not(.modal-overlay) {
+    display: none !important;
+  }
+
   .main-content {
     padding: 0 !important;
     max-width: 100% !important;

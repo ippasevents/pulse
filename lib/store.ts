@@ -17,6 +17,8 @@ import {
   MenuItemIngredient,
   EventItem,
   EventExtra,
+  EventExpense,
+  EventExpenseCategory,
   StaffMember,
   Shift,
   ShiftAttendanceStatus,
@@ -38,6 +40,64 @@ import {
   AuditAction,
   AuditSource
 } from './types';
+import {
+  AuditFieldChange,
+  buildRecordDiffs,
+  encodeAuditDetails,
+  extractEmbeddedExpensePayload,
+  formatAuditVal,
+  formatCurrencyAuditVal
+} from './auditDiff';
+
+export const EVENT_EXPENSE_CATEGORY_LABELS: Record<
+  EventExpenseCategory,
+  { en: string; ml: string; short: string }
+> = {
+  stock_pricing: {
+    en: 'Stock Pricing / Raw Materials',
+    ml: 'സ്റ്റോക്കിന്റെ പ്രൈസിങ്',
+    short: 'Stock Pricing'
+  },
+  extras_cost: {
+    en: 'Extras Taken / Logistics Cost',
+    ml: 'എക്സ്ട്രാസ് കൊണ്ടുപോയതിന്റെ ചെലവുകൾ',
+    short: 'Extras Cost'
+  },
+  staff_expense: {
+    en: 'Staff Extra Expenses',
+    ml: 'സ്റ്റാഫിന്റെ ചെലവുകൾ',
+    short: 'Staff Expenses'
+  },
+  other_expense: {
+    en: 'Other Event Expenses',
+    ml: 'മറ്റ് ചെലവുകൾ',
+    short: 'Other Expenses'
+  }
+};
+
+export interface EventFinancialSummary {
+  eventId: string;
+  quotationTotal: number;
+  invoicedAmount: number;
+  hasActiveInvoice: boolean;
+  contractRevenue: number;
+  collectedRevenue: number;
+  pendingReceivable: number;
+  recipeStockEstimate: number;
+  stockPricingCost: number;
+  extrasTakenCost: number;
+  staffShiftWages: number;
+  staffAllowances: number;
+  staffExpenseCost: number;
+  totalStaffCost: number;
+  otherExpenseCost: number;
+  totalExpenditure: number;
+  netProfit: number;
+  marginPercent: number;
+  expenses: EventExpense[];
+  allowanceRecords: StaffSalaryRecord[];
+  attendedShiftCount: number;
+}
 
 export interface StaffShiftEarningItem {
   shift: Shift;
@@ -633,6 +693,7 @@ export interface AppState {
   events: EventRecord[];
   eventItems: EventItem[];
   eventExtras: EventExtra[];
+  eventExpenses: EventExpense[];
   staff: StaffMember[];
   shifts: Shift[];
   staffSalaryRecords: StaffSalaryRecord[];
@@ -1004,6 +1065,16 @@ class DataStore {
         .from(op.table)
         .delete()
         .neq('id', '00000000-0000-0000-0000-000000000000');
+      if (error && op.table === 'event_expenses') {
+        const msg = String(error.message || '');
+        if (
+          msg.includes('does not exist') ||
+          msg.includes('Could not find the table') ||
+          msg.includes('schema cache')
+        ) {
+          return { error: null };
+        }
+      }
       return { error };
     }
 
@@ -1036,7 +1107,17 @@ class DataStore {
         const { error } = await q;
         if (!error) return { error: null };
 
-        const missingCol = this.extractMissingColumn(String(error.message || ''));
+        const msg = String(error.message || '');
+        if (
+          op.table === 'event_expenses' &&
+          (msg.includes('does not exist') ||
+            msg.includes('Could not find the table') ||
+            msg.includes('schema cache'))
+        ) {
+          return { error: null };
+        }
+
+        const missingCol = this.extractMissingColumn(msg);
         if (missingCol && missingCol in currentValues) {
           delete currentValues[missingCol];
           if (Object.keys(currentValues).length === 0) return { error: null };
@@ -1063,6 +1144,14 @@ class DataStore {
       if (!error) return { error: null };
 
       const msg = String(error.message || '');
+      if (
+        op.table === 'event_expenses' &&
+        (msg.includes('does not exist') ||
+          msg.includes('Could not find the table') ||
+          msg.includes('schema cache'))
+      ) {
+        return { error: null };
+      }
       const missingCol = this.extractMissingColumn(msg);
       if (missingCol) {
         currentValues = this.stripColFromValues(currentValues, missingCol);
@@ -1507,6 +1596,8 @@ class DataStore {
       case 'event_items':
       case 'event_extras':
         return 'quotation';
+      case 'event_expenses':
+        return 'event_expense';
       case 'invoices':
         return 'invoice';
       case 'payments':
@@ -1580,14 +1671,32 @@ class DataStore {
       const action: AuditAction =
         eventType === 'INSERT' ? 'create' : eventType === 'DELETE' ? 'delete' : 'update';
 
+      const dbChanges: AuditFieldChange[] = [];
+      if (action === 'update' && payload.old && payload.new && typeof payload.old === 'object' && typeof payload.new === 'object') {
+        const skipKeys = new Set(['id', 'created_at', 'snapshot', 'password']);
+        for (const k of Object.keys(payload.new)) {
+          if (skipKeys.has(k)) continue;
+          if (k in payload.old && String(payload.old[k] ?? '') !== String(payload.new[k] ?? '')) {
+            dbChanges.push({
+              field: k.replace(/_/g, ' '),
+              before: formatAuditVal(payload.old[k]),
+              after: formatAuditVal(payload.new[k])
+            });
+          }
+        }
+      }
+
       const dbAlert: AuditLogEntry = {
         id: generateUUID(),
         entity_type: entityType,
         entity_id: entityId,
         parent_event_id: parentEventId,
         action,
-        summary: `Direct Database ${eventType} on ${tableName} (${label})`,
-        details: `Detected live database modification on table "${tableName}"`,
+        summary: `Database ${eventType.toLowerCase()} on ${tableName} (${label})`,
+        details: encodeAuditDetails({
+          changes: dbChanges,
+          note: `Table: ${tableName}`
+        }),
         actor_username: 'supabase_db',
         actor_name: 'Direct Database Change',
         actor_role: 'database',
@@ -1872,6 +1981,7 @@ class DataStore {
       events: [...this.state.events],
       eventItems: [...this.state.eventItems],
       eventExtras: [...this.state.eventExtras],
+      eventExpenses: [...(this.state.eventExpenses || [])],
       staff: [...this.state.staff],
       shifts: [...this.state.shifts],
       staffSalaryRecords: [...(this.state.staffSalaryRecords || [])],
@@ -1926,6 +2036,7 @@ class DataStore {
       let eventsRes: any;
       let eventItemsRes: any;
       let eventExtrasRes: any;
+      let eventExpensesRes: any;
       let staffRes: any;
       let shiftsRes: any;
       let salaryRecordsRes: any;
@@ -1963,6 +2074,7 @@ class DataStore {
               eventsRes,
               eventItemsRes,
               eventExtrasRes,
+              eventExpensesRes,
               staffRes,
               shiftsRes,
               salaryRecordsRes,
@@ -1990,6 +2102,7 @@ class DataStore {
           eventsRes,
           eventItemsRes,
           eventExtrasRes,
+          eventExpensesRes,
           staffRes,
           shiftsRes,
           salaryRecordsRes,
@@ -2009,6 +2122,7 @@ class DataStore {
           supabase.from('events').select('*').order('event_date', { ascending: true }),
           supabase.from('event_items').select('*'),
           supabase.from('event_extras').select('*'),
+          supabase.from('event_expenses').select('*').order('created_at', { ascending: false }),
           supabase.from('staff_members').select('*').order('name', { ascending: true }),
           supabase.from('shifts').select('*'),
           supabase.from('staff_salary_records').select('*').order('recorded_at', { ascending: false }),
@@ -2328,6 +2442,85 @@ class DataStore {
           description: x.description,
           amount: Number(x.amount || 0)
         })),
+        eventExpenses: (() => {
+          const validEventIds = new Set(((eventsRes?.data || []) as any[]).map((ev) => String(ev.id)));
+          const expenseMap = new Map<string, EventExpense>();
+          const deletedIds = new Set<string>();
+
+          // 1. Reconstruct from activity_logs chronologically so expenses persist online even before migration_08.sql
+          const rawLogsAsc = !activityLogsRes?.error
+            ? [...((activityLogsRes?.data || []) as any[])].sort((a, b) =>
+                String(a.created_at || '').localeCompare(String(b.created_at || ''))
+              )
+            : [];
+
+          for (const al of rawLogsAsc) {
+            if (String(al.entity_type || '') === 'event_expense') {
+              const expId = String(al.entity_id || '');
+              if (al.action === 'delete') {
+                deletedIds.add(expId);
+                expenseMap.delete(expId);
+              } else {
+                const embedded = extractEmbeddedExpensePayload(al.details ? String(al.details) : undefined);
+                if (embedded && embedded.id && embedded.event_id && validEventIds.has(String(embedded.event_id))) {
+                  deletedIds.delete(String(embedded.id));
+                  expenseMap.set(String(embedded.id), {
+                    id: String(embedded.id),
+                    event_id: String(embedded.event_id),
+                    category: (
+                      embedded.category === 'stock_pricing' ||
+                      embedded.category === 'extras_cost' ||
+                      embedded.category === 'staff_expense' ||
+                      embedded.category === 'other_expense'
+                        ? embedded.category
+                        : 'other_expense'
+                    ) as EventExpenseCategory,
+                    description: String(embedded.description || 'Event Expense'),
+                    amount: Number(embedded.amount || 0),
+                    expense_date: String(embedded.expense_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
+                    notes: embedded.notes ? String(embedded.notes) : '',
+                    created_by_role: (embedded.created_by_role || al.actor_role || undefined) as UserRole | undefined,
+                    created_by_name: embedded.created_by_name || al.actor_name || undefined,
+                    created_at: String(embedded.created_at || al.created_at || new Date().toISOString())
+                  });
+                }
+              }
+            }
+          }
+
+          // 2. Overlay authoritative rows from event_expenses table when present
+          if (eventExpensesRes && !eventExpensesRes.error && !eventExpensesRes.tableMissing) {
+            for (const row of (eventExpensesRes.data || []) as any[]) {
+              const idStr = String(row.id);
+              if (deletedIds.has(idStr)) continue;
+              expenseMap.set(idStr, {
+                id: idStr,
+                event_id: String(row.event_id),
+                category: (
+                  row.category === 'stock_pricing' ||
+                  row.category === 'extras_cost' ||
+                  row.category === 'staff_expense' ||
+                  row.category === 'other_expense'
+                    ? row.category
+                    : 'other_expense'
+                ) as EventExpenseCategory,
+                description: String(row.description || ''),
+                amount: Number(row.amount || 0),
+                expense_date: row.expense_date
+                  ? String(row.expense_date).slice(0, 10)
+                  : new Date().toISOString().slice(0, 10),
+                notes: row.notes || '',
+                created_by_role: (row.created_by_role || undefined) as UserRole | undefined,
+                created_by_name: row.created_by_name || undefined,
+                created_at: row.created_at || new Date().toISOString()
+              });
+            }
+          }
+
+          return Array.from(expenseMap.values()).sort((a, b) =>
+            (b.created_at || '').localeCompare(a.created_at || '')
+          );
+        })(),
         staff: loadedStaff,
         shifts: (shiftsRes?.data || [])
           .filter((sh: any) => sh.staff_member_id || sh.staff_id)
@@ -2594,6 +2787,7 @@ class DataStore {
       events: [],
       eventItems: [],
       eventExtras: [],
+      eventExpenses: [],
       staff: [],
       shifts: [],
       staffSalaryRecords: [],
@@ -2926,6 +3120,7 @@ class DataStore {
       updates = { ...updates, username: cleanUsername };
     }
 
+    const prevSnapshot = { ...target };
     let updatedRecord: Profile | undefined;
     this.state.profiles = this.state.profiles.map((p) => {
       if (p.id !== profileId) return p;
@@ -2938,12 +3133,24 @@ class DataStore {
     }
 
     if (updatedRecord) {
+      const diffs = buildRecordDiffs(prevSnapshot, updatedRecord, [
+        { key: 'full_name', label: 'Full Name' },
+        { key: 'username', label: 'Username' },
+        { key: 'role', label: 'Role', format: (v) => String(v || '').toUpperCase() },
+        { key: 'phone', label: 'Phone' }
+      ]);
+      if (updates.password && updates.password !== prevSnapshot.password) {
+        diffs.push({ field: 'Password', before: '••••••', after: 'Updated' });
+      }
       this.logMutation({
         entity_type: 'user',
         entity_id: updatedRecord.id,
         action: 'update',
         summary: `Updated user account "${updatedRecord.username}" (${updatedRecord.role.toUpperCase()})`,
-        details: `Full Name: ${updatedRecord.full_name}`
+        details: encodeAuditDetails({
+          changes: diffs,
+          note: `Full Name: ${updatedRecord.full_name}`
+        })
       });
     }
     this.save();
@@ -3083,6 +3290,7 @@ class DataStore {
       events: [],
       eventItems: [],
       eventExtras: [],
+      eventExpenses: [],
       shifts: [],
       staffSalaryRecords: [],
       invoices: [],
@@ -3097,6 +3305,7 @@ class DataStore {
       { type: 'delete_all', table: 'invoices' },
       { type: 'delete_all', table: 'shifts' },
       { type: 'delete_all', table: 'staff_salary_records' },
+      { type: 'delete_all', table: 'event_expenses' },
       { type: 'delete_all', table: 'event_items' },
       { type: 'delete_all', table: 'event_extras' },
       { type: 'delete_all', table: 'events' },
@@ -3161,17 +3370,27 @@ class DataStore {
   }
 
   public updateClient(id: string, updates: Partial<Client>) {
+    const prevClient = this.state.clients.find((c) => c.id === id);
+    const prevSnapshot = prevClient ? { ...prevClient } : undefined;
     let updatedClient: Client | undefined;
     this.state.clients = this.state.clients.map((c) => {
       if (c.id !== id) return c;
       updatedClient = { ...c, ...updates };
       return updatedClient;
     });
+    const diffs = buildRecordDiffs(prevSnapshot, updatedClient, [
+      { key: 'name', label: 'Client Name' },
+      { key: 'phone', label: 'Phone' },
+      { key: 'email', label: 'Email' },
+      { key: 'company', label: 'Company' },
+      { key: 'notes', label: 'Notes' }
+    ]);
     this.logMutation({
       entity_type: 'client',
       entity_id: id,
       action: 'update',
-      summary: `Updated client profile "${updatedClient?.name || 'Client'}"`
+      summary: `Updated client "${updatedClient?.name || 'Client'}"`,
+      details: encodeAuditDetails({ changes: diffs })
     });
     this.save();
 
@@ -3194,6 +3413,9 @@ class DataStore {
       this.state.events = this.state.events.filter((e) => e.client_id !== id);
       this.state.eventItems = this.state.eventItems.filter((ei) => !clientEventIds.includes(ei.event_id));
       this.state.eventExtras = this.state.eventExtras.filter((ex) => !clientEventIds.includes(ex.event_id));
+      this.state.eventExpenses = (this.state.eventExpenses || []).filter(
+        (exp) => !clientEventIds.includes(exp.event_id)
+      );
       this.state.shifts = this.state.shifts.filter((sh) => !clientEventIds.includes(sh.event_id));
       this.state.invoices = this.state.invoices.filter((inv) => !clientEventIds.includes(inv.event_id));
       this.state.payments = this.state.payments.filter((p) => !clientInvoiceIds.includes(p.invoice_id));
@@ -3214,6 +3436,7 @@ class DataStore {
       }
       for (const evtId of clientEventIds.filter(isValidUUID)) {
         ops.push({ type: 'delete', table: 'invoices', match: { event_id: evtId } });
+        ops.push({ type: 'delete', table: 'event_expenses', match: { event_id: evtId } });
         ops.push({ type: 'delete', table: 'event_items', match: { event_id: evtId } });
         ops.push({ type: 'delete', table: 'event_extras', match: { event_id: evtId } });
         ops.push({ type: 'delete', table: 'shifts', match: { event_id: evtId } });
@@ -3400,6 +3623,8 @@ class DataStore {
   }
 
   public updateEvent(id: string, updates: Partial<EventRecord>) {
+    const prevEvt = this.state.events.find((e) => e.id === id);
+    const prevSnapshot = prevEvt ? { ...prevEvt } : undefined;
     let updatedEvt: EventRecord | undefined;
     let guestCountChanged = false;
     this.state.events = this.state.events.map((e) => {
@@ -3427,6 +3652,20 @@ class DataStore {
     }
 
     const qtnNo = updatedEvt ? this.getQuotationNumber(updatedEvt) : '';
+    const diffs = buildRecordDiffs(prevSnapshot, updatedEvt, [
+      { key: 'title', label: 'Event Title' },
+      { key: 'event_date', label: 'Event Date' },
+      { key: 'guest_count', label: 'Guest Count', format: (v) => `${v ?? 0} Guests` },
+      { key: 'status', label: 'Status', format: (v) => String(v || '').toUpperCase() },
+      { key: 'venue', label: 'Venue' },
+      { key: 'start_time', label: 'Start Time' },
+      { key: 'end_time', label: 'End Time' },
+      { key: 'payment_terms', label: 'Payment Terms' },
+      { key: 'show_bank_details', label: 'Show Bank Details' },
+      { key: 'show_payment_details', label: 'Show Payment Details' },
+      { key: 'notes', label: 'Notes' }
+    ]);
+
     this.logMutation({
       entity_type: 'event',
       entity_id: id,
@@ -3434,7 +3673,10 @@ class DataStore {
       action: 'update',
       summary: `Updated event "${updatedEvt?.title || id}" (${qtnNo})`,
       details: updatedEvt
-        ? `Quote#: ${qtnNo} • Date: ${updatedEvt.event_date} • ${updatedEvt.guest_count} Pax • Status: ${updatedEvt.status} • BankDetails: ${updatedEvt.show_bank_details !== false ? 'ON' : 'OFF'} • PayDetails: ${updatedEvt.show_payment_details !== false ? 'ON' : 'OFF'}${updatedEvt.payment_terms ? ` • Terms: ${updatedEvt.payment_terms}` : ''}`
+        ? encodeAuditDetails({
+            changes: diffs,
+            meta: `Quote#: ${qtnNo} • BankDetails: ${updatedEvt.show_bank_details !== false ? 'ON' : 'OFF'} • PayDetails: ${updatedEvt.show_payment_details !== false ? 'ON' : 'OFF'}${updatedEvt.payment_terms ? ` • Terms: ${updatedEvt.payment_terms}` : ''}`
+          })
         : undefined
     });
     this.save();
@@ -3453,6 +3695,7 @@ class DataStore {
     this.state.events = this.state.events.filter((e) => e.id !== id);
     this.state.eventItems = this.state.eventItems.filter((ei) => ei.event_id !== id);
     this.state.eventExtras = this.state.eventExtras.filter((ex) => ex.event_id !== id);
+    this.state.eventExpenses = (this.state.eventExpenses || []).filter((exp) => exp.event_id !== id);
     this.state.shifts = this.state.shifts.filter((sh) => sh.event_id !== id);
     this.state.invoices = this.state.invoices.filter((inv) => inv.event_id !== id);
     this.state.payments = this.state.payments.filter((p) => !invIds.includes(p.invoice_id));
@@ -3472,6 +3715,7 @@ class DataStore {
       }
       ops.push(
         { type: 'delete', table: 'invoices', match: { event_id: id } },
+        { type: 'delete', table: 'event_expenses', match: { event_id: id } },
         { type: 'delete', table: 'event_items', match: { event_id: id } },
         { type: 'delete', table: 'event_extras', match: { event_id: id } },
         { type: 'delete', table: 'shifts', match: { event_id: id } },
@@ -3496,6 +3740,8 @@ class DataStore {
     );
     let targetItem: EventItem;
     const isUpdate = existingIndex >= 0;
+    const prevItemSnapshot = isUpdate ? { ...this.state.eventItems[existingIndex] } : undefined;
+
     if (existingIndex >= 0) {
       this.state.eventItems[existingIndex].price_per_unit = pricePerUnit;
       this.state.eventItems[existingIndex].price_per_guest = pricePerUnit;
@@ -3503,7 +3749,7 @@ class DataStore {
       if (quantity !== undefined) {
         this.state.eventItems[existingIndex].quantity = quantity;
       }
-      targetItem = this.state.eventItems[existingIndex];
+      targetItem = { ...this.state.eventItems[existingIndex] };
     } else {
       targetItem = {
         id: generateUUID(),
@@ -3517,13 +3763,23 @@ class DataStore {
       this.state.eventItems.push(targetItem);
     }
 
+    const diffs = isUpdate
+      ? buildRecordDiffs(prevItemSnapshot, targetItem, [
+          { key: 'price_per_unit', label: 'Unit Rate', format: (v) => formatCurrencyAuditVal(v) },
+          { key: 'quantity', label: 'Quantity', format: (v) => formatAuditVal(v) },
+          { key: 'pricing_type', label: 'Pricing Mode', format: (v) => (v === 'per_kg' ? 'Per Kg' : 'Per Guest') }
+        ])
+      : [];
+
     this.logMutation({
       entity_type: 'quotation',
       entity_id: targetItem.id,
       parent_event_id: eventId,
       action: isUpdate ? 'update' : 'create',
       summary: `${isUpdate ? 'Updated' : 'Added'} dish "${dish?.name || 'Item'}" in quotation for "${evt?.title || 'Event'}"`,
-      details: `Rate: ₹${pricePerUnit}/${pricingType === 'per_kg' ? 'kg' : 'guest'}${targetItem.quantity ? ` • Qty: ${targetItem.quantity}` : ''}`
+      details: isUpdate
+        ? encodeAuditDetails({ changes: diffs })
+        : `Rate: ₹${pricePerUnit}/${pricingType === 'per_kg' ? 'kg' : 'guest'}${targetItem.quantity ? ` • Qty: ${targetItem.quantity}` : ''}`
     });
     this.save();
 
@@ -3554,6 +3810,8 @@ class DataStore {
   }
 
   public updateEventItem(id: string, updates: Partial<EventItem>) {
+    const prevItem = this.state.eventItems.find((ei) => ei.id === id);
+    const prevSnapshot = prevItem ? { ...prevItem } : undefined;
     let updatedItem: EventItem | undefined;
     this.state.eventItems = this.state.eventItems.map((ei) => {
       if (ei.id !== id) return ei;
@@ -3571,18 +3829,19 @@ class DataStore {
     const evt = updatedItem ? this.state.events.find((e) => e.id === updatedItem!.event_id) : undefined;
     const dish = updatedItem ? this.state.menuItems.find((m) => m.id === updatedItem!.menu_item_id) : undefined;
 
+    const diffs = buildRecordDiffs(prevSnapshot, updatedItem, [
+      { key: 'price_per_unit', label: `${dish?.name || 'Dish'} Rate`, format: (v) => formatCurrencyAuditVal(v) },
+      { key: 'quantity', label: `${dish?.name || 'Dish'} Qty`, format: (v) => formatAuditVal(v) },
+      { key: 'pricing_type', label: 'Pricing Type', format: (v) => (v === 'per_kg' ? 'Per Kg' : 'Per Guest') }
+    ]);
+
     this.logMutation({
       entity_type: 'quotation',
       entity_id: id,
       parent_event_id: updatedItem?.event_id,
       action: 'update',
       summary: `Edited quotation item "${dish?.name || 'Dish'}" on "${evt?.title || 'Event'}"`,
-      details:
-        updates.quantity !== undefined
-          ? `Updated quantity to ${updates.quantity}`
-          : updates.price_per_unit !== undefined
-          ? `Updated rate to ₹${updates.price_per_unit}`
-          : undefined
+      details: encodeAuditDetails({ changes: diffs })
     });
     this.save();
 
@@ -3746,6 +4005,8 @@ class DataStore {
   }
 
   public updateMenuItem(id: string, updates: Partial<MenuItem>) {
+    const prevDish = this.state.menuItems.find((m) => m.id === id);
+    const prevSnapshot = prevDish ? { ...prevDish } : undefined;
     let updatedItem: MenuItem | undefined;
     this.state.menuItems = this.state.menuItems.map((m) => {
       if (m.id !== id) return m;
@@ -3764,12 +4025,20 @@ class DataStore {
       return updatedItem;
     });
     if (updatedItem) {
+      const diffs = buildRecordDiffs(prevSnapshot, updatedItem, [
+        { key: 'name', label: 'Dish Name' },
+        { key: 'category', label: 'Category' },
+        { key: 'pricing_type', label: 'Pricing Mode', format: (v) => (v === 'per_kg' ? 'Per Kg' : 'Per Guest') },
+        { key: 'price_per_unit', label: 'Rate', format: (v) => formatCurrencyAuditVal(v) },
+        { key: 'description', label: 'Description' },
+        { key: 'active', label: 'Visibility', format: (v) => (v ? 'Active' : 'Hidden') }
+      ]);
       this.logMutation({
         entity_type: 'menu',
         entity_id: id,
         action: 'update',
         summary: `Updated menu dish "${updatedItem.name}"`,
-        details: `Rate: ₹${updatedItem.price_per_unit} • ${updatedItem.active ? 'Active' : 'Hidden'}`
+        details: encodeAuditDetails({ changes: diffs })
       });
     }
     this.save();
@@ -3805,7 +4074,21 @@ class DataStore {
 
   public setRecipeIngredients(menuItemId: string, ingredients: { ingredient_id: string; qty_per_guest: number }[]) {
     const targetDish = this.state.menuItems.find((m) => m.id === menuItemId);
+    const prevRecipeLines = this.state.recipes.filter((r) => r.menu_item_id === menuItemId);
     const validLines = ingredients.filter((ing) => ing.ingredient_id && ing.qty_per_guest > 0);
+
+    const summarizeLines = (lines: { ingredient_id: string; qty_per_guest: number }[]) => {
+      if (lines.length === 0) return 'No ingredients';
+      return lines
+        .map((l) => {
+          const ing = this.state.ingredients.find((i) => i.id === l.ingredient_id);
+          return `${ing?.name || 'Ingredient'}: ${l.qty_per_guest} ${ing?.unit || ''}`;
+        })
+        .join(', ');
+    };
+    const beforeRecipeText = summarizeLines(prevRecipeLines);
+    const afterRecipeText = summarizeLines(validLines);
+
     this.state.recipes = this.state.recipes.filter((r) => r.menu_item_id !== menuItemId);
     for (const ing of validLines) {
       this.state.recipes.push({
@@ -3818,8 +4101,13 @@ class DataStore {
       entity_type: 'recipe',
       entity_id: menuItemId,
       action: 'update',
-      summary: `Updated recipe ingredients for "${targetDish?.name || 'Dish'}"`,
-      details: `${validLines.length} raw ingredient(s) configured`
+      summary: `Updated recipe for "${targetDish?.name || 'Dish'}"`,
+      details: encodeAuditDetails({
+        changes:
+          beforeRecipeText !== afterRecipeText
+            ? [{ field: 'Recipe Formula', before: beforeRecipeText, after: afterRecipeText }]
+            : []
+      })
     });
     this.save();
 
@@ -3869,7 +4157,10 @@ class DataStore {
       entity_id: newIng.id,
       action: 'create',
       summary: `Added stock item "${newIng.name}" (${newIng.stock_qty} ${newIng.unit})`,
-      details: `Unit Cost: ₹${newIng.cost_per_unit}/${newIng.unit} • Expiry: ${newIng.expiry_date || 'None'}`
+      details: encodeAuditDetails({
+        note: `Unit Cost: ₹${newIng.cost_per_unit}/${newIng.unit}`,
+        meta: `Expiry: ${newIng.expiry_date || 'None'}`
+      })
     });
     this.save();
 
@@ -3881,6 +4172,8 @@ class DataStore {
   }
 
   public updateIngredient(id: string, updates: Partial<Ingredient>) {
+    const prevIng = this.state.ingredients.find((i) => i.id === id);
+    const prevSnapshot = prevIng ? { ...prevIng } : undefined;
     let updatedIng: Ingredient | undefined;
     this.state.ingredients = this.state.ingredients.map((i) => {
       if (i.id !== id) return i;
@@ -3892,12 +4185,22 @@ class DataStore {
       return updatedIng;
     });
     if (updatedIng) {
+      const diffs = buildRecordDiffs(prevSnapshot, updatedIng, [
+        { key: 'name', label: 'Ingredient Name' },
+        { key: 'stock_qty', label: 'Stock Qty', format: (v, rec) => `${v ?? 0} ${rec.unit}` },
+        { key: 'cost_per_unit', label: 'Unit Cost', format: (v, rec) => `₹${v ?? 0}/${rec.unit}` },
+        { key: 'low_stock_level', label: 'Low Stock Alert', format: (v, rec) => `${v ?? 0} ${rec.unit}` },
+        { key: 'expiry_date', label: 'Expiry Date', format: (v) => (v ? String(v) : 'None') }
+      ]);
       this.logMutation({
         entity_type: 'stock',
         entity_id: id,
         action: 'update',
         summary: `Updated stock item "${updatedIng.name}"`,
-        details: `Qty: ${updatedIng.stock_qty} ${updatedIng.unit} • Cost: ₹${updatedIng.cost_per_unit} • Expiry: ${updatedIng.expiry_date || 'None'}`
+        details: encodeAuditDetails({
+          changes: diffs,
+          meta: `Expiry: ${updatedIng.expiry_date || 'None'}`
+        })
       });
     }
     this.save();
@@ -3930,9 +4233,11 @@ class DataStore {
   }
 
   public adjustStock(id: string, delta: number) {
+    let prevQty = 0;
     let updatedIng: Ingredient | undefined;
     this.state.ingredients = this.state.ingredients.map((i) => {
       if (i.id === id) {
+        prevQty = i.stock_qty;
         const next = Math.max(0, Number((i.stock_qty + delta).toFixed(3)));
         updatedIng = { ...i, stock_qty: next };
         return updatedIng;
@@ -3944,7 +4249,17 @@ class DataStore {
       entity_id: id,
       action: 'update',
       summary: `Adjusted stock "${updatedIng?.name || 'Stock Item'}" (${delta >= 0 ? `+${delta}` : delta} ${updatedIng?.unit || ''})`,
-      details: updatedIng ? `New Stock Balance: ${updatedIng.stock_qty} ${updatedIng.unit}` : undefined
+      details: updatedIng
+        ? encodeAuditDetails({
+            changes: [
+              {
+                field: `${updatedIng.name} Stock`,
+                before: `${prevQty} ${updatedIng.unit}`,
+                after: `${updatedIng.stock_qty} ${updatedIng.unit}`
+              }
+            ]
+          })
+        : undefined
     });
     this.save();
 
@@ -3961,12 +4276,19 @@ class DataStore {
     }
     const targetSet = new Set(ids);
     const updatedItems: Ingredient[] = [];
+    const diffs: AuditFieldChange[] = [];
 
     this.state.ingredients = this.state.ingredients.map((i) => {
       if (!targetSet.has(i.id)) return i;
+      const prevQty = i.stock_qty;
       const next = Math.max(0, Number((i.stock_qty + delta).toFixed(3)));
       const updated = { ...i, stock_qty: next };
       updatedItems.push(updated);
+      diffs.push({
+        field: i.name,
+        before: `${prevQty} ${i.unit}`,
+        after: `${next} ${i.unit}`
+      });
       this.recentLocalMutations.set(i.id, Date.now());
       return updated;
     });
@@ -3974,19 +4296,13 @@ class DataStore {
     if (updatedItems.length === 0) return 0;
 
     const signLabel = delta >= 0 ? `+${delta}` : `${delta}`;
-    const previewNames = updatedItems
-      .slice(0, 5)
-      .map((it) => `${it.name} (${it.stock_qty} ${it.unit})`)
-      .join(', ');
-    const moreSuffix =
-      updatedItems.length > 5 ? ` +${updatedItems.length - 5} more` : '';
 
     this.logMutation({
       entity_type: 'stock',
       entity_id: updatedItems.length === 1 ? updatedItems[0].id : 'bulk_stock',
       action: 'update',
       summary: `Bulk adjusted stock (${signLabel}) across ${updatedItems.length} ingredient${updatedItems.length === 1 ? '' : 's'}`,
-      details: `Updated balances: ${previewNames}${moreSuffix}`
+      details: encodeAuditDetails({ changes: diffs.slice(0, 12) })
     });
     this.save();
 
@@ -4251,6 +4567,8 @@ class DataStore {
 
   public updateStockPurchase(id: string, updates: Partial<StockPurchase>) {
     if (!Array.isArray(this.state.stockPurchases)) return;
+    const prevPurchase = this.state.stockPurchases.find((p) => p.id === id);
+    const prevSnapshot = prevPurchase ? { ...prevPurchase } : undefined;
     let updatedPurchase: StockPurchase | undefined;
     this.state.stockPurchases = this.state.stockPurchases.map((p) => {
       if (p.id !== id) return p;
@@ -4271,11 +4589,20 @@ class DataStore {
       return updatedPurchase;
     });
     if (updatedPurchase) {
+      const diffs = buildRecordDiffs(prevSnapshot, updatedPurchase, [
+        { key: 'vendor_name', label: 'Vendor Name' },
+        { key: 'bill_number', label: 'Bill #' },
+        { key: 'purchase_date', label: 'Purchase Date' },
+        { key: 'total_amount', label: 'Bill Amount', format: (v) => formatCurrencyAuditVal(v) },
+        { key: 'paid_amount', label: 'Paid Amount', format: (v) => formatCurrencyAuditVal(v) },
+        { key: 'notes', label: 'Notes' }
+      ]);
       this.logMutation({
         entity_type: 'purchase',
         entity_id: id,
         action: 'update',
-        summary: `Updated stock purchase bill from "${updatedPurchase.vendor_name}"`
+        summary: `Updated stock purchase bill from "${updatedPurchase.vendor_name}"`,
+        details: encodeAuditDetails({ changes: diffs })
       });
     }
     this.save();
@@ -4379,6 +4706,8 @@ class DataStore {
   }
 
   public updateStaff(id: string, updates: Partial<StaffMember>) {
+    const prevStaff = this.state.staff.find((s) => s.id === id);
+    const prevSnapshot = prevStaff ? { ...prevStaff } : undefined;
     let updatedStaff: StaffMember | undefined;
     this.state.staff = this.state.staff.map((s) => {
       if (s.id !== id) return s;
@@ -4386,12 +4715,19 @@ class DataStore {
       return updatedStaff;
     });
     if (updatedStaff) {
+      const diffs = buildRecordDiffs(prevSnapshot, updatedStaff, [
+        { key: 'name', label: 'Staff Name' },
+        { key: 'phone', label: 'Mobile' },
+        { key: 'role_title', label: 'Role Title' },
+        { key: 'hourly_rate', label: 'Hourly Rate', format: (v) => `₹${v ?? 0}/hr` },
+        { key: 'active', label: 'Status', format: (v) => (v ? 'Active' : 'Inactive') }
+      ]);
       this.logMutation({
         entity_type: 'staff',
         entity_id: id,
         action: 'update',
         summary: `Updated staff profile "${updatedStaff.name}"`,
-        details: `${updatedStaff.role_title || 'Crew'} • ₹${updatedStaff.hourly_rate}/hr`
+        details: encodeAuditDetails({ changes: diffs })
       });
     }
     this.save();
@@ -4566,6 +4902,8 @@ class DataStore {
   }
 
   public updateShiftAttendance(shiftId: string, status: ShiftAttendanceStatus) {
+    const prevShift = this.state.shifts.find((sh) => sh.id === shiftId);
+    const prevStatus = prevShift?.attendance_status || 'pending';
     let updatedShift: Shift | undefined;
     const markedAt = status === 'pending' ? undefined : new Date().toISOString();
 
@@ -4591,7 +4929,16 @@ class DataStore {
       entity_id: shiftId,
       parent_event_id: updatedShift.event_id,
       action: 'update',
-      summary: `Marked attendance ${statusLabel} for "${staffMember?.name || 'Staff'}" on "${evt?.title || 'Event'}"`
+      summary: `Marked attendance ${statusLabel} for "${staffMember?.name || 'Staff'}" on "${evt?.title || 'Event'}"`,
+      details: encodeAuditDetails({
+        changes: [
+          {
+            field: 'Attendance',
+            before: prevStatus.toUpperCase(),
+            after: status.toUpperCase()
+          }
+        ]
+      })
     });
     this.save();
 
@@ -4991,6 +5338,8 @@ class DataStore {
   }
 
   public updateInvoice(id: string, updates: Partial<Invoice>) {
+    const prevInv = this.state.invoices.find((inv) => inv.id === id);
+    const prevSnapshot = prevInv ? { ...prevInv } : undefined;
     let updatedInv: Invoice | undefined;
     this.state.invoices = this.state.invoices.map((inv) => {
       if (inv.id !== id) return inv;
@@ -5011,13 +5360,27 @@ class DataStore {
     if (updatedInv) {
       const evt = this.state.events.find((e) => e.id === updatedInv!.event_id);
       const qtnRef = updatedInv.quotation_number || (evt ? this.getQuotationNumber(evt) : 'N/A');
+      const diffs = buildRecordDiffs(prevSnapshot, updatedInv, [
+        { key: 'subtotal', label: 'Gross Subtotal', format: (v) => formatCurrencyAuditVal(v) },
+        { key: 'discount', label: 'Discount', format: (v) => formatCurrencyAuditVal(v) },
+        { key: 'discount_note', label: 'Discount Note' },
+        { key: 'amount', label: 'Net Payable', format: (v) => formatCurrencyAuditVal(v) },
+        { key: 'status', label: 'Status', format: (v) => String(v || '').toUpperCase() },
+        { key: 'due_date', label: 'Due Date' },
+        { key: 'show_bank_details', label: 'Show Bank Details' },
+        { key: 'show_payment_details', label: 'Show Payment Details' },
+        { key: 'notes', label: 'Notes' }
+      ]);
       this.logMutation({
         entity_type: 'invoice',
         entity_id: id,
         parent_event_id: updatedInv.event_id,
         action: 'update',
         summary: `Updated Invoice ${updatedInv.invoice_number} (₹${updatedInv.amount.toLocaleString('en-IN')})`,
-        details: `Event: ${evt?.title || 'Event'} • QuoteRef: ${qtnRef} • Discount: ₹${updatedInv.discount.toLocaleString('en-IN')} • DiscountNote: ${updatedInv.discount_note?.trim() || 'None'} • Status: ${updatedInv.status} • BankDetails: ${updatedInv.show_bank_details !== false ? 'ON' : 'OFF'} • PayDetails: ${updatedInv.show_payment_details !== false ? 'ON' : 'OFF'}`
+        details: encodeAuditDetails({
+          changes: diffs,
+          meta: `QuoteRef: ${qtnRef} • DiscountNote: ${updatedInv.discount_note?.trim() || 'None'} • BankDetails: ${updatedInv.show_bank_details !== false ? 'ON' : 'OFF'} • PayDetails: ${updatedInv.show_payment_details !== false ? 'ON' : 'OFF'}`
+        })
       });
     }
     this.save();
@@ -5292,12 +5655,26 @@ class DataStore {
 
   // Settings
   public updateSettings(updates: Partial<BusinessSettings>) {
+    const prevSettings = { ...this.state.settings };
     this.state.settings = { ...this.state.settings, ...updates };
+    const diffs = buildRecordDiffs(prevSettings, this.state.settings, [
+      { key: 'name', label: 'Business Name' },
+      { key: 'address', label: 'Address' },
+      { key: 'phone', label: 'Phone' },
+      { key: 'email', label: 'Email' },
+      { key: 'bank_name', label: 'Bank Name' },
+      { key: 'account_name', label: 'Account Name' },
+      { key: 'account_number', label: 'Account Number' },
+      { key: 'ifsc_code', label: 'IFSC Code' },
+      { key: 'upi_id', label: 'UPI ID' },
+      { key: 'payment_terms', label: 'Payment Terms' }
+    ]);
     this.logMutation({
       entity_type: 'settings',
       entity_id: String(this.state.settings.id || 1),
       action: 'update',
-      summary: 'Updated business profile, bank details, or payment terms'
+      summary: 'Updated business profile or bank settings',
+      details: encodeAuditDetails({ changes: diffs })
     });
     this.save();
 
@@ -5322,6 +5699,270 @@ class DataStore {
         onConflict: 'id'
       }
     ]);
+  }
+
+  // Event Internal / Extra Expenses (Accessible to Owner, Accountant & Manager)
+  public addEventExpense(expense: {
+    event_id: string;
+    category: EventExpenseCategory;
+    description: string;
+    amount: number;
+    expense_date?: string;
+    notes?: string;
+  }): EventExpense {
+    const actor = this.getCurrentUser();
+    const evt = this.state.events.find((e) => e.id === expense.event_id);
+    const newExpense: EventExpense = {
+      id: generateUUID(),
+      event_id: expense.event_id,
+      category: expense.category,
+      description: expense.description.trim(),
+      amount: Math.max(0, Number(expense.amount || 0)),
+      expense_date:
+        expense.expense_date || evt?.event_date || new Date().toISOString().slice(0, 10),
+      notes: (expense.notes || '').trim(),
+      created_by_role: this.state.currentRole,
+      created_by_name: actor?.full_name || this.state.currentRole.toUpperCase(),
+      created_at: new Date().toISOString()
+    };
+
+    if (!Array.isArray(this.state.eventExpenses)) {
+      this.state.eventExpenses = [];
+    }
+    this.state.eventExpenses.unshift(newExpense);
+
+    const catInfo = EVENT_EXPENSE_CATEGORY_LABELS[newExpense.category];
+    this.logMutation({
+      entity_type: 'event_expense',
+      entity_id: newExpense.id,
+      parent_event_id: newExpense.event_id,
+      action: 'create',
+      summary: `Added ${catInfo.short} "${newExpense.description}" (₹${newExpense.amount.toLocaleString('en-IN')}) on "${evt?.title || 'Event'}"`,
+      details: encodeAuditDetails({
+        note: `Category: ${catInfo.short}${newExpense.notes ? ` • ${newExpense.notes}` : ''}`,
+        expensePayload: newExpense
+      })
+    });
+    this.save();
+
+    if (isValidUUID(newExpense.event_id)) {
+      this.enqueueSqlOperations('Add Event Expense', [
+        ...this.ensureEventParentOps(newExpense.event_id),
+        {
+          type: 'upsert',
+          table: 'event_expenses',
+          values: {
+            id: newExpense.id,
+            event_id: newExpense.event_id,
+            category: newExpense.category,
+            description: newExpense.description,
+            amount: newExpense.amount,
+            expense_date: newExpense.expense_date,
+            notes: newExpense.notes || null,
+            created_by_role: newExpense.created_by_role || null,
+            created_by_name: newExpense.created_by_name || null,
+            created_at: newExpense.created_at
+          },
+          onConflict: 'id'
+        }
+      ]);
+    }
+
+    return newExpense;
+  }
+
+  public updateEventExpense(
+    id: string,
+    updates: Partial<Pick<EventExpense, 'category' | 'description' | 'amount' | 'expense_date' | 'notes'>>
+  ) {
+    if (!Array.isArray(this.state.eventExpenses)) return;
+    const prevExp = this.state.eventExpenses.find((ex) => ex.id === id);
+    const prevSnapshot = prevExp ? { ...prevExp } : undefined;
+    let updatedExp: EventExpense | undefined;
+
+    this.state.eventExpenses = this.state.eventExpenses.map((ex) => {
+      if (ex.id !== id) return ex;
+      updatedExp = {
+        ...ex,
+        ...updates,
+        description: updates.description !== undefined ? updates.description.trim() : ex.description,
+        amount: updates.amount !== undefined ? Math.max(0, Number(updates.amount || 0)) : ex.amount,
+        notes: updates.notes !== undefined ? updates.notes.trim() : ex.notes
+      };
+      return updatedExp;
+    });
+
+    if (!updatedExp) return;
+
+    const evt = this.state.events.find((e) => e.id === updatedExp!.event_id);
+    const diffs = buildRecordDiffs(prevSnapshot, updatedExp, [
+      {
+        key: 'category',
+        label: 'Category',
+        format: (v) => EVENT_EXPENSE_CATEGORY_LABELS[v as EventExpenseCategory]?.short || String(v)
+      },
+      { key: 'description', label: 'Description' },
+      { key: 'amount', label: 'Amount', format: (v) => formatCurrencyAuditVal(v) },
+      { key: 'expense_date', label: 'Expense Date' },
+      { key: 'notes', label: 'Notes' }
+    ]);
+
+    this.logMutation({
+      entity_type: 'event_expense',
+      entity_id: id,
+      parent_event_id: updatedExp.event_id,
+      action: 'update',
+      summary: `Updated event expense "${updatedExp.description}" on "${evt?.title || 'Event'}"`,
+      details: encodeAuditDetails({
+        changes: diffs,
+        expensePayload: updatedExp
+      })
+    });
+    this.save();
+
+    if (isValidUUID(id) && isValidUUID(updatedExp.event_id)) {
+      this.enqueueSqlOperations('Update Event Expense', [
+        ...this.ensureEventParentOps(updatedExp.event_id),
+        {
+          type: 'upsert',
+          table: 'event_expenses',
+          values: {
+            id: updatedExp.id,
+            event_id: updatedExp.event_id,
+            category: updatedExp.category,
+            description: updatedExp.description,
+            amount: updatedExp.amount,
+            expense_date: updatedExp.expense_date,
+            notes: updatedExp.notes || null,
+            created_by_role: updatedExp.created_by_role || null,
+            created_by_name: updatedExp.created_by_name || null,
+            created_at: updatedExp.created_at
+          },
+          onConflict: 'id'
+        }
+      ]);
+    }
+  }
+
+  public deleteEventExpense(id: string) {
+    if (!Array.isArray(this.state.eventExpenses)) return;
+    const existing = this.state.eventExpenses.find((ex) => ex.id === id);
+    if (!existing) return;
+    const evt = this.state.events.find((e) => e.id === existing.event_id);
+    this.state.eventExpenses = this.state.eventExpenses.filter((ex) => ex.id !== id);
+
+    this.logMutation({
+      entity_type: 'event_expense',
+      entity_id: id,
+      parent_event_id: existing.event_id,
+      action: 'delete',
+      summary: `Deleted expense "${existing.description}" (₹${existing.amount.toLocaleString('en-IN')}) from "${evt?.title || 'Event'}"`
+    });
+    this.save();
+
+    if (isValidUUID(id)) {
+      this.enqueueSqlOperations('Delete Event Expense', [
+        { type: 'delete', table: 'event_expenses', match: { id } }
+      ]);
+    }
+  }
+
+  /**
+   * Computes complete Event Expenditure (including all staff shift wages + all staff allowances + 4 expense categories)
+   * as well as Event Revenue & Profit/Loss metrics.
+   */
+  public getEventFinancialSummary(eventId: string): EventFinancialSummary {
+    const event = this.state.events.find((e) => e.id === eventId);
+    const quoteTotals = this.getEventTotal(eventId);
+    const quotationTotal = quoteTotals.grandTotal;
+
+    const nonVoidInvoices = this.state.invoices.filter(
+      (inv) => inv.event_id === eventId && inv.status !== 'void'
+    );
+    const hasActiveInvoice = nonVoidInvoices.length > 0;
+    const invoicedAmount = nonVoidInvoices.reduce((s, inv) => s + Number(inv.amount || 0), 0);
+    const invoiceIds = new Set(nonVoidInvoices.map((inv) => inv.id));
+    const collectedRevenue = this.state.payments
+      .filter((p) => invoiceIds.has(p.invoice_id))
+      .reduce((s, p) => s + Number(p.amount || 0), 0);
+
+    const contractRevenue = hasActiveInvoice ? invoicedAmount : quotationTotal;
+    const pendingReceivable = Math.max(0, contractRevenue - collectedRevenue);
+
+    // Full recipe raw material value for this event (qtyNeeded * costPerUnit across all dishes)
+    const stockEst = this.getEventStockEstimation(eventId);
+    const recipeStockEstimate = stockEst.items.reduce(
+      (sum, it) => sum + Math.round(it.qtyNeeded * it.costPerUnit),
+      0
+    );
+
+    const expenses = (this.state.eventExpenses || []).filter((ex) => ex.event_id === eventId);
+    const stockPricingCost = expenses
+      .filter((ex) => ex.category === 'stock_pricing')
+      .reduce((s, ex) => s + Number(ex.amount || 0), 0);
+    const extrasTakenCost = expenses
+      .filter((ex) => ex.category === 'extras_cost')
+      .reduce((s, ex) => s + Number(ex.amount || 0), 0);
+    const staffExpenseCost = expenses
+      .filter((ex) => ex.category === 'staff_expense')
+      .reduce((s, ex) => s + Number(ex.amount || 0), 0);
+    const otherExpenseCost = expenses
+      .filter((ex) => ex.category === 'other_expense')
+      .reduce((s, ex) => s + Number(ex.amount || 0), 0);
+
+    // Attended shift wages for this event
+    let staffShiftWages = 0;
+    let attendedShiftCount = 0;
+    if (event && event.status !== 'cancelled') {
+      const eventShifts = this.state.shifts.filter((sh) => sh.event_id === eventId);
+      for (const sh of eventShifts) {
+        if (sh.attendance_status === 'present') {
+          attendedShiftCount += 1;
+          const staffMember = this.state.staff.find((s) => s.id === sh.staff_member_id);
+          const rate = Number(staffMember?.hourly_rate || 0);
+          const hrs = this.calculateShiftHours(sh.starts_at, sh.ends_at);
+          staffShiftWages += Math.round(hrs * rate);
+        }
+      }
+    }
+
+    // All allowances / duty bonuses linked to this event
+    const allowanceRecords = (this.state.staffSalaryRecords || []).filter(
+      (sr) => sr.event_id === eventId && sr.record_type === 'earning'
+    );
+    const staffAllowances = allowanceRecords.reduce((s, sr) => s + Number(sr.amount || 0), 0);
+
+    const totalStaffCost = staffShiftWages + staffAllowances + staffExpenseCost;
+    const totalExpenditure =
+      stockPricingCost + extrasTakenCost + totalStaffCost + otherExpenseCost;
+
+    const netProfit = contractRevenue - totalExpenditure;
+    const marginPercent =
+      contractRevenue > 0 ? Number(((netProfit / contractRevenue) * 100).toFixed(1)) : 0;
+
+    return {
+      eventId,
+      quotationTotal,
+      invoicedAmount,
+      hasActiveInvoice,
+      contractRevenue,
+      collectedRevenue,
+      pendingReceivable,
+      recipeStockEstimate,
+      stockPricingCost,
+      extrasTakenCost,
+      staffShiftWages,
+      staffAllowances,
+      staffExpenseCost,
+      totalStaffCost,
+      otherExpenseCost,
+      totalExpenditure,
+      netProfit,
+      marginPercent,
+      expenses,
+      allowanceRecords,
+      attendedShiftCount
+    };
   }
 
   // Event Totals: supports per_guest and per_kg
