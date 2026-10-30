@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { store, StockEstimationItem } from '@/lib/store';
 import { EventRecord, EventStatus, MenuItem, Invoice, Payment, PaymentChannel, PricingType, ShiftAttendanceStatus } from '@/lib/types';
 import { downloadElementAsPdf } from '@/lib/downloadPdf';
-import { sendInvoiceEmailNotification } from '@/lib/emailInvoice';
 import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
 import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
 import WhatsAppShareModal from '@/components/WhatsAppShareModal';
@@ -56,21 +55,15 @@ export default function EventDetailPage() {
   const [selectedShiftForWhatsApp, setSelectedShiftForWhatsApp] = useState<Shift | null>(null);
   const [shiftModalInitialNote, setShiftModalInitialNote] = useState('');
 
-  // New Invoice form with Discount & Auto-Email to Gmail
+  // New Invoice form with Discount
   const [invKind, setInvKind] = useState<'deposit' | 'final'>('deposit');
   const [invSubtotal, setInvSubtotal] = useState<number>(50000);
   const [invDiscount, setInvDiscount] = useState<number>(0);
   const [invDueDate, setInvDueDate] = useState('');
   const [invNotes, setInvNotes] = useState('');
-  const [autoEmailInvoice, setAutoEmailInvoice] = useState<boolean>(
-    state.settings.auto_email_invoices !== false
-  );
-  const [sendingEmailInvId, setSendingEmailInvId] = useState<string | null>(null);
   const [statusBanner, setStatusBanner] = useState<{
     type: 'success' | 'info';
     message: string;
-    gmailWebUrl?: string;
-    mailtoUrl?: string;
   } | null>(null);
 
   // Edit Invoice modal state (allows editing discount & subtotal on same invoice)
@@ -118,10 +111,6 @@ export default function EventDetailPage() {
     });
     return unsub;
   }, []);
-
-  useEffect(() => {
-    setAutoEmailInvoice(state.settings.auto_email_invoices !== false);
-  }, [state.settings.auto_email_invoices]);
 
   const event = state.events.find((e) => e.id === eventId);
   const client = state.clients.find((c) => c.id === event?.client_id);
@@ -399,40 +388,8 @@ export default function EventDetailPage() {
     }
   };
 
-  const handleSendInvoiceEmail = async (inv: Invoice, isAutomatic: boolean = false) => {
-    const targetEmail = state.settings.invoice_notification_email || 'ippasevents@gmail.com';
-    setSendingEmailInvId(inv.id);
-    const res = await sendInvoiceEmailNotification(inv, targetEmail);
-    setSendingEmailInvId(null);
-
-    if (res.success) {
-      setStatusBanner({
-        type: 'success',
-        message: isAutomatic
-          ? `Invoice ${inv.invoice_number} created and automatically emailed to ${res.sentTo}.`
-          : `Invoice ${inv.invoice_number} emailed successfully to ${res.sentTo}.`
-      });
-    } else if (!res.configured) {
-      setStatusBanner({
-        type: 'info',
-        message: isAutomatic
-          ? `Invoice ${inv.invoice_number} created! Add SMTP_USER & SMTP_PASS in Vercel Environment Variables for silent background delivery, or send immediately to ${res.sentTo} below:`
-          : `Server SMTP credentials are not configured yet. Click below to send Invoice ${inv.invoice_number} directly to ${res.sentTo}:`,
-        gmailWebUrl: res.gmailWebUrl,
-        mailtoUrl: res.mailtoUrl
-      });
-    } else {
-      setStatusBanner({
-        type: 'info',
-        message: `Invoice ${inv.invoice_number} saved, but automatic email encountered an error (${res.error}). Use quick send to ${res.sentTo}:`,
-        gmailWebUrl: res.gmailWebUrl,
-        mailtoUrl: res.mailtoUrl
-      });
-    }
-  };
-
-  // Create Invoice with Subtotal, Discount, and Optional Auto-Email to Gmail
-  const handleCreateInvoice = async (e: React.FormEvent) => {
+  // Create Invoice with Subtotal and Discount
+  const handleCreateInvoice = (e: React.FormEvent) => {
     e.preventDefault();
     const net = Math.max(0, invSubtotal - invDiscount);
     const createdInv = store.addInvoice({
@@ -447,15 +404,10 @@ export default function EventDetailPage() {
     });
     setInvDiscount(0);
     setInvNotes('');
-
-    if (autoEmailInvoice) {
-      await handleSendInvoiceEmail(createdInv, true);
-    } else {
-      setStatusBanner({
-        type: 'success',
-        message: `Invoice ${createdInv.invoice_number} generated successfully.`
-      });
-    }
+    setStatusBanner({
+      type: 'success',
+      message: `Invoice ${createdInv.invoice_number} generated successfully.`
+    });
   };
 
   // Open Edit Invoice Modal (Same Invoice editing)
@@ -559,26 +511,6 @@ export default function EventDetailPage() {
         >
           <div style={{ fontWeight: 600 }}>{statusBanner.message}</div>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            {statusBanner.gmailWebUrl && (
-              <a
-                href={statusBanner.gmailWebUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="btn btn-primary btn-sm"
-                style={{ fontWeight: 600 }}
-              >
-                📧 Send in Gmail
-              </a>
-            )}
-            {statusBanner.mailtoUrl && (
-              <a
-                href={statusBanner.mailtoUrl}
-                className="btn btn-secondary btn-sm"
-                style={{ fontWeight: 600 }}
-              >
-                ✉️ Open Mail App
-              </a>
-            )}
             <button
               type="button"
               className="btn btn-secondary btn-sm"
@@ -1816,17 +1748,6 @@ export default function EventDetailPage() {
                                 {isFinance && (
                                   <>
                                     <button
-                                      type="button"
-                                      className="btn btn-secondary btn-sm"
-                                      title={`Email Invoice to ${state.settings.invoice_notification_email || 'ippasevents@gmail.com'}`}
-                                      disabled={sendingEmailInvId === inv.id}
-                                      onClick={() => handleSendInvoiceEmail(inv, false)}
-                                      style={{ background: '#eff6ff', borderColor: '#bfdbfe', color: '#1d4ed8', fontWeight: 600 }}
-                                    >
-                                      {sendingEmailInvId === inv.id ? '⏳...' : '📧 Gmail'}
-                                    </button>
-
-                                    <button
                                       className="btn btn-secondary btn-sm"
                                       title="Record Advance Deposit or Milestone Payment on this invoice"
                                       onClick={() => handleOpenPartPayment(inv)}
@@ -1924,37 +1845,6 @@ export default function EventDetailPage() {
                       value={invNotes}
                       onChange={(e) => setInvNotes(e.target.value)}
                     />
-                  </div>
-
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: '0.55rem',
-                      padding: '0.7rem 0.8rem',
-                      background: '#eff6ff',
-                      border: '1px solid #bfdbfe',
-                      borderRadius: '6px',
-                      marginBottom: '1rem'
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      id="autoEmailInvoiceToggle"
-                      checked={autoEmailInvoice}
-                      onChange={(e) => setAutoEmailInvoice(e.target.checked)}
-                      style={{ marginTop: '0.2rem' }}
-                    />
-                    <label
-                      htmlFor="autoEmailInvoiceToggle"
-                      style={{ fontSize: '0.82rem', color: '#1e3a8a', cursor: 'pointer', lineHeight: 1.4 }}
-                    >
-                      <strong>Automatically email invoice copy to Gmail</strong>
-                      <div style={{ fontSize: '0.75rem', color: '#2563eb' }}>
-                        Sends invoice details to{' '}
-                        <strong>{state.settings.invoice_notification_email || 'ippasevents@gmail.com'}</strong>
-                      </div>
-                    </label>
                   </div>
 
                   <button type="submit" className="btn btn-primary" style={{ width: '100%', fontWeight: 600 }}>

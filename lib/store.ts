@@ -125,9 +125,7 @@ const INITIAL_SETTINGS: BusinessSettings = {
   account_number: '9876-5432-1000',
   ifsc_code: 'FDRL0001234',
   upi_id: 'ippas@upi',
-  payment_terms: 'Payment strictly due within 3 days. 50% advance deposit upon booking confirmation.',
-  auto_email_invoices: true,
-  invoice_notification_email: 'ippasevents@gmail.com'
+  payment_terms: 'Payment strictly due within 3 days. 50% advance deposit upon booking confirmation.'
 };
 
 const INITIAL_PROFILES: Profile[] = [
@@ -4901,7 +4899,7 @@ class DataStore {
       entity_type: 'settings',
       entity_id: String(this.state.settings.id || 1),
       action: 'update',
-      summary: 'Updated business profile, bank details, or auto-email settings'
+      summary: 'Updated business profile, bank details, or payment terms'
     });
     this.save();
 
@@ -4921,9 +4919,7 @@ class DataStore {
           account_number: s.account_number || null,
           ifsc_code: s.ifsc_code || null,
           upi_id: s.upi_id || null,
-          payment_terms: s.payment_terms || null,
-          auto_email_invoices: s.auto_email_invoices !== false,
-          invoice_notification_email: s.invoice_notification_email || 'ippasevents@gmail.com'
+          payment_terms: s.payment_terms || null
         },
         onConflict: 'id'
       }

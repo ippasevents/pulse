@@ -209,51 +209,6 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.65rem', color: '#0f172a' }}>
-                📧 Automatic Invoice Email Copy
-              </h3>
-
-              <div
-                className="form-group"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  background: '#eff6ff',
-                  border: '1px solid #bfdbfe',
-                  padding: '0.65rem 0.85rem',
-                  borderRadius: '6px'
-                }}
-              >
-                <input
-                  type="checkbox"
-                  id="autoEmailInvoicesSetting"
-                  checked={form.auto_email_invoices !== false}
-                  onChange={(e) => setForm({ ...form, auto_email_invoices: e.target.checked })}
-                  disabled={!isOwner}
-                />
-                <label
-                  htmlFor="autoEmailInvoicesSetting"
-                  style={{ fontSize: '0.85rem', fontWeight: 600, color: '#1e3a8a', cursor: 'pointer' }}
-                >
-                  Automatically email every newly created invoice to Gmail
-                </label>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Recipient Gmail Address for Invoices</label>
-                <input
-                  type="email"
-                  className="form-control"
-                  value={form.invoice_notification_email ?? 'ippasevents@gmail.com'}
-                  onChange={(e) => setForm({ ...form, invoice_notification_email: e.target.value })}
-                  disabled={!isOwner}
-                  placeholder="ippasevents@gmail.com"
-                />
-              </div>
-            </div>
-
             {isOwner && (
               <div style={{ marginTop: '1.25rem' }}>
                 <button type="submit" className="btn btn-primary">

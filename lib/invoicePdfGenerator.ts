@@ -55,7 +55,7 @@ export async function generateInvoicePdfBlob(
               Outdoor Catering &bull; Event Management &bull; Kerala
             </div>
             <div style="font-size: 0.75rem; color: #64748b;">
-              Phone: ${state.settings.phone || '+91 98470 11111'} &bull; Email: ${state.settings.email || 'ippasevents@gmail.com'}
+              Phone: ${state.settings.phone || '+91 98470 11111'} &bull; Email: ${state.settings.email || 'events@ippas.com'}
             </div>
           </div>
         </div>

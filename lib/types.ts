@@ -196,8 +196,6 @@ export interface BusinessSettings {
   ifsc_code?: string;
   upi_id?: string;
   payment_terms?: string;
-  auto_email_invoices?: boolean;
-  invoice_notification_email?: string;
 }
 
 export type AuditEntityType =
