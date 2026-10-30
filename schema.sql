@@ -107,8 +107,11 @@ create table if not exists clients (
   created_at timestamptz default now()
 );
 
+create sequence if not exists quotation_seq;
+
 create table if not exists events (
   id uuid primary key default gen_random_uuid(),
+  quotation_number text unique default ('QTN-' || lpad(nextval('quotation_seq')::text, 4, '0')),
   client_id uuid not null references clients(id) on delete cascade,
   title text not null,
   event_date date not null,
@@ -118,8 +121,17 @@ create table if not exists events (
   guest_count int not null check (guest_count > 0),
   status event_status not null default 'inquiry',
   notes text,
+  payment_terms text,
+  show_bank_details boolean not null default true,
+  show_payment_details boolean not null default true,
   created_at timestamptz default now()
 );
+
+alter table events
+  add column if not exists quotation_number text,
+  add column if not exists payment_terms text,
+  add column if not exists show_bank_details boolean not null default true,
+  add column if not exists show_payment_details boolean not null default true;
 
 alter table events drop constraint if exists events_client_id_fkey;
 alter table events add constraint events_client_id_fkey
@@ -260,20 +272,28 @@ create table if not exists invoices (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references events(id) on delete cascade,
   invoice_number text not null unique default ('INV-' || lpad(nextval('invoice_seq')::text, 4, '0')),
-  kind text not null default 'final',
+  quotation_number text,
+  kind text not null default 'deposit',
   subtotal numeric(12,2),
   discount numeric(12,2) not null default 0,
+  discount_note text,
   amount numeric(12,2) not null default 0,
   due_date date,
   status invoice_status not null default 'draft',
+  show_bank_details boolean not null default true,
+  show_payment_details boolean not null default true,
   notes text,
   snapshot jsonb,
   created_at timestamptz default now()
 );
 
 alter table invoices
+  add column if not exists quotation_number text,
   add column if not exists subtotal numeric(12,2),
   add column if not exists discount numeric(12,2) not null default 0,
+  add column if not exists discount_note text,
+  add column if not exists show_bank_details boolean not null default true,
+  add column if not exists show_payment_details boolean not null default true,
   add column if not exists notes text,
   add column if not exists snapshot jsonb;
 

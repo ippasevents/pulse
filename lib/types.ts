@@ -27,6 +27,7 @@ export interface Client {
 
 export interface EventRecord {
   id: string;
+  quotation_number?: string;
   client_id: string;
   title: string;
   event_date: string;
@@ -37,6 +38,8 @@ export interface EventRecord {
   status: EventStatus;
   notes?: string;
   payment_terms?: string;
+  show_bank_details?: boolean;
+  show_payment_details?: boolean;
   stock_deducted?: boolean;
   created_at: string;
 }
@@ -164,12 +167,16 @@ export interface Invoice {
   id: string;
   event_id: string;
   invoice_number: string;
+  quotation_number?: string;
   kind: 'deposit' | 'final';
   subtotal: number;
   discount: number;
+  discount_note?: string;
   amount: number;
   due_date?: string;
   status: InvoiceStatus;
+  show_bank_details?: boolean;
+  show_payment_details?: boolean;
   created_at: string;
   notes?: string;
 }

@@ -9,6 +9,7 @@ import { downloadElementAsPdf } from '@/lib/downloadPdf';
 import OwnerAuditBadge, { formatAuditTimestamp, getActorRoleStyle } from '@/components/OwnerAuditBadge';
 import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
 import WhatsAppShareModal from '@/components/WhatsAppShareModal';
+import QuotationWhatsAppModal from '@/components/QuotationWhatsAppModal';
 import StaffWhatsAppModal from '@/components/StaffWhatsAppModal';
 import { Shift } from '@/lib/types';
 import { formatDisplayWhatsAppPhone } from '@/lib/staffWhatsApp';
@@ -22,8 +23,9 @@ export default function EventDetailPage() {
   const [activeTab, setActiveTab] = useState<'quote' | 'stock' | 'shifts' | 'invoices' | 'details'>('quote');
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
-  // Print Modals - Standard A4 Portrait Only
+  // Print & WhatsApp Modals - Standard A4 Portrait Only
   const [isPrintQuoteOpen, setIsPrintQuoteOpen] = useState(false);
+  const [isQuoteWhatsAppOpen, setIsQuoteWhatsAppOpen] = useState(false);
   const [isPrintStockOpen, setIsPrintStockOpen] = useState(false);
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<Invoice | null>(null);
   const [selectedInvoiceForWhatsApp, setSelectedInvoiceForWhatsApp] = useState<Invoice | null>(null);
@@ -55,25 +57,30 @@ export default function EventDetailPage() {
   const [selectedShiftForWhatsApp, setSelectedShiftForWhatsApp] = useState<Shift | null>(null);
   const [shiftModalInitialNote, setShiftModalInitialNote] = useState('');
 
-  // New Invoice form with Discount
-  const [invKind, setInvKind] = useState<'deposit' | 'final'>('deposit');
-  const [invSubtotal, setInvSubtotal] = useState<number>(50000);
+  // Unified Invoice Conversion / Modification Form state
+  const [invSubtotal, setInvSubtotal] = useState<number>(0);
   const [invDiscount, setInvDiscount] = useState<number>(0);
+  const [invDiscountNote, setInvDiscountNote] = useState<string>('');
   const [invDueDate, setInvDueDate] = useState('');
   const [invNotes, setInvNotes] = useState('');
+  const [invShowBankDetails, setInvShowBankDetails] = useState<boolean>(true);
+  const [invShowPaymentDetails, setInvShowPaymentDetails] = useState<boolean>(true);
   const [statusBanner, setStatusBanner] = useState<{
     type: 'success' | 'info';
     message: string;
   } | null>(null);
 
-  // Edit Invoice modal state (allows editing discount & subtotal on same invoice)
+  // Edit Invoice modal state (allows editing discount, discount_note & visibility on same invoice)
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [editInvForm, setEditInvForm] = useState({
     subtotal: 0,
     discount: 0,
+    discount_note: '',
     kind: 'deposit' as 'deposit' | 'final',
     due_date: '',
     status: 'draft' as Invoice['status'],
+    show_bank_details: true,
+    show_payment_details: true,
     notes: ''
   });
 
@@ -114,6 +121,9 @@ export default function EventDetailPage() {
 
   const event = state.events.find((e) => e.id === eventId);
   const client = state.clients.find((c) => c.id === event?.client_id);
+  const activeMasterInv = state.invoices.find(
+    (i) => i.event_id === eventId && i.status !== 'void'
+  );
 
   useEffect(() => {
     if (event) {
@@ -129,9 +139,48 @@ export default function EventDetailPage() {
       });
       setPaymentTerms(event.payment_terms || '');
       const totals = store.getEventTotal(event.id);
-      setInvSubtotal(totals.grandTotal > 0 ? totals.grandTotal : 50000);
+      if (activeMasterInv) {
+        setInvSubtotal(
+          activeMasterInv.subtotal !== undefined
+            ? activeMasterInv.subtotal
+            : activeMasterInv.amount
+        );
+        setInvDiscount(activeMasterInv.discount || 0);
+        setInvDiscountNote(activeMasterInv.discount_note || '');
+        setInvDueDate(activeMasterInv.due_date || event.event_date || '');
+        setInvNotes(activeMasterInv.notes || '');
+        setInvShowBankDetails(activeMasterInv.show_bank_details !== false);
+        setInvShowPaymentDetails(activeMasterInv.show_payment_details !== false);
+      } else {
+        setInvSubtotal(totals.grandTotal);
+        setInvDueDate(event.event_date || '');
+        setInvShowBankDetails(event.show_bank_details !== false);
+        setInvShowPaymentDetails(event.show_payment_details !== false);
+      }
     }
-  }, [event]);
+  }, [
+    event?.id,
+    event?.title,
+    event?.event_date,
+    event?.start_time,
+    event?.end_time,
+    event?.venue,
+    event?.guest_count,
+    event?.status,
+    event?.notes,
+    event?.payment_terms,
+    event?.show_bank_details,
+    event?.show_payment_details,
+    activeMasterInv?.id,
+    activeMasterInv?.subtotal,
+    activeMasterInv?.amount,
+    activeMasterInv?.discount,
+    activeMasterInv?.discount_note,
+    activeMasterInv?.due_date,
+    activeMasterInv?.notes,
+    activeMasterInv?.show_bank_details,
+    activeMasterInv?.show_payment_details
+  ]);
 
   if (!event) {
     return (
@@ -164,8 +213,10 @@ export default function EventDetailPage() {
   // Shifts for this event
   const shifts = state.shifts.filter((s) => s.event_id === event.id);
 
-  // Invoices for this event
+  // Invoices & Distinct Quotation Number for this event
+  const quoteNumber = store.getQuotationNumber(event);
   const invoices = state.invoices.filter((i) => i.event_id === event.id);
+  const masterInvoice = invoices.find((i) => i.status !== 'void') || invoices[0] || null;
 
   // Total Invoiced & Payments across this event
   const totalInvoicedForEvent = invoices.reduce((s, inv) => s + inv.amount, 0);
@@ -200,24 +251,24 @@ export default function EventDetailPage() {
     setStatusBanner({ type: 'success', message: 'Event details updated successfully.' });
   };
 
-  // Confirm Quotation: sets status to confirmed, creates unified master invoice, checks inventory shortages
+  // Confirm Quotation ("Client OK"): sets status to confirmed, converts same quotation into unified master invoice, checks inventory shortages
   const handleConfirmQuotation = () => {
     store.updateEvent(event.id, {
       status: 'confirmed',
       payment_terms: paymentTerms || event.payment_terms
     });
-    const masterInv = store.ensureEventInvoice(event.id);
+    const masterInv = store.ensureEventInvoice(event.id, invDiscount, invDiscountNote);
     const updatedStockEst = store.getEventStockEstimation(event.id);
 
     if (updatedStockEst.totalShortageCount > 0) {
       setStatusBanner({
         type: 'info',
-        message: `✓ Quotation confirmed! Unified Master Invoice #${masterInv.invoice_number} generated. ⚠️ ${updatedStockEst.totalShortageCount} raw materials required for this menu are low in warehouse stock. Please place an order below.`
+        message: `✓ Quotation #${quoteNumber} approved & converted to Invoice #${masterInv.invoice_number}! ⚠️ ${updatedStockEst.totalShortageCount} raw materials required for this menu are low in warehouse stock.`
       });
     } else {
       setStatusBanner({
         type: 'success',
-        message: `✓ Quotation confirmed! Unified Master Invoice #${masterInv.invoice_number} generated. All required ingredients are available in warehouse.`
+        message: `✓ Quotation #${quoteNumber} approved & converted to Invoice #${masterInv.invoice_number}! All required ingredients are available in warehouse.`
       });
     }
   };
@@ -388,26 +439,44 @@ export default function EventDetailPage() {
     }
   };
 
-  // Create Invoice with Subtotal and Discount
-  const handleCreateInvoice = (e: React.FormEvent) => {
+  // Convert Quotation to Single Unified Invoice OR Update Existing Unified Invoice (Discount, Discount Note & Visibility)
+  const handleConvertOrUpdateMasterInvoice = (e: React.FormEvent) => {
     e.preventDefault();
-    const net = Math.max(0, invSubtotal - invDiscount);
-    const createdInv = store.addInvoice({
-      event_id: event.id,
-      kind: invKind,
-      subtotal: invSubtotal,
-      discount: invDiscount,
-      amount: net,
-      due_date: invDueDate || event.event_date,
-      status: 'draft',
-      notes: invNotes
-    });
-    setInvDiscount(0);
-    setInvNotes('');
-    setStatusBanner({
-      type: 'success',
-      message: `Invoice ${createdInv.invoice_number} generated successfully.`
-    });
+    if (!masterInvoice) {
+      store.updateEvent(event.id, {
+        status: event.status === 'inquiry' || event.status === 'quoted' ? 'confirmed' : event.status,
+        show_bank_details: invShowBankDetails,
+        show_payment_details: invShowPaymentDetails
+      });
+      const createdInv = store.ensureEventInvoice(event.id, invDiscount, invDiscountNote);
+      store.updateInvoice(createdInv.id, {
+        subtotal: invSubtotal > 0 ? invSubtotal : grandTotal,
+        discount: invDiscount,
+        discount_note: invDiscountNote.trim(),
+        due_date: invDueDate || event.event_date,
+        show_bank_details: invShowBankDetails,
+        show_payment_details: invShowPaymentDetails,
+        notes: invNotes || event.payment_terms || state.settings.payment_terms
+      });
+      setStatusBanner({
+        type: 'success',
+        message: `✓ Quotation #${quoteNumber} converted into Invoice #${createdInv.invoice_number}!`
+      });
+    } else {
+      store.updateInvoice(masterInvoice.id, {
+        subtotal: invSubtotal,
+        discount: invDiscount,
+        discount_note: invDiscountNote.trim(),
+        due_date: invDueDate,
+        show_bank_details: invShowBankDetails,
+        show_payment_details: invShowPaymentDetails,
+        notes: invNotes
+      });
+      setStatusBanner({
+        type: 'success',
+        message: `✓ Invoice #${masterInvoice.invoice_number} updated (Discount: ₹${invDiscount.toLocaleString('en-IN')}${invDiscountNote.trim() ? ` — ${invDiscountNote.trim()}` : ''}).`
+      });
+    }
   };
 
   // Open Edit Invoice Modal (Same Invoice editing)
@@ -416,9 +485,12 @@ export default function EventDetailPage() {
     setEditInvForm({
       subtotal: inv.subtotal !== undefined ? inv.subtotal : inv.amount,
       discount: inv.discount || 0,
+      discount_note: inv.discount_note || '',
       kind: inv.kind,
       due_date: inv.due_date || '',
       status: inv.status,
+      show_bank_details: inv.show_bank_details !== false,
+      show_payment_details: inv.show_payment_details !== false,
       notes: inv.notes || ''
     });
   };
@@ -429,9 +501,12 @@ export default function EventDetailPage() {
     store.updateInvoice(editingInvoice.id, {
       subtotal: editInvForm.subtotal,
       discount: editInvForm.discount,
+      discount_note: editInvForm.discount_note.trim(),
       kind: editInvForm.kind,
       due_date: editInvForm.due_date,
       status: editInvForm.status,
+      show_bank_details: editInvForm.show_bank_details,
+      show_payment_details: editInvForm.show_payment_details,
       notes: editInvForm.notes
     });
     setEditingInvoice(null);
@@ -467,8 +542,11 @@ export default function EventDetailPage() {
         : partPayDestAccount ||
           store.getDefaultDestinationAccount(partPayChannel, partPayMethod);
 
+    const targetInvId = partPayInvoice.id;
+    const targetInvNum = partPayInvoice.invoice_number;
+
     store.addPayment({
-      invoice_id: partPayInvoice.id,
+      invoice_id: targetInvId,
       amount: partPayAmount,
       method: partPayMethod,
       payment_channel: partPayChannel,
@@ -476,10 +554,15 @@ export default function EventDetailPage() {
       note: partPayNote
     });
 
+    const refreshedInv = store.getState().invoices.find((i) => i.id === targetInvId);
+    const settledNow = refreshedInv?.status === 'paid' && refreshedInv?.kind === 'final';
+
     setPartPayInvoice(null);
     setStatusBanner({
       type: 'success',
-      message: `Part-payment recorded to "${finalAccount}" (${partPayChannel === 'cash' ? 'Cash' : 'Bank'}).`
+      message: settledNow
+        ? `🎉 Full payment received! Invoice #${targetInvNum} has automatically transitioned to a Final Settlement Invoice (Payment Terms hidden).`
+        : `Part-payment recorded on Invoice #${targetInvNum} to "${finalAccount}" (${partPayChannel === 'cash' ? 'Cash' : 'Bank'}).`
     });
   };
 
@@ -525,27 +608,55 @@ export default function EventDetailPage() {
       {/* Page Header */}
       <div className="page-header" style={{ alignItems: 'flex-start' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
             <h1 className="page-title" style={{ margin: 0 }}>{event.title}</h1>
             <span className={`badge badge-${event.status}`}>{event.status}</span>
+            <span
+              className="badge"
+              style={{
+                background: '#eff6ff',
+                color: '#1d4ed8',
+                border: '1px solid #bfdbfe',
+                fontWeight: 700,
+                fontSize: '0.75rem'
+              }}
+            >
+              Quote #{quoteNumber}
+            </span>
+            {masterInvoice && (
+              <span
+                className="badge"
+                style={{
+                  background: masterInvoice.status === 'paid' ? '#dcfce7' : '#fef3c7',
+                  color: masterInvoice.status === 'paid' ? '#15803d' : '#92400e',
+                  border: `1px solid ${masterInvoice.status === 'paid' ? '#86efac' : '#fde68a'}`,
+                  fontWeight: 700,
+                  fontSize: '0.75rem'
+                }}
+              >
+                {masterInvoice.status === 'paid'
+                  ? `✓ Final Settlement #${masterInvoice.invoice_number}`
+                  : `Invoice #${masterInvoice.invoice_number}`}
+              </span>
+            )}
           </div>
           <p className="page-subtitle">
             Client: <strong>{client?.name}</strong> {client?.company ? `(${client.company})` : ''} &bull; {event.event_date} &bull; {event.venue || 'No venue'} &bull; <strong>{event.guest_count} Guests</strong>
           </p>
         </div>
 
-        {/* Header Actions: Status progression & A4 PDF Quotation & Total */}
+        {/* Header Actions: Status progression, WhatsApp Quotation & A4 PDF Quotation */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
-            {(event.status === 'inquiry' || event.status === 'quoted') && canEditOps && (
+            {(event.status === 'inquiry' || event.status === 'quoted' || !masterInvoice) && canEditOps && (
               <button
                 type="button"
                 onClick={handleConfirmQuotation}
                 className="btn btn-sm"
                 style={{ background: '#16a34a', color: '#ffffff', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                title="Confirm quotation and auto-generate Master Invoice"
+                title="Client approved quotation — convert same quotation into Invoice"
               >
-                ✓ Confirm Quotation
+                ✓ Approve Quote &amp; Convert to Invoice
               </button>
             )}
 
@@ -568,6 +679,24 @@ export default function EventDetailPage() {
             )}
 
             <button
+              type="button"
+              onClick={() => setIsQuoteWhatsAppOpen(true)}
+              className="btn btn-sm"
+              style={{
+                background: '#f0fdf4',
+                border: '1px solid #86efac',
+                color: '#15803d',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                fontWeight: 700
+              }}
+              title="Send Quotation directly to Client's WhatsApp"
+            >
+              💬 Send Quote on WhatsApp
+            </button>
+
+            <button
               onClick={() => setIsPrintQuoteOpen(true)}
               className="btn btn-primary btn-sm"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600 }}
@@ -577,7 +706,7 @@ export default function EventDetailPage() {
           </div>
 
           <div style={{ textAlign: 'right', marginTop: '0.25rem' }}>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Quote Total</div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Quote Total ({quoteNumber})</div>
             <div style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--primary)' }}>
               ₹{displayTotal.toLocaleString('en-IN')}
             </div>
@@ -747,17 +876,30 @@ export default function EventDetailPage() {
           <div className="grid-2">
             {/* Selected dishes quote */}
             <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                <h2 className="card-title" style={{ margin: 0 }}>
-                  Event Menu ({event.guest_count} Guests)
-                </h2>
-                <button
-                  onClick={() => setIsPrintQuoteOpen(true)}
-                  className="btn btn-secondary btn-sm"
-                  title="Preview Quotation A4 PDF with Logo"
-                >
-                  📄 A4 PDF Preview
-                </button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <h2 className="card-title" style={{ margin: 0 }}>
+                    Quotation Menu ({event.guest_count} Guests) &bull; <span style={{ color: '#1d4ed8' }}>#{quoteNumber}</span>
+                  </h2>
+                </div>
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsQuoteWhatsAppOpen(true)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ background: '#f0fdf4', borderColor: '#86efac', color: '#15803d', fontWeight: 700 }}
+                    title="Send Quotation directly to Client's WhatsApp"
+                  >
+                    💬 WhatsApp Quote
+                  </button>
+                  <button
+                    onClick={() => setIsPrintQuoteOpen(true)}
+                    className="btn btn-secondary btn-sm"
+                    title="Preview Quotation A4 PDF with Logo"
+                  >
+                    📄 A4 PDF Preview
+                  </button>
+                </div>
               </div>
 
               {role === 'owner' && auditSummary?.quoteAudit && (
@@ -868,19 +1010,28 @@ export default function EventDetailPage() {
                 </div>
               )}
 
-              {/* Extras & Logistics Lines */}
+              {/* Logistics, Transport & Extra Charges */}
               <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
-                <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                  Logistics, Crockery &amp; Extra Charges
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.5rem' }}>
+                  <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0 }}>
+                    🚚 Logistics, Transport &amp; Extra Charges
+                  </h3>
+                  {extras.length > 0 && (
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary)' }}>
+                      Extras Subtotal: ₹{extrasTotal.toLocaleString('en-IN')}
+                    </span>
+                  )}
+                </div>
                 {extras.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No extras or logistics fees added.</p>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                    No logistics, transport, or extra charges added yet. Use quick presets or type below:
+                  </p>
                 ) : (
                   <div className="data-table-container">
                     <table className="data-table">
                       <thead>
                         <tr>
-                          <th>Description</th>
+                          <th>Logistics / Transport / Extra Description</th>
                           <th style={{ textAlign: 'right' }}>Amount</th>
                           {canEditQuote && <th style={{ textAlign: 'center' }}>Remove</th>}
                         </tr>
@@ -889,7 +1040,7 @@ export default function EventDetailPage() {
                         {extras.map((ex) => (
                           <tr key={ex.id}>
                             <td>
-                              <div>{ex.description}</div>
+                              <div style={{ fontWeight: 500 }}>{ex.description}</div>
                               {role === 'owner' && (
                                 <OwnerAuditBadge
                                   role={role}
@@ -918,29 +1069,51 @@ export default function EventDetailPage() {
                   </div>
                 )}
 
-                {/* Add Extra Charge Form */}
+                {/* Quick Presets + Add Extra Charge Form */}
                 {canEditQuote && (
-                  <form onSubmit={handleAddExtra} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="e.g. Copper Chafing Dishes, Transport, Linen"
-                      style={{ flex: 2, minWidth: '180px' }}
-                      value={extraDesc}
-                      onChange={(e) => setExtraDesc(e.target.value)}
-                    />
-                    <input
-                      type="number"
-                      className="form-control"
-                      placeholder="Amount ₹"
-                      style={{ flex: 1, minWidth: '100px' }}
-                      value={extraAmount || ''}
-                      onChange={(e) => setExtraAmount(parseFloat(e.target.value) || 0)}
-                    />
-                    <button type="submit" className="btn btn-secondary btn-sm" style={{ fontWeight: 600 }}>
-                      + Add Extra
-                    </button>
-                  </form>
+                  <div style={{ marginTop: '0.75rem' }}>
+                    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                      {[
+                        { label: '🚚 Transport & Delivery', desc: 'Vehicle Transport & Site Delivery Charges' },
+                        { label: '🍽️ Service Boys & Logistics', desc: 'Uniformed Service Staff & Site Logistics' },
+                        { label: '🏺 Chafing Dishes & Crockery', desc: 'VIP Chafing Dishes, Cutlery & Crockery Setup' },
+                        { label: '⛺ Buffet Counter & Linen', desc: 'Buffet Counter Setup, Frills & Linen' },
+                        { label: '⚡ Live Counter / Extra Expense', desc: 'Live Kitchen Counter & Extra Event Expense' },
+                        { label: '💧 Mineral Water & Welcome Setup', desc: 'Packaged Drinking Water & Welcome Counter' }
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                          onClick={() => setExtraDesc(preset.desc)}
+                        >
+                          + {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                    <form onSubmit={handleAddExtra} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. Transport Charges, Service Logistics, Extra Expenses..."
+                        style={{ flex: 2, minWidth: '180px' }}
+                        value={extraDesc}
+                        onChange={(e) => setExtraDesc(e.target.value)}
+                      />
+                      <input
+                        type="number"
+                        className="form-control"
+                        placeholder="Amount ₹"
+                        style={{ flex: 1, minWidth: '100px' }}
+                        value={extraAmount || ''}
+                        onChange={(e) => setExtraAmount(parseFloat(e.target.value) || 0)}
+                      />
+                      <button type="submit" className="btn btn-secondary btn-sm" style={{ fontWeight: 600 }}>
+                        + Add Charge
+                      </button>
+                    </form>
+                  </div>
                 )}
               </div>
             </div>
@@ -1042,28 +1215,72 @@ export default function EventDetailPage() {
             </div>
           </div>
 
-          {/* Quotation Payment Terms & Instant Confirmation Card */}
+          {/* Quotation Payment Terms, Bank/Payment Visibility Toggles & Client Approval Card */}
           <div className="card" style={{ marginTop: '1.25rem', borderTop: '2px solid var(--primary)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
               <div>
                 <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>
-                  📜 Quotation Payment Terms
+                  📜 Quotation Payment Terms &amp; Document Display Options (#{quoteNumber})
                 </h3>
                 <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
-                  Specify the advance deposit and milestone payment terms to print directly on this quotation and master invoice.
+                  Enable or disable Bank Details &amp; Payment Details on this quotation, or send directly to Client&apos;s WhatsApp.
                 </p>
               </div>
 
-              {(event.status === 'inquiry' || event.status === 'quoted') && canEditOps && (
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <button
                   type="button"
-                  onClick={handleConfirmQuotation}
+                  onClick={() => setIsQuoteWhatsAppOpen(true)}
                   className="btn btn-sm"
-                  style={{ background: '#16a34a', color: '#ffffff', fontWeight: 700, padding: '0.45rem 0.9rem' }}
+                  style={{ background: '#f0fdf4', border: '1px solid #86efac', color: '#15803d', fontWeight: 700, padding: '0.45rem 0.85rem' }}
                 >
-                  ✓ Confirm Quotation
+                  💬 Send Quotation to WhatsApp
                 </button>
-              )}
+                {(event.status === 'inquiry' || event.status === 'quoted' || !masterInvoice) && canEditOps && (
+                  <button
+                    type="button"
+                    onClick={handleConfirmQuotation}
+                    className="btn btn-sm"
+                    style={{ background: '#16a34a', color: '#ffffff', fontWeight: 700, padding: '0.45rem 0.9rem' }}
+                  >
+                    ✓ Client OK — Convert to Invoice
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Enable / Disable Bank Details & Payment Details on Quotation */}
+            <div
+              style={{
+                display: 'flex',
+                gap: '1.25rem',
+                flexWrap: 'wrap',
+                padding: '0.65rem 0.85rem',
+                background: '#f8fafc',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                marginBottom: '0.85rem'
+              }}
+            >
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.85rem', fontWeight: 600, cursor: canEditQuote ? 'pointer' : 'default' }}>
+                <input
+                  type="checkbox"
+                  checked={event.show_bank_details !== false}
+                  disabled={!canEditQuote}
+                  onChange={(e) => store.updateEvent(event.id, { show_bank_details: e.target.checked })}
+                />
+                🏦 Show Bank Details on Quotation
+              </label>
+
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.85rem', fontWeight: 600, cursor: canEditQuote ? 'pointer' : 'default' }}>
+                <input
+                  type="checkbox"
+                  checked={event.show_payment_details !== false}
+                  disabled={!canEditQuote}
+                  onChange={(e) => store.updateEvent(event.id, { show_payment_details: e.target.checked })}
+                />
+                💳 Show Payment Details / Terms on Quotation
+              </label>
             </div>
 
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.65rem', flexWrap: 'wrap' }}>
@@ -1627,33 +1844,33 @@ export default function EventDetailPage() {
           )}
 
           <div className="grid-2" style={{ marginBottom: '1.5rem' }}>
-            {/* Invoices list with Part-Payments on Same Invoice */}
+            {/* Unified Invoice converted from Quotation + Part-Payments & Final Settlement */}
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
                 <div>
                   <h2 className="card-title" style={{ margin: 0 }}>
-                    Unified Master Invoice &amp; Settlement Bill
+                    Unified Event Invoice &amp; Final Settlement
                   </h2>
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
-                    Single invoice lifecycle: covers initial advance deposit through final settlement with complete payment history.
+                    Quotation <strong>#{quoteNumber}</strong> converts to a single Invoice with its own Invoice #, discounts, part-payments, and automatic upgrade to <strong>Final Settlement</strong> upon full payment.
                   </p>
                 </div>
-                {isFinance && (
+                {isFinance && masterInvoice && (
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
                     style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
                     onClick={handleSyncInvoice}
-                    title="Synchronize master invoice subtotal with latest event total"
+                    title="Synchronize invoice subtotal with latest quotation menu & logistics total"
                   >
-                    🔄 Sync with Event Total (₹{grandTotal.toLocaleString('en-IN')})
+                    🔄 Sync Quote Total (₹{grandTotal.toLocaleString('en-IN')})
                   </button>
                 )}
               </div>
               {invoices.length === 0 ? (
                 <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1', textAlign: 'center' }}>
                   <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0 0 0.75rem 0' }}>
-                    No invoice generated for this event yet. You can confirm the quotation or generate the unified master invoice directly:
+                    Quotation <strong>#{quoteNumber}</strong> has not been converted to an invoice yet. Approve the quotation when the client confirms:
                   </p>
                   {isFinance && (
                     <button
@@ -1661,11 +1878,15 @@ export default function EventDetailPage() {
                       className="btn btn-primary btn-sm"
                       style={{ fontWeight: 700 }}
                       onClick={() => {
-                        const inv = store.ensureEventInvoice(event.id);
-                        setStatusBanner({ type: 'success', message: `Unified Master Invoice #${inv.invoice_number} generated successfully.` });
+                        store.updateEvent(event.id, { status: 'confirmed' });
+                        const inv = store.ensureEventInvoice(event.id, invDiscount, invDiscountNote);
+                        setStatusBanner({
+                          type: 'success',
+                          message: `✓ Quotation #${quoteNumber} converted to Invoice #${inv.invoice_number} (₹${inv.amount.toLocaleString('en-IN')}).`
+                        });
                       }}
                     >
-                      ⚡ Generate Unified Master Invoice (₹{grandTotal.toLocaleString('en-IN')})
+                      ✓ Convert Quotation #{quoteNumber} to Invoice (₹{grandTotal.toLocaleString('en-IN')})
                     </button>
                   )}
                 </div>
@@ -1674,10 +1895,10 @@ export default function EventDetailPage() {
                   <table className="data-table">
                     <thead>
                       <tr>
-                        <th>Invoice #</th>
-                        <th>Type</th>
+                        <th>Invoice # / Quote Ref</th>
+                        <th>Stage</th>
                         <th style={{ textAlign: 'right' }}>Net Amount</th>
-                        <th style={{ textAlign: 'right' }}>Paid Amount</th>
+                        <th style={{ textAlign: 'right' }}>Paid / Due</th>
                         <th>Status</th>
                         <th style={{ textAlign: 'center' }}>Actions</th>
                       </tr>
@@ -1688,16 +1909,25 @@ export default function EventDetailPage() {
                           .filter((p) => p.invoice_id === inv.id)
                           .reduce((s, p) => s + p.amount, 0);
                         const balance = Math.max(0, inv.amount - paymentsForThis);
+                        const isSettled = inv.status === 'paid' || (inv.amount > 0 && balance <= 0);
+                        const qRef = inv.quotation_number || quoteNumber;
 
                         return (
                           <tr key={inv.id}>
                             <td>
                               <div style={{ fontWeight: 700 }}>{inv.invoice_number}</div>
+                              <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                                Quote Ref: <strong>#{qRef}</strong>
+                              </div>
                               {inv.discount > 0 && (
-                                <div style={{ fontSize: '0.72rem', color: '#15803d' }}>
+                                <div style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>
                                   Discount: -₹{inv.discount.toLocaleString('en-IN')}
+                                  {inv.discount_note ? ` (${inv.discount_note})` : ''}
                                 </div>
                               )}
+                              <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '2px' }}>
+                                Bank: {inv.show_bank_details !== false ? 'Shown' : 'Hidden'} &bull; Payment Info: {inv.show_payment_details !== false ? 'Shown' : 'Hidden'}
+                              </div>
                               {role === 'owner' && (
                                 <OwnerAuditBadge
                                   role={role}
@@ -1707,8 +1937,15 @@ export default function EventDetailPage() {
                               )}
                             </td>
                             <td>
-                              <span className="badge" style={{ background: '#f1f5f9' }}>
-                                {inv.kind}
+                              <span
+                                className="badge"
+                                style={{
+                                  background: isSettled ? '#dcfce7' : '#eff6ff',
+                                  color: isSettled ? '#15803d' : '#1d4ed8',
+                                  fontWeight: 700
+                                }}
+                              >
+                                {isSettled ? '✓ Final Settlement' : 'Advance / Booking'}
                               </span>
                             </td>
                             <td style={{ textAlign: 'right', fontWeight: 700 }}>
@@ -1716,10 +1953,16 @@ export default function EventDetailPage() {
                             </td>
                             <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--success)' }}>
                               ₹{paymentsForThis.toLocaleString('en-IN')}
-                              {balance > 0 && (
+                              {balance > 0 ? (
                                 <div style={{ fontSize: '0.7rem', color: '#dc2626' }}>
                                   Due: ₹{balance.toLocaleString('en-IN')}
                                 </div>
+                              ) : (
+                                inv.amount > 0 && (
+                                  <div style={{ fontSize: '0.7rem', color: '#15803d' }}>
+                                    Settled in Full
+                                  </div>
+                                )
                               )}
                             </td>
                             <td>
@@ -1747,18 +1990,20 @@ export default function EventDetailPage() {
 
                                 {isFinance && (
                                   <>
-                                    <button
-                                      className="btn btn-secondary btn-sm"
-                                      title="Record Advance Deposit or Milestone Payment on this invoice"
-                                      onClick={() => handleOpenPartPayment(inv)}
-                                      style={{ fontWeight: 600, background: '#f0fdf4', borderColor: '#86efac', color: '#15803d' }}
-                                    >
-                                      + Record Advance / Pay
-                                    </button>
+                                    {!isSettled && (
+                                      <button
+                                        className="btn btn-secondary btn-sm"
+                                        title="Record Advance Deposit or Part-Payment on this invoice"
+                                        onClick={() => handleOpenPartPayment(inv)}
+                                        style={{ fontWeight: 600, background: '#f0fdf4', borderColor: '#86efac', color: '#15803d' }}
+                                      >
+                                        + Part Pay / Settle
+                                      </button>
+                                    )}
 
                                     <button
                                       className="btn btn-secondary btn-sm"
-                                      title="Edit Invoice Subtotal / Discount"
+                                      title="Edit Invoice Discount, Details & Visibility"
                                       onClick={() => handleOpenEditInvoice(inv)}
                                     >
                                       Edit
@@ -1776,26 +2021,18 @@ export default function EventDetailPage() {
               )}
             </div>
 
-            {/* Generate Invoice with Discount Form */}
+            {/* Same-Invoice Discount, Modifications & Display Toggles Form */}
             {isFinance ? (
               <div className="card">
-                <h2 className="card-title">Generate Invoice with Discount</h2>
-                <form onSubmit={handleCreateInvoice}>
-                  <div className="form-group">
-                    <label className="form-label">Invoice Kind</label>
-                    <select
-                      className="form-control"
-                      value={invKind}
-                      onChange={(e) => setInvKind(e.target.value as any)}
-                    >
-                      <option value="deposit">Deposit / Advance Booking</option>
-                      <option value="final">Final Balance Settlement</option>
-                    </select>
-                  </div>
-
+                <h2 className="card-title">
+                  {masterInvoice
+                    ? `🏷️ Modify Invoice #${masterInvoice.invoice_number} (Discounts & Visibility)`
+                    : `⚡ Convert Quotation #${quoteNumber} to Invoice`}
+                </h2>
+                <form onSubmit={handleConvertOrUpdateMasterInvoice}>
                   <div className="grid-2">
                     <div className="form-group">
-                      <label className="form-label">Subtotal (₹) *</label>
+                      <label className="form-label">Quotation Gross Subtotal (₹) *</label>
                       <input
                         type="number"
                         min="0"
@@ -1807,7 +2044,7 @@ export default function EventDetailPage() {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label">Discount (₹)</label>
+                      <label className="form-label">Discount Amount (₹)</label>
                       <input
                         type="number"
                         min="0"
@@ -1819,36 +2056,83 @@ export default function EventDetailPage() {
                     </div>
                   </div>
 
-                  <div style={{ background: '#f8fafc', padding: '0.65rem 0.85rem', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Net Payable Amount:</span>
+                  <div className="form-group">
+                    <label className="form-label">Discount Details / Reason (Optional)</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. Special wedding package discount / Loyal client concession"
+                      value={invDiscountNote}
+                      onChange={(e) => setInvDiscountNote(e.target.value)}
+                    />
+                  </div>
+
+                  <div style={{ background: '#f8fafc', padding: '0.65rem 0.85rem', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Net Invoice Payable:</span>
                     <strong style={{ fontSize: '1.15rem', color: 'var(--primary)' }}>
                       ₹{Math.max(0, invSubtotal - invDiscount).toLocaleString('en-IN')}
                     </strong>
                   </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Due Date</label>
-                    <input
-                      type="date"
-                      className="form-control"
-                      value={invDueDate}
-                      onChange={(e) => setInvDueDate(e.target.value)}
-                    />
+                  <div className="grid-2">
+                    <div className="form-group">
+                      <label className="form-label">Due Date</label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={invDueDate}
+                        onChange={(e) => setInvDueDate(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Invoice Notes</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. Balance payable on event day"
+                        value={invNotes}
+                        onChange={(e) => setInvNotes(e.target.value)}
+                      />
+                    </div>
                   </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Invoice Notes</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="e.g. 50% advance received, balance before function"
-                      value={invNotes}
-                      onChange={(e) => setInvNotes(e.target.value)}
-                    />
+                  {/* Enable / Disable Bank Details & Payment Details on Invoice */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.45rem',
+                      padding: '0.65rem 0.85rem',
+                      background: '#f8fafc',
+                      border: '1px solid var(--border)',
+                      borderRadius: '8px',
+                      marginBottom: '1rem'
+                    }}
+                  >
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.83rem', fontWeight: 600, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={invShowBankDetails}
+                        onChange={(e) => setInvShowBankDetails(e.target.checked)}
+                      />
+                      🏦 Show Bank Details on Invoice
+                    </label>
+
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.83rem', fontWeight: 600, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={invShowPaymentDetails}
+                        onChange={(e) => setInvShowPaymentDetails(e.target.checked)}
+                      />
+                      💳 Show Payment Details on Invoice (Payment Terms auto-hide once Fully Paid)
+                    </label>
                   </div>
 
-                  <button type="submit" className="btn btn-primary" style={{ width: '100%', fontWeight: 600 }}>
-                    Create Invoice
+                  <button type="submit" className="btn btn-primary" style={{ width: '100%', fontWeight: 700 }}>
+                    {masterInvoice
+                      ? `✓ Save Changes to Invoice #${masterInvoice.invoice_number}`
+                      : `✓ Convert Quotation #${quoteNumber} to Invoice`}
                   </button>
                 </form>
               </div>
@@ -2181,15 +2465,43 @@ export default function EventDetailPage() {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Toolbar */}
-            <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <span style={{ fontWeight: 700, fontSize: '1rem' }}>📄 Official Quotation (Standard A4 PDF)</span>
+            <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 700, fontSize: '1rem' }}>📄 Quotation #{quoteNumber} (A4 PDF)</span>
                 <span className="badge" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 600 }}>
                   A4 Fit
                 </span>
               </div>
 
-              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', fontWeight: 600, marginRight: '0.35rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={event.show_bank_details !== false}
+                    onChange={(e) => store.updateEvent(event.id, { show_bank_details: e.target.checked })}
+                  />
+                  🏦 Bank Details
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', fontWeight: 600, marginRight: '0.5rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={event.show_payment_details !== false}
+                    onChange={(e) => store.updateEvent(event.id, { show_payment_details: e.target.checked })}
+                  />
+                  💳 Payment Details
+                </label>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ background: '#f0fdf4', borderColor: '#86efac', color: '#15803d', fontWeight: 700 }}
+                  onClick={() => {
+                    setIsPrintQuoteOpen(false);
+                    setIsQuoteWhatsAppOpen(true);
+                  }}
+                >
+                  💬 Send WhatsApp
+                </button>
                 <button
                   className="btn btn-primary btn-sm"
                   disabled={isDownloadingPdf}
@@ -2197,7 +2509,7 @@ export default function EventDetailPage() {
                     setIsDownloadingPdf(true);
                     await downloadElementAsPdf(
                       'quotation-printable-area',
-                      `Quotation-${event.title.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                      `${quoteNumber}-${event.title.replace(/[^a-zA-Z0-9]/g, '_')}`,
                       { orientation: 'portrait' }
                     );
                     setIsDownloadingPdf(false);
@@ -2261,7 +2573,7 @@ export default function EventDetailPage() {
                       Quotation
                     </h1>
                     <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>
-                      Commercial Catering Proposal
+                      Catering Proposal
                     </div>
                   </div>
                 </div>
@@ -2279,7 +2591,7 @@ export default function EventDetailPage() {
                   </div>
 
                   <div style={{ textAlign: 'right' }}>
-                    <div>Quote #: <strong>QTN-{event.id.replace(/[^0-9]/g, '').slice(-4) || '1001'}</strong></div>
+                    <div>Quote #: <strong>{quoteNumber}</strong></div>
                     <div>Quote Date: <strong>{new Date().toLocaleDateString('en-GB')}</strong></div>
                     <div>Event Date: <strong>{event.event_date}</strong></div>
                     <div>Venue: <strong>{event.venue || 'TBD'}</strong></div>
@@ -2334,7 +2646,7 @@ export default function EventDetailPage() {
                       <tr key={ex.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '8px 10px' }} colSpan={2}>
                           <div style={{ fontWeight: 600 }}>{ex.description}</div>
-                          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Logistics, Cutlery &amp; Service</div>
+                          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Logistics, Transport &amp; Extra Charges</div>
                         </td>
                         <td style={{ textAlign: 'center', padding: '8px 10px' }}>1 Lot</td>
                         <td style={{ textAlign: 'right', padding: '8px 10px' }}>₹{ex.amount.toLocaleString('en-IN')}</td>
@@ -2355,7 +2667,7 @@ export default function EventDetailPage() {
                     </div>
                     {extras.length > 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
-                        <span>Logistics &amp; Extras:</span>
+                        <span>Logistics, Transport &amp; Extras:</span>
                         <strong>₹{extrasTotal.toLocaleString('en-IN')}</strong>
                       </div>
                     )}
@@ -2366,19 +2678,30 @@ export default function EventDetailPage() {
                   </div>
                 </div>
 
-                {/* Payment & Bank Details */}
+                {/* Payment & Bank Details (Respects Enable/Disable Toggles) */}
                 <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '12px', display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '1rem', fontSize: '0.8rem' }}>
                   <div>
-                    <div style={{ fontWeight: 700, textTransform: 'uppercase', color: '#0f172a', marginBottom: '4px' }}>
-                      Official Bank Details &amp; Payment Terms
-                    </div>
-                    <div>Bank: <strong>{state.settings.bank_name || 'Federal Bank'}</strong></div>
-                    <div>Account Name: <strong>{state.settings.account_name || state.settings.name}</strong></div>
-                    <div>A/C No: <strong>{state.settings.account_number || '9876-5432-1000'}</strong> &bull; IFSC: <strong>{state.settings.ifsc_code || 'FDRL0001234'}</strong></div>
-                    <div>UPI ID: <strong>{state.settings.upi_id || 'ippas@upi'}</strong></div>
-                    <div style={{ marginTop: '4px', color: '#dc2626', fontWeight: 600 }}>
-                      {state.settings.payment_terms || 'Payment strictly due within 3 days. 50% advance deposit upon confirmation.'}
-                    </div>
+                    {event.show_bank_details !== false && (
+                      <div style={{ marginBottom: event.show_payment_details !== false ? '6px' : 0 }}>
+                        <div style={{ fontWeight: 700, textTransform: 'uppercase', color: '#0f172a', marginBottom: '4px' }}>
+                          Official Bank Details
+                        </div>
+                        <div>Bank: <strong>{state.settings.bank_name || 'Federal Bank'}</strong></div>
+                        <div>Account Name: <strong>{state.settings.account_name || state.settings.name}</strong></div>
+                        <div>A/C No: <strong>{state.settings.account_number || '9876-5432-1000'}</strong> &bull; IFSC: <strong>{state.settings.ifsc_code || 'FDRL0001234'}</strong></div>
+                        <div>UPI ID: <strong>{state.settings.upi_id || 'ippas@upi'}</strong></div>
+                      </div>
+                    )}
+                    {event.show_payment_details !== false && (
+                      <div>
+                        <div style={{ fontWeight: 700, textTransform: 'uppercase', color: '#0f172a', marginBottom: '2px' }}>
+                          Payment Terms
+                        </div>
+                        <div style={{ color: '#dc2626', fontWeight: 600 }}>
+                          {event.payment_terms || state.settings.payment_terms || 'Payment strictly due within 3 days. 50% advance deposit upon confirmation.'}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'flex-end' }}>
@@ -2582,264 +2905,355 @@ export default function EventDetailPage() {
       {/* ----------------------------------------------------------------------------------- */}
       {/* MODAL 3: A4 PRINTABLE INVOICE (STANDARD A4 PORTRAIT WITH PART-PAYMENTS & DISCOUNTS) */}
       {/* ----------------------------------------------------------------------------------- */}
-      {selectedInvoiceForPrint && (
-        <div className="modal-overlay" onClick={() => setSelectedInvoiceForPrint(null)}>
-          <div
-            className="modal-content print-page"
-            style={{ maxWidth: '780px', width: '96%', background: '#ffffff' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Toolbar */}
-            <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <span style={{ fontWeight: 700, fontSize: '1rem' }}>🧾 Official Tax Invoice (Standard A4 PDF)</span>
-                <span className="badge" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 600 }}>
-                  A4 Fit
-                </span>
-              </div>
+      {selectedInvoiceForPrint && (() => {
+        const liveInv =
+          state.invoices.find((i) => i.id === selectedInvoiceForPrint.id) || selectedInvoiceForPrint;
+        const paymentsForThis = state.payments.filter((p) => p.invoice_id === liveInv.id);
+        const totalPaidThis = paymentsForThis.reduce((s, p) => s + p.amount, 0);
+        const balanceDue = Math.max(0, liveInv.amount - totalPaidThis);
+        const isFullyPaid = liveInv.status === 'paid' || (liveInv.amount > 0 && balanceDue <= 0);
+        const isFinalSettlement = isFullyPaid || liveInv.kind === 'final';
+        const showBankDetails = liveInv.show_bank_details !== false;
+        const showPaymentDetails = liveInv.show_payment_details !== false;
+        const quoteRef = liveInv.quotation_number || quoteNumber;
 
-              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={isDownloadingPdf}
-                  onClick={async () => {
-                    setIsDownloadingPdf(true);
-                    await downloadElementAsPdf(
-                      'event-invoice-printable-area',
-                      `${selectedInvoiceForPrint.invoice_number}`,
-                      { orientation: 'portrait' }
-                    );
-                    setIsDownloadingPdf(false);
-                  }}
-                  style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                >
-                  {isDownloadingPdf ? '⏳ Generating PDF...' : '📥 Download A4 PDF'}
-                </button>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => {
-                    window.print();
-                  }}
-                >
-                  🖨️ Print A4
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
-                  onClick={() => setSelectedInvoiceForWhatsApp(selectedInvoiceForPrint)}
-                >
-                  💬 Share WA PDF
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setSelectedInvoiceForPrint(null)}>
-                  Close
-                </button>
-              </div>
-            </div>
+        return (
+          <div className="modal-overlay" onClick={() => setSelectedInvoiceForPrint(null)}>
+            <div
+              className="modal-content print-page"
+              style={{ maxWidth: '780px', width: '96%', background: '#ffffff' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Toolbar */}
+              <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 700, fontSize: '1rem' }}>
+                    🧾 {isFinalSettlement ? 'Final Settlement Invoice' : 'Official Invoice'} ({liveInv.invoice_number})
+                  </span>
+                  <span className="badge" style={{ background: isFullyPaid ? '#dcfce7' : '#eff6ff', color: isFullyPaid ? '#15803d' : '#1d4ed8', fontWeight: 700 }}>
+                    {isFullyPaid ? '✓ Paid in Full' : 'A4 Fit'}
+                  </span>
+                </div>
 
-            {/* Standard A4 Sheet Container */}
-            <div style={{ overflowX: 'auto' }}>
-              {(() => {
-                const inv = selectedInvoiceForPrint;
-                const paymentsForThis = state.payments.filter((p) => p.invoice_id === inv.id);
-                const totalPaidThis = paymentsForThis.reduce((s, p) => s + p.amount, 0);
-                const balanceDue = Math.max(0, inv.amount - totalPaidThis);
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', fontWeight: 600, marginRight: '0.35rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={showBankDetails}
+                      onChange={(e) => store.updateInvoice(liveInv.id, { show_bank_details: e.target.checked })}
+                    />
+                    🏦 Bank Details
+                  </label>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', fontWeight: 600, marginRight: '0.5rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={showPaymentDetails}
+                      onChange={(e) => store.updateInvoice(liveInv.id, { show_payment_details: e.target.checked })}
+                    />
+                    💳 Payment Details
+                  </label>
 
-                return (
-                  <div
-                    id="event-invoice-printable-area"
-                    style={{
-                      width: '210mm',
-                      minHeight: '280mm',
-                      padding: '16mm 18mm',
-                      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-                      color: '#111827',
-                      background: '#ffffff',
-                      margin: '0 auto',
-                      boxSizing: 'border-box'
+                  <button
+                    className="btn btn-primary btn-sm"
+                    disabled={isDownloadingPdf}
+                    onClick={async () => {
+                      setIsDownloadingPdf(true);
+                      await downloadElementAsPdf(
+                        'event-invoice-printable-area',
+                        `${liveInv.invoice_number}`,
+                        { orientation: 'portrait' }
+                      );
+                      setIsDownloadingPdf(false);
+                    }}
+                    style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                  >
+                    {isDownloadingPdf ? '⏳ Generating PDF...' : '📥 Download A4 PDF'}
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      window.print();
                     }}
                   >
-                    {/* Header */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '12px', marginBottom: '16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                        <img
-                          src="/logo.png"
-                          alt="IPPAS Food Service & Events"
-                          style={{ height: '56px', width: 'auto', objectFit: 'contain' }}
-                        />
-                        <div>
-                          <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#0f172a' }}>
-                            {state.settings.name}
-                          </div>
-                          <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                            {state.settings.address}
-                          </div>
-                          <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                            Phone: {state.settings.phone} &bull; {state.settings.email}
-                          </div>
-                        </div>
-                      </div>
+                    🖨️ Print A4
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
+                    onClick={() => setSelectedInvoiceForWhatsApp(liveInv)}
+                  >
+                    💬 Share WA PDF
+                  </button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setSelectedInvoiceForPrint(null)}>
+                    Close
+                  </button>
+                </div>
+              </div>
 
-                      <div style={{ textAlign: 'right' }}>
-                        <h1 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: '2.4rem', margin: 0, fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
-                          Invoice
-                        </h1>
-                        <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>
-                          Official Bill / Receipt
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Metadata */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '0.85rem' }}>
+              {/* Standard A4 Sheet Container */}
+              <div style={{ overflowX: 'auto' }}>
+                <div
+                  id="event-invoice-printable-area"
+                  style={{
+                    width: '210mm',
+                    minHeight: '280mm',
+                    padding: '16mm 18mm',
+                    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+                    color: '#111827',
+                    background: '#ffffff',
+                    margin: '0 auto',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  {/* Header */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '12px', marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                      <img
+                        src="/logo.png"
+                        alt="IPPAS Food Service & Events"
+                        style={{ height: '56px', width: 'auto', objectFit: 'contain' }}
+                      />
                       <div>
-                        <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: '#64748b', marginBottom: '2px' }}>
-                          Billed To:
+                        <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#0f172a' }}>
+                          {state.settings.name}
                         </div>
-                        <div style={{ fontWeight: 700, fontSize: '1rem', color: '#0f172a' }}>{client?.name}</div>
-                        {client?.company && <div>Company: {client.company}</div>}
-                        {client?.phone && <div>Phone: {client.phone}</div>}
-                        <div>Event: <strong>{event.title}</strong></div>
-                      </div>
-
-                      <div style={{ textAlign: 'right' }}>
-                        <div>Invoice No: <strong>{inv.invoice_number}</strong></div>
-                        <div>Date Issued: <strong>{new Date(inv.created_at).toLocaleDateString('en-GB')}</strong></div>
-                        <div>Due Date: <strong>{inv.due_date || 'Upon Receipt'}</strong></div>
-                        <div>Type: <strong>{inv.kind === 'final' ? 'Final Settlement' : 'Advance Deposit'}</strong></div>
-                      </div>
-                    </div>
-
-                    {/* Bill Particulars */}
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', marginBottom: '16px' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '2px solid #0f172a', background: '#f1f5f9' }}>
-                          <th style={{ textAlign: 'left', padding: '8px 10px', color: '#0f172a' }}>Description</th>
-                          <th style={{ textAlign: 'center', padding: '8px 10px', color: '#0f172a' }}>Guests / Pax</th>
-                          <th style={{ textAlign: 'right', padding: '8px 10px', color: '#0f172a' }}>Amount (₹)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                          <td style={{ padding: '10px 10px' }}>
-                            <div style={{ fontWeight: 700 }}>
-                              {inv.kind === 'final' ? 'Final Catering Contract Settlement' : 'Advance Booking Deposit'}
-                            </div>
-                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                              Event: {event.title} on {event.event_date} at {event.venue || 'Client Venue'}
-                            </div>
-                          </td>
-                          <td style={{ textAlign: 'center', padding: '10px 10px' }}>{event.guest_count} pax</td>
-                          <td style={{ textAlign: 'right', padding: '10px 10px', fontWeight: 600 }}>
-                            ₹{(inv.subtotal || inv.amount).toLocaleString('en-IN')}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-
-                    {/* Subtotal, Discount & Net Payable */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-                      <div style={{ width: '300px', fontSize: '0.85rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
-                          <span>Subtotal:</span>
-                          <strong>₹{(inv.subtotal || inv.amount).toLocaleString('en-IN')}</strong>
+                        <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                          {state.settings.address}
                         </div>
-
-                        {inv.discount > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#15803d' }}>
-                            <span>Special Discount:</span>
-                            <strong>- ₹{inv.discount.toLocaleString('en-IN')}</strong>
-                          </div>
-                        )}
-
-                        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid #0f172a', paddingTop: '6px', marginTop: '6px', fontSize: '1.05rem', fontWeight: 800 }}>
-                          <span>Net Invoiced Amount:</span>
-                          <strong>₹{inv.amount.toLocaleString('en-IN')}</strong>
+                        <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                          Phone: {state.settings.phone} &bull; {state.settings.email}
                         </div>
                       </div>
                     </div>
 
-                    {/* Part-Payments Table on Same Invoice */}
-                    {paymentsForThis.length > 0 && (
-                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 12px', marginBottom: '16px' }}>
-                        <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', color: '#0f172a', marginBottom: '6px' }}>
-                          Payment Installments Received:
-                        </div>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-                          <thead>
-                            <tr style={{ borderBottom: '1px solid #cbd5e1', color: '#64748b' }}>
-                              <th style={{ textAlign: 'left', padding: '4px' }}>Date</th>
-                              <th style={{ textAlign: 'left', padding: '4px' }}>Method &amp; Channel</th>
-                              <th style={{ textAlign: 'left', padding: '4px' }}>Account</th>
-                              <th style={{ textAlign: 'left', padding: '4px' }}>Note</th>
-                              <th style={{ textAlign: 'right', padding: '4px' }}>Amount Paid</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {paymentsForThis.map((pmt) => {
-                              const ch = store.inferPaymentChannel(pmt.method, pmt.payment_channel);
-                              const acc = store.resolveDestinationAccount(pmt);
-                              return (
-                                <tr key={pmt.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                  <td style={{ padding: '4px' }}>{pmt.paid_at.slice(0, 10)}</td>
-                                  <td style={{ padding: '4px', textTransform: 'capitalize' }}>
-                                    {pmt.method} ({ch === 'cash' ? 'Cash' : 'Bank'})
-                                  </td>
-                                  <td style={{ padding: '4px', fontWeight: 600, color: '#0f172a' }}>{acc}</td>
-                                  <td style={{ padding: '4px', color: '#64748b' }}>{pmt.note || '—'}</td>
-                                  <td style={{ padding: '4px', textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
-                                    ₹{pmt.amount.toLocaleString('en-IN')}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-
-                        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #cbd5e1', paddingTop: '6px', marginTop: '6px', fontSize: '0.9rem', fontWeight: 700 }}>
-                          <span>Total Paid So Far: ₹{totalPaidThis.toLocaleString('en-IN')}</span>
-                          <span style={{ color: balanceDue > 0 ? '#dc2626' : 'var(--success)' }}>
-                            Balance Due: ₹{balanceDue.toLocaleString('en-IN')}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Bank Details & Terms */}
-                    <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '12px', display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '1rem', fontSize: '0.8rem' }}>
-                      <div>
-                        <div style={{ fontWeight: 700, textTransform: 'uppercase', color: '#0f172a', marginBottom: '4px' }}>
-                          Official Bank Details &amp; Payment Instructions
-                        </div>
-                        <div>Bank: <strong>{state.settings.bank_name || 'Federal Bank'}</strong></div>
-                        <div>Account Name: <strong>{state.settings.account_name || state.settings.name}</strong></div>
-                        <div>A/C No: <strong>{state.settings.account_number || '9876-5432-1000'}</strong> &bull; IFSC: <strong>{state.settings.ifsc_code || 'FDRL0001234'}</strong></div>
-                        <div>UPI ID: <strong>{state.settings.upi_id || 'ippas@upi'}</strong></div>
-                        <div style={{ marginTop: '4px', color: '#dc2626', fontWeight: 600 }}>
-                          {state.settings.payment_terms || 'Payment strictly due within 3 days.'}
-                        </div>
-                      </div>
-
-                      <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'flex-end' }}>
-                        <div style={{ borderTop: '1px dashed #94a3b8', width: '160px', textAlign: 'center', paddingTop: '4px', fontSize: '0.75rem', color: '#64748b' }}>
-                          Authorized Signatory
-                        </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <h1 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: isFinalSettlement ? '2rem' : '2.4rem', margin: 0, fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
+                        {isFinalSettlement ? 'Final Settlement' : 'Invoice'}
+                      </h1>
+                      <div style={{ fontSize: '0.8rem', color: isFullyPaid ? '#15803d' : '#64748b', fontWeight: isFullyPaid ? 700 : 500, marginTop: '4px' }}>
+                        {isFinalSettlement ? 'Final Settlement Invoice' : 'Advance / Booking Invoice'}
                       </div>
                     </div>
                   </div>
-                );
-              })()}
+
+                  {/* Metadata */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 14px', marginBottom: '16px', fontSize: '0.85rem' }}>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: '#64748b', marginBottom: '2px' }}>
+                        Billed To:
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: '1rem', color: '#0f172a' }}>{client?.name}</div>
+                      {client?.company && <div>Company: {client.company}</div>}
+                      {client?.phone && <div>Phone: {client.phone}</div>}
+                      <div>Event: <strong>{event.title}</strong> ({event.event_date})</div>
+                      <div>Venue: <strong>{event.venue || 'Client Venue'}</strong> &bull; <strong>{event.guest_count} Pax</strong></div>
+                    </div>
+
+                    <div style={{ textAlign: 'right' }}>
+                      <div>Invoice No: <strong>{liveInv.invoice_number}</strong></div>
+                      <div>Quote Ref: <strong>#{quoteRef}</strong></div>
+                      <div>Date Issued: <strong>{new Date(liveInv.created_at).toLocaleDateString('en-GB')}</strong></div>
+                      {!isFullyPaid && <div>Due Date: <strong>{liveInv.due_date || 'Upon Receipt'}</strong></div>}
+                      <div>Stage: <strong style={{ color: isFullyPaid ? '#15803d' : '#0f172a' }}>{isFinalSettlement ? 'Final Settlement' : 'Advance / Booking'}</strong></div>
+                    </div>
+                  </div>
+
+                  {/* Full Itemized Menu + Logistics, Transport & Extras from Converted Quotation */}
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem', marginBottom: '16px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #0f172a', background: '#f1f5f9' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 10px', color: '#0f172a' }}>Dish / Service Particulars</th>
+                        <th style={{ textAlign: 'center', padding: '8px 10px', color: '#0f172a' }}>Qty / Pax</th>
+                        <th style={{ textAlign: 'right', padding: '8px 10px', color: '#0f172a' }}>Rate</th>
+                        <th style={{ textAlign: 'right', padding: '8px 10px', color: '#0f172a' }}>Amount (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {eventItems.length === 0 && extras.length === 0 ? (
+                        <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '10px 10px' }}>
+                            <div style={{ fontWeight: 700 }}>
+                              {isFinalSettlement ? 'Final Catering Contract Settlement' : 'Catering Package & Services'}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                              Event: {event.title} on {event.event_date}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'center', padding: '10px 10px' }}>{event.guest_count} pax</td>
+                          <td style={{ textAlign: 'right', padding: '10px 10px' }}>—</td>
+                          <td style={{ textAlign: 'right', padding: '10px 10px', fontWeight: 600 }}>
+                            ₹{(liveInv.subtotal || liveInv.amount).toLocaleString('en-IN')}
+                          </td>
+                        </tr>
+                      ) : (
+                        <>
+                          {eventItems.map((item) => {
+                            const dish = state.menuItems.find((m) => m.id === item.menu_item_id);
+                            const isKg = item.pricing_type === 'per_kg';
+                            const rate = item.price_per_unit || item.price_per_guest || 0;
+                            const qty = isKg
+                              ? (item.quantity !== undefined ? item.quantity : 1)
+                              : (item.quantity !== undefined ? item.quantity : event.guest_count);
+                            const lineTotal = rate * qty;
+                            return (
+                              <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                <td style={{ padding: '8px 10px' }}>
+                                  <div style={{ fontWeight: 600 }}>{dish?.name || 'Menu Dish'}</div>
+                                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{dish?.category}</div>
+                                </td>
+                                <td style={{ textAlign: 'center', padding: '8px 10px' }}>
+                                  {qty} {isKg ? 'kg' : 'pax'}
+                                </td>
+                                <td style={{ textAlign: 'right', padding: '8px 10px' }}>
+                                  ₹{rate.toLocaleString('en-IN')}{isKg ? '/kg' : '/pax'}
+                                </td>
+                                <td style={{ textAlign: 'right', padding: '8px 10px', fontWeight: 700 }}>
+                                  ₹{lineTotal.toLocaleString('en-IN')}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {extras.map((ex) => (
+                            <tr key={ex.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                              <td style={{ padding: '8px 10px' }}>
+                                <div style={{ fontWeight: 600 }}>{ex.description}</div>
+                                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Logistics, Transport &amp; Extra Charges</div>
+                              </td>
+                              <td style={{ textAlign: 'center', padding: '8px 10px' }}>1 Lot</td>
+                              <td style={{ textAlign: 'right', padding: '8px 10px' }}>₹{ex.amount.toLocaleString('en-IN')}</td>
+                              <td style={{ textAlign: 'right', padding: '8px 10px', fontWeight: 700 }}>
+                                ₹{ex.amount.toLocaleString('en-IN')}
+                              </td>
+                            </tr>
+                          ))}
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+
+                  {/* Subtotal, Discount + Discount Note & Net Payable */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+                    <div style={{ width: '320px', fontSize: '0.85rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
+                        <span>Gross Subtotal:</span>
+                        <strong>₹{(liveInv.subtotal || liveInv.amount).toLocaleString('en-IN')}</strong>
+                      </div>
+
+                      {liveInv.discount > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', color: '#15803d', gap: '0.5rem' }}>
+                          <span>
+                            Discount{liveInv.discount_note ? ` (${liveInv.discount_note})` : ''}:
+                          </span>
+                          <strong>- ₹{liveInv.discount.toLocaleString('en-IN')}</strong>
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid #0f172a', paddingTop: '6px', marginTop: '6px', fontSize: '1.05rem', fontWeight: 800 }}>
+                        <span>Net Invoice Total:</span>
+                        <strong>₹{liveInv.amount.toLocaleString('en-IN')}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Part-Payments Table on Same Invoice (Controlled by showPaymentDetails) */}
+                  {showPaymentDetails && paymentsForThis.length > 0 && (
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 12px', marginBottom: '16px' }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', color: '#0f172a', marginBottom: '6px' }}>
+                        Part-Payment &amp; Settlement Receipts:
+                      </div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #cbd5e1', color: '#64748b' }}>
+                            <th style={{ textAlign: 'left', padding: '4px' }}>Date</th>
+                            <th style={{ textAlign: 'left', padding: '4px' }}>Method &amp; Channel</th>
+                            <th style={{ textAlign: 'left', padding: '4px' }}>Account</th>
+                            <th style={{ textAlign: 'left', padding: '4px' }}>Note</th>
+                            <th style={{ textAlign: 'right', padding: '4px' }}>Amount Paid</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paymentsForThis.map((pmt) => {
+                            const ch = store.inferPaymentChannel(pmt.method, pmt.payment_channel);
+                            const acc = store.resolveDestinationAccount(pmt);
+                            return (
+                              <tr key={pmt.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '4px' }}>{pmt.paid_at.slice(0, 10)}</td>
+                                <td style={{ padding: '4px', textTransform: 'capitalize' }}>
+                                  {pmt.method} ({ch === 'cash' ? 'Cash' : 'Bank'})
+                                </td>
+                                <td style={{ padding: '4px', fontWeight: 600, color: '#0f172a' }}>{acc}</td>
+                                <td style={{ padding: '4px', color: '#64748b' }}>{pmt.note || '—'}</td>
+                                <td style={{ padding: '4px', textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
+                                  ₹{pmt.amount.toLocaleString('en-IN')}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #cbd5e1', paddingTop: '6px', marginTop: '6px', fontSize: '0.9rem', fontWeight: 700 }}>
+                        <span>Total Paid: ₹{totalPaidThis.toLocaleString('en-IN')}</span>
+                        <span style={{ color: balanceDue > 0 ? '#dc2626' : '#15803d' }}>
+                          {isFullyPaid ? '✓ Settled in Full (Balance ₹0)' : `Balance Due: ₹${balanceDue.toLocaleString('en-IN')}`}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {isFullyPaid && (
+                    <div style={{ background: '#dcfce7', border: '1px solid #86efac', color: '#166534', borderRadius: '6px', padding: '8px 12px', marginBottom: '14px', fontSize: '0.82rem', fontWeight: 700, textAlign: 'center' }}>
+                      ✓ PAID IN FULL — FINAL SETTLEMENT COMPLETED
+                    </div>
+                  )}
+
+                  {/* Bank Details & Payment Terms (Payment Terms STRICTLY HIDDEN once Fully Paid!) */}
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '12px', display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '1rem', fontSize: '0.8rem' }}>
+                    <div>
+                      {showBankDetails && (
+                        <div style={{ marginBottom: !isFullyPaid && showPaymentDetails ? '6px' : 0 }}>
+                          <div style={{ fontWeight: 700, textTransform: 'uppercase', color: '#0f172a', marginBottom: '4px' }}>
+                            Official Bank Details
+                          </div>
+                          <div>Bank: <strong>{state.settings.bank_name || 'Federal Bank'}</strong></div>
+                          <div>Account Name: <strong>{state.settings.account_name || state.settings.name}</strong></div>
+                          <div>A/C No: <strong>{state.settings.account_number || '9876-5432-1000'}</strong> &bull; IFSC: <strong>{state.settings.ifsc_code || 'FDRL0001234'}</strong></div>
+                          <div>UPI ID: <strong>{state.settings.upi_id || 'ippas@upi'}</strong></div>
+                        </div>
+                      )}
+
+                      {!isFullyPaid && showPaymentDetails && (
+                        <div>
+                          <div style={{ fontWeight: 700, textTransform: 'uppercase', color: '#0f172a', marginBottom: '2px' }}>
+                            Payment Terms
+                          </div>
+                          <div style={{ color: '#dc2626', fontWeight: 600 }}>
+                            {event.payment_terms || state.settings.payment_terms || 'Payment strictly due within 3 days.'}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'flex-end' }}>
+                      <div style={{ borderTop: '1px dashed #94a3b8', width: '160px', textAlign: 'center', paddingTop: '4px', fontSize: '0.75rem', color: '#64748b' }}>
+                        Authorized Signatory
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ----------------------------------------------------------------------------------- */}
-      {/* MODAL 4: EDIT INVOICE MODAL (SUBTOTAL / DISCOUNT ON SAME INVOICE) */}
+      {/* MODAL 4: EDIT INVOICE MODAL (SUBTOTAL / DISCOUNT / VISIBILITY ON SAME INVOICE) */}
       {/* ----------------------------------------------------------------------------------- */}
       {editingInvoice && (
         <div className="modal-overlay" onClick={() => setEditingInvoice(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
             <div className="modal-header">
               <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
                 Edit Invoice {editingInvoice.invoice_number}
@@ -2850,26 +3264,39 @@ export default function EventDetailPage() {
             </div>
 
             <form onSubmit={handleSaveInvoiceEdit}>
-              <div className="form-group">
-                <label className="form-label">Subtotal (₹) *</label>
-                <input
-                  type="number"
-                  min="0"
-                  className="form-control"
-                  value={editInvForm.subtotal}
-                  onChange={(e) => setEditInvForm({ ...editInvForm, subtotal: parseFloat(e.target.value) || 0 })}
-                  required
-                />
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Subtotal (₹) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    className="form-control"
+                    value={editInvForm.subtotal}
+                    onChange={(e) => setEditInvForm({ ...editInvForm, subtotal: parseFloat(e.target.value) || 0 })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Discount (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    className="form-control"
+                    value={editInvForm.discount}
+                    onChange={(e) => setEditInvForm({ ...editInvForm, discount: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
               </div>
 
               <div className="form-group">
-                <label className="form-label">Discount (₹)</label>
+                <label className="form-label">Discount Details / Reason</label>
                 <input
-                  type="number"
-                  min="0"
+                  type="text"
                   className="form-control"
-                  value={editInvForm.discount}
-                  onChange={(e) => setEditInvForm({ ...editInvForm, discount: parseFloat(e.target.value) || 0 })}
+                  placeholder="e.g. Special wedding concession / Client loyalty discount"
+                  value={editInvForm.discount_note}
+                  onChange={(e) => setEditInvForm({ ...editInvForm, discount_note: e.target.value })}
                 />
               </div>
 
@@ -2880,29 +3307,62 @@ export default function EventDetailPage() {
                 </strong>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Due Date</label>
-                <input
-                  type="date"
-                  className="form-control"
-                  value={editInvForm.due_date}
-                  onChange={(e) => setEditInvForm({ ...editInvForm, due_date: e.target.value })}
-                />
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Due Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={editInvForm.due_date}
+                    onChange={(e) => setEditInvForm({ ...editInvForm, due_date: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Status</label>
+                  <select
+                    className="form-control"
+                    value={editInvForm.status}
+                    onChange={(e) => setEditInvForm({ ...editInvForm, status: e.target.value as any })}
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="sent">Sent to Client</option>
+                    <option value="partially_paid">Partially Paid</option>
+                    <option value="paid">Paid in Full (Final Settlement)</option>
+                    <option value="void">Void</option>
+                  </select>
+                </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Status</label>
-                <select
-                  className="form-control"
-                  value={editInvForm.status}
-                  onChange={(e) => setEditInvForm({ ...editInvForm, status: e.target.value as any })}
-                >
-                  <option value="draft">Draft</option>
-                  <option value="sent">Sent to Client</option>
-                  <option value="partially_paid">Partially Paid</option>
-                  <option value="paid">Paid in Full</option>
-                  <option value="void">Void</option>
-                </select>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.45rem',
+                  padding: '0.65rem 0.85rem',
+                  background: '#f8fafc',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  marginBottom: '1rem'
+                }}
+              >
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.83rem', fontWeight: 600, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={editInvForm.show_bank_details}
+                    onChange={(e) => setEditInvForm({ ...editInvForm, show_bank_details: e.target.checked })}
+                  />
+                  🏦 Show Bank Details on Invoice
+                </label>
+
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.83rem', fontWeight: 600, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={editInvForm.show_payment_details}
+                    onChange={(e) => setEditInvForm({ ...editInvForm, show_payment_details: e.target.checked })}
+                  />
+                  💳 Show Payment Details on Invoice
+                </label>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
@@ -3233,6 +3693,13 @@ export default function EventDetailPage() {
           </div>
         </div>
       )}
+
+      {/* WhatsApp Quotation PDF & Message Share Modal */}
+      <QuotationWhatsAppModal
+        event={event}
+        isOpen={isQuoteWhatsAppOpen}
+        onClose={() => setIsQuoteWhatsAppOpen(false)}
+      />
 
       {/* WhatsApp Invoice PDF Share Modal */}
       <WhatsAppShareModal

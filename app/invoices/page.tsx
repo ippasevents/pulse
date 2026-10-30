@@ -23,10 +23,13 @@ export default function InvoicesPage() {
   const [editInvForm, setEditInvForm] = useState({
     subtotal: 0,
     discount: 0,
+    discount_note: '',
     amount: 0,
     kind: 'deposit' as 'deposit' | 'final',
     due_date: '',
     status: 'draft' as Invoice['status'],
+    show_bank_details: true,
+    show_payment_details: true,
     notes: ''
   });
 
@@ -82,16 +85,18 @@ export default function InvoicesPage() {
     const subtotal = inv.subtotal !== undefined ? inv.subtotal : inv.amount;
     const discount = inv.discount || 0;
     const amount = Math.max(0, subtotal - discount);
-    const maxDue = getMaxDueDate(inv.created_at);
     const initialDue = inv.due_date ? clampDueDate(inv.due_date, inv.created_at) : getDefaultDueDate(inv.created_at);
 
     setEditInvForm({
       subtotal,
       discount,
+      discount_note: inv.discount_note || '',
       amount,
       kind: inv.kind,
       due_date: initialDue,
       status: inv.status,
+      show_bank_details: inv.show_bank_details !== false,
+      show_payment_details: inv.show_payment_details !== false,
       notes: inv.notes || ''
     });
   };
@@ -106,10 +111,13 @@ export default function InvoicesPage() {
     store.updateInvoice(editingInvoice.id, {
       subtotal: Number(editInvForm.subtotal),
       discount: Number(editInvForm.discount),
+      discount_note: editInvForm.discount_note.trim(),
       amount: netAmount,
       kind: editInvForm.kind,
       due_date: safeDueDate,
       status: editInvForm.status,
+      show_bank_details: editInvForm.show_bank_details,
+      show_payment_details: editInvForm.show_payment_details,
       notes: editInvForm.notes
     });
     setEditingInvoice(null);
@@ -238,14 +246,20 @@ export default function InvoicesPage() {
                     .reduce((sum, p) => sum + p.amount, 0);
                   const balanceDue = Math.max(0, inv.amount - paymentsForThis);
 
-                  const waText = encodeURIComponent(
-                    `Hello ${client?.name}, here is the invoice ${inv.invoice_number} from ${state.settings.name} for ${evt?.title}. Amount: ₹${inv.amount.toLocaleString('en-IN')}, Paid: ₹${paymentsForThis.toLocaleString('en-IN')}, Balance Due: ₹${balanceDue.toLocaleString('en-IN')}. Due date: ${inv.due_date || 'immediate'}. Thank you!`
-                  );
-                  const waUrl = `https://wa.me/${client?.phone?.replace(/[^0-9]/g, '') || ''}?text=${waText}`;
+                  const isFullyPaid = inv.status === 'paid' || (inv.amount > 0 && balanceDue <= 0);
+                  const isFinalSettlement = isFullyPaid || inv.kind === 'final';
+                  const quoteRef = inv.quotation_number || (evt ? store.getQuotationNumber(evt) : '');
 
                   return (
                     <tr key={inv.id}>
-                      <td style={{ fontWeight: 700 }}>{inv.invoice_number}</td>
+                      <td>
+                        <div style={{ fontWeight: 700 }}>{inv.invoice_number}</div>
+                        {quoteRef && (
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                            Quote: #{quoteRef}
+                          </div>
+                        )}
+                      </td>
                       <td>
                         <Link
                           href={`/events/${evt?.id}`}
@@ -265,16 +279,23 @@ export default function InvoicesPage() {
                         )}
                       </td>
                       <td>
-                        <span className="badge" style={{ background: '#f1f5f9' }}>
-                          {inv.kind === 'deposit' ? 'Advance Deposit' : 'Final Settlement'}
+                        <span
+                          className="badge"
+                          style={{
+                            background: isFinalSettlement ? '#dcfce7' : '#f1f5f9',
+                            color: isFinalSettlement ? '#15803d' : '#334155',
+                            fontWeight: 600
+                          }}
+                        >
+                          {isFinalSettlement ? '✓ Final Settlement' : 'Advance / Booking'}
                         </span>
                       </td>
-                      <td>{inv.due_date || 'Immediate'}</td>
+                      <td>{isFullyPaid ? 'Settled' : inv.due_date || 'Immediate'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700 }}>
                         ₹{inv.amount.toLocaleString('en-IN')}
                         {(inv.discount || 0) > 0 && (
                           <div style={{ fontSize: '0.7rem', color: '#16a34a', fontWeight: 500 }}>
-                            (₹{inv.discount} off)
+                            (₹{inv.discount.toLocaleString('en-IN')} off{inv.discount_note ? `: ${inv.discount_note}` : ''})
                           </div>
                         )}
                       </td>
@@ -466,342 +487,448 @@ export default function InvoicesPage() {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Toolbar */}
-            <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 700, fontSize: '1rem' }}>🧾 Official Tax Invoice (Standard A4 Portrait)</span>
-                <span className="badge" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 600 }}>
-                  A4 Print Ready
-                </span>
-              </div>
+            {(() => {
+              const livePrintInv =
+                state.invoices.find((i) => i.id === selectedInvoiceForPrint.id) ||
+                selectedInvoiceForPrint;
+              const printBankEnabled = livePrintInv.show_bank_details !== false;
+              const printPayEnabled = livePrintInv.show_payment_details !== false;
 
-              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={isDownloadingPdf}
-                  onClick={async () => {
-                    setIsDownloadingPdf(true);
-                    await downloadElementAsPdf('invoice-printable-area', `${selectedInvoiceForPrint.invoice_number}`, {
-                      orientation: 'portrait'
-                    });
-                    setIsDownloadingPdf(false);
-                  }}
-                  style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                >
-                  {isDownloadingPdf ? '⏳ Generating A4 PDF...' : '📥 Download A4 PDF'}
-                </button>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => {
-                    document.body.classList.add('print-portrait-mode');
-                    window.print();
-                  }}
-                >
-                  🖨️ Print A4
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
-                  onClick={() => setSelectedInvoiceForWhatsApp(selectedInvoiceForPrint)}
-                >
-                  💬 Share WA PDF
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setSelectedInvoiceForPrint(null)}>
-                  Close
-                </button>
-              </div>
-            </div>
-
-            {/* Standard A4 Portrait Container */}
-            <div style={{ maxHeight: '82vh', overflowY: 'auto', background: '#f8fafc', padding: '1rem', borderRadius: '8px' }}>
-              {(() => {
-                const inv = selectedInvoiceForPrint;
-                const evt = state.events.find((e) => e.id === inv.event_id);
-                const client = state.clients.find((c) => c.id === evt?.client_id);
-                const { grandTotal } = evt ? store.getEventTotal(evt.id) : { grandTotal: 0 };
-                const evtItems = evt ? state.eventItems.filter((i) => i.event_id === evt.id) : [];
-                const invPayments = state.payments.filter((p) => p.invoice_id === inv.id);
-                const paymentsForThis = invPayments.reduce((s, p) => s + p.amount, 0);
-                const subtotal = inv.subtotal !== undefined ? inv.subtotal : (grandTotal > 0 ? grandTotal : inv.amount);
-                const discount = inv.discount || 0;
-                const netAmount = inv.amount;
-                const balanceDue = Math.max(0, netAmount - paymentsForThis);
-
-                return (
-                  <div
-                    id="invoice-printable-area"
-                    style={{
-                      width: '100%',
-                      maxWidth: '750px',
-                      minHeight: '260mm',
-                      padding: '2.5rem 2.25rem',
-                      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-                      color: '#111827',
-                      background: '#ffffff',
-                      margin: '0 auto',
-                      boxSizing: 'border-box',
-                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)'
-                    }}
-                  >
-                    {/* Header: Logo and Title */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.75rem', borderBottom: '2px solid #0f172a', paddingBottom: '1.25rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <img
-                          src="/logo.png"
-                          alt="IPPAS Food Service & Events"
-                          style={{ height: '64px', width: 'auto', objectFit: 'contain', display: 'block' }}
-                        />
-                        <div>
-                          <div style={{ fontWeight: 800, fontSize: '1.15rem', letterSpacing: '0.5px', color: '#0f172a' }}>
-                            {state.settings.name || 'IPPAS FOOD SERVICE & EVENTS'}
-                          </div>
-                          <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                            Outdoor Catering &bull; Event Management &bull; Kerala
-                          </div>
-                          <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                            Phone: {state.settings.phone} &bull; Email: {state.settings.email}
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <h1
-                          style={{
-                            fontFamily: "'Playfair Display', Georgia, serif",
-                            fontSize: '2.4rem',
-                            fontWeight: 700,
-                            color: '#0f172a',
-                            lineHeight: 1,
-                            margin: 0
-                          }}
-                        >
-                          INVOICE
-                        </h1>
-                        <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.3rem', fontWeight: 600 }}>
-                          #{inv.invoice_number}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#475569' }}>
-                          Kind: {inv.kind === 'deposit' ? 'Advance Deposit' : 'Final Settlement'}
-                        </div>
-                      </div>
+              return (
+                <>
+                  <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, fontSize: '1rem' }}>
+                        🧾 {livePrintInv.status === 'paid' || livePrintInv.kind === 'final' ? 'Final Settlement Invoice' : 'Official Tax Invoice'} (A4 Portrait)
+                      </span>
+                      <span className="badge" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 600 }}>
+                        A4 Print Ready
+                      </span>
                     </div>
 
-                    {/* Metadata: Billed To and Event Details */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1.5rem', marginBottom: '1.5rem', background: '#f8fafc', padding: '1rem 1.25rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.3rem' }}>
-                          Billed To:
-                        </div>
-                        <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
-                          {client?.name || 'Valued Client'}
-                        </div>
-                        {client?.company && <div style={{ fontSize: '0.85rem', color: '#334155' }}>🏢 {client.company}</div>}
-                        {client?.phone && <div style={{ fontSize: '0.85rem', color: '#334155' }}>📞 {client.phone}</div>}
-                        {client?.email && <div style={{ fontSize: '0.85rem', color: '#334155' }}>✉️ {client.email}</div>}
-                        <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '0.2rem' }}>
-                          📍 Venue: {evt?.venue || 'Kerala'}
-                        </div>
-                      </div>
-
-                      <div style={{ textAlign: 'right', fontSize: '0.85rem', lineHeight: 1.5 }}>
-                        <div><strong>Event:</strong> {evt?.title || 'Catering Order'}</div>
-                        {evt?.event_date && (
-                          <div>
-                            <strong>Event Date:</strong> {new Date(evt.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </div>
-                        )}
-                        {evt?.guest_count && <div><strong>Guests:</strong> {evt.guest_count} Pax</div>}
-                        <div><strong>Issue Date:</strong> {new Date(inv.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
-                        <div><strong>Due Date:</strong> {inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'On Receipt'}</div>
-                        <div style={{ marginTop: '0.35rem' }}>
-                          <span
-                            style={{
-                              display: 'inline-block',
-                              padding: '0.15rem 0.5rem',
-                              borderRadius: '4px',
-                              fontSize: '0.72rem',
-                              fontWeight: 700,
-                              textTransform: 'uppercase',
-                              background: inv.status === 'paid' ? '#dcfce7' : (balanceDue === 0 ? '#dcfce7' : '#fee2e2'),
-                              color: inv.status === 'paid' ? '#15803d' : (balanceDue === 0 ? '#15803d' : '#b91c1c')
-                            }}
-                          >
-                            Status: {balanceDue === 0 ? 'Fully Paid' : inv.status}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Particulars Table */}
-                    <div style={{ marginBottom: '1.25rem' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                        <thead>
-                          <tr style={{ borderBottom: '2px solid #0f172a', background: '#f1f5f9' }}>
-                            <th style={{ textAlign: 'left', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Description</th>
-                            <th style={{ textAlign: 'center', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Unit / Type</th>
-                            <th style={{ textAlign: 'right', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Rate</th>
-                            <th style={{ textAlign: 'right', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Total (₹)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {evtItems.length > 0 ? (
-                            evtItems.map((item) => {
-                              const mi = state.menuItems.find((m) => m.id === item.menu_item_id);
-                              const isPerKg = item.pricing_type === 'per_kg';
-                              const qty = item.quantity !== undefined ? item.quantity : (isPerKg ? 1 : (evt?.guest_count || 1));
-                              const rate = item.price_per_unit || item.price_per_guest || 0;
-                              const lineTotal = rate * qty;
-
-                              return (
-                                <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                  <td style={{ padding: '0.55rem 0.5rem' }}>
-                                    <div style={{ fontWeight: 600, color: '#0f172a' }}>{mi?.name || 'Menu Item'}</div>
-                                    {mi?.category && <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{mi.category}</div>}
-                                  </td>
-                                  <td style={{ textAlign: 'center', padding: '0.55rem 0.5rem', color: '#334155' }}>
-                                    {qty} {isPerKg ? 'Kg' : 'Pax'}
-                                  </td>
-                                  <td style={{ textAlign: 'right', padding: '0.55rem 0.5rem', color: '#334155' }}>
-                                    ₹{rate.toLocaleString('en-IN')} {isPerKg ? '/Kg' : '/Pax'}
-                                  </td>
-                                  <td style={{ textAlign: 'right', padding: '0.55rem 0.5rem', fontWeight: 600, color: '#0f172a' }}>
-                                    ₹{lineTotal.toLocaleString('en-IN')}
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          ) : (
-                            <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                              <td style={{ padding: '0.6rem 0.5rem' }}>
-                                <div style={{ fontWeight: 600 }}>{evt?.title || 'Catering Package'}</div>
-                                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                                  {inv.kind === 'deposit' ? 'Advance Deposit Payment' : 'Final Event Settlement'}
-                                </div>
-                              </td>
-                              <td style={{ textAlign: 'center', padding: '0.6rem 0.5rem' }}>1 Lot</td>
-                              <td style={{ textAlign: 'right', padding: '0.6rem 0.5rem' }}>₹{subtotal.toLocaleString('en-IN')}</td>
-                              <td style={{ textAlign: 'right', padding: '0.6rem 0.5rem', fontWeight: 600 }}>₹{subtotal.toLocaleString('en-IN')}</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Totals Section with Discount */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.25rem' }}>
-                      <div style={{ width: '310px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0.4rem', fontSize: '0.85rem' }}>
-                          <span style={{ color: '#475569' }}>Subtotal:</span>
-                          <span style={{ fontWeight: 600 }}>₹{subtotal.toLocaleString('en-IN')}</span>
-                        </div>
-                        {discount > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0.4rem', fontSize: '0.85rem', color: '#16a34a' }}>
-                            <span>Discount:</span>
-                            <span style={{ fontWeight: 700 }}>- ₹{discount.toLocaleString('en-IN')}</span>
-                          </div>
-                        )}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0.6rem', background: '#0f172a', color: '#ffffff', borderRadius: '4px', marginTop: '0.4rem' }}>
-                          <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>Net Invoice Total:</span>
-                          <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>₹{netAmount.toLocaleString('en-IN')}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Part-Payments History on the SAME invoice */}
-                    <div style={{ marginBottom: '1.5rem', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0.85rem 1rem', background: '#f8fafc' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                        <span style={{ fontWeight: 700, fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#0f172a' }}>
-                          💳 Payment &amp; Installments History
-                        </span>
-                        <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                          {invPayments.length} installment{invPayments.length === 1 ? '' : 's'} recorded
-                        </span>
-                      </div>
-
-                      {invPayments.length === 0 ? (
-                        <div style={{ fontSize: '0.8rem', color: '#64748b', fontStyle: 'italic', padding: '0.4rem 0' }}>
-                          No payments recorded yet against this invoice.
-                        </div>
-                      ) : (
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-                          <thead>
-                            <tr style={{ borderBottom: '1px solid #cbd5e1', color: '#475569' }}>
-                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Receipt Date</th>
-                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Method &amp; Channel</th>
-                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Account</th>
-                              <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Note</th>
-                              <th style={{ textAlign: 'right', padding: '0.35rem 0.25rem' }}>Amount Paid</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {invPayments.map((p) => {
-                              const ch = store.inferPaymentChannel(p.method, p.payment_channel);
-                              const acc = store.resolveDestinationAccount(p);
-                              return (
-                                <tr key={p.id} style={{ borderBottom: '1px dashed #e2e8f0' }}>
-                                  <td style={{ padding: '0.35rem 0.25rem' }}>
-                                    {new Date(p.paid_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                  </td>
-                                  <td style={{ padding: '0.35rem 0.25rem', fontWeight: 500 }}>
-                                    {p.method} ({ch === 'cash' ? 'Cash' : 'Bank'})
-                                  </td>
-                                  <td style={{ padding: '0.35rem 0.25rem', fontWeight: 600, color: '#0f172a' }}>
-                                    {acc}
-                                  </td>
-                                  <td style={{ padding: '0.35rem 0.25rem', color: '#64748b' }}>{p.note || '-'}</td>
-                                  <td style={{ textAlign: 'right', padding: '0.35rem 0.25rem', fontWeight: 600, color: '#16a34a' }}>
-                                    ₹{p.amount.toLocaleString('en-IN')}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      )}
-
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.65rem', paddingTop: '0.5rem', borderTop: '1px solid #cbd5e1' }}>
-                        <div style={{ fontSize: '0.85rem' }}>
-                          <span style={{ color: '#475569' }}>Total Paid so far: </span>
-                          <strong style={{ color: '#16a34a' }}>₹{paymentsForThis.toLocaleString('en-IN')}</strong>
-                        </div>
-                        <div style={{ fontSize: '0.9rem' }}>
-                          <span style={{ color: '#475569' }}>Balance Due: </span>
-                          <strong style={{ color: balanceDue > 0 ? '#dc2626' : '#16a34a', fontSize: '1.05rem' }}>
-                            ₹{balanceDue.toLocaleString('en-IN')}
-                          </strong>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Bank & Signature Footer */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '1.5rem', borderTop: '1px solid #e2e8f0', paddingTop: '1.25rem', alignItems: 'flex-end' }}>
-                      <div style={{ fontSize: '0.78rem', color: '#334155', lineHeight: 1.5 }}>
-                        <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.2rem', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                          Bank &amp; Payment Details
-                        </div>
-                        <div>Bank: <strong>{state.settings.bank_name || 'Federal Bank / State Bank of India'}</strong></div>
-                        <div>Account Name: <strong>{state.settings.account_name || state.settings.name}</strong></div>
-                        <div>Account No: <strong>{state.settings.account_number || '9876-5432-1000'}</strong> &bull; IFSC: <strong>{state.settings.ifsc_code || 'FDRL0001234'}</strong></div>
-                        <div>UPI ID: <strong>{state.settings.upi_id || 'ippas@upi'}</strong></div>
-                        {state.settings.payment_terms && (
-                          <div style={{ marginTop: '0.3rem', color: '#64748b', fontSize: '0.72rem' }}>
-                            Terms: {state.settings.payment_terms}
-                          </div>
-                        )}
-                      </div>
-
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: '1.05rem', fontWeight: 700, color: '#0f172a' }}>
-                          {state.settings.name}
-                        </div>
-                        <div style={{ marginTop: '1.75rem', paddingTop: '0.4rem', borderTop: '1px dashed #94a3b8', display: 'inline-block', minWidth: '150px', textAlign: 'center', fontSize: '0.72rem', color: '#64748b' }}>
-                          Authorized Signatory
-                        </div>
-                      </div>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={isDownloadingPdf}
+                        onClick={async () => {
+                          setIsDownloadingPdf(true);
+                          await downloadElementAsPdf('invoice-printable-area', `${livePrintInv.invoice_number}`, {
+                            orientation: 'portrait'
+                          });
+                          setIsDownloadingPdf(false);
+                        }}
+                        style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                      >
+                        {isDownloadingPdf ? '⏳ Generating A4 PDF...' : '📥 Download A4 PDF'}
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => {
+                          document.body.classList.add('print-portrait-mode');
+                          window.print();
+                        }}
+                      >
+                        🖨️ Print A4
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
+                        onClick={() => setSelectedInvoiceForWhatsApp(livePrintInv)}
+                      >
+                        💬 Share WA PDF
+                      </button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => setSelectedInvoiceForPrint(null)}>
+                        Close
+                      </button>
                     </div>
                   </div>
-                );
-              })()}
-            </div>
+
+                  {/* Enable / Disable Bank Details & Payment Details Bar */}
+                  <div
+                    className="no-print"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '0.75rem',
+                      background: '#f1f5f9',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '6px',
+                      padding: '0.55rem 0.85rem',
+                      marginBottom: '0.85rem',
+                      fontSize: '0.82rem'
+                    }}
+                  >
+                    <span style={{ fontWeight: 700, color: '#0f172a' }}>
+                      Invoice Display Options:
+                    </span>
+                    <div style={{ display: 'flex', gap: '1.1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer', fontWeight: 600 }}>
+                        <input
+                          type="checkbox"
+                          checked={printBankEnabled}
+                          onChange={(e) =>
+                            store.updateInvoice(livePrintInv.id, { show_bank_details: e.target.checked })
+                          }
+                        />
+                        🏦 Show Bank Details
+                      </label>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer', fontWeight: 600 }}>
+                        <input
+                          type="checkbox"
+                          checked={printPayEnabled}
+                          onChange={(e) =>
+                            store.updateInvoice(livePrintInv.id, { show_payment_details: e.target.checked })
+                          }
+                        />
+                        💳 Show Payment Details
+                      </label>
+                      {livePrintInv.status === 'paid' && (
+                        <span style={{ fontSize: '0.74rem', color: '#15803d', fontWeight: 700 }}>
+                          ✓ Paid in Full — Payment Terms Automatically Hidden
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Standard A4 Portrait Container */}
+                  <div style={{ maxHeight: '78vh', overflowY: 'auto', background: '#f8fafc', padding: '1rem', borderRadius: '8px' }}>
+                    {(() => {
+                      const inv = livePrintInv;
+                      const evt = state.events.find((e) => e.id === inv.event_id);
+                      const client = state.clients.find((c) => c.id === evt?.client_id);
+                      const { grandTotal } = evt ? store.getEventTotal(evt.id) : { grandTotal: 0 };
+                      const evtItems = evt ? state.eventItems.filter((i) => i.event_id === evt.id) : [];
+                      const evtExtras = evt ? state.eventExtras.filter((x) => x.event_id === evt.id) : [];
+                      const invPayments = state.payments.filter((p) => p.invoice_id === inv.id);
+                      const paymentsForThis = invPayments.reduce((s, p) => s + p.amount, 0);
+                      const subtotal = inv.subtotal !== undefined ? inv.subtotal : (grandTotal > 0 ? grandTotal : inv.amount);
+                      const discount = inv.discount || 0;
+                      const netAmount = inv.amount;
+                      const balanceDue = Math.max(0, netAmount - paymentsForThis);
+                      const isFullyPaid = inv.status === 'paid' || (netAmount > 0 && balanceDue <= 0);
+                      const isFinalSettlement = isFullyPaid || inv.kind === 'final';
+                      const quoteRef = inv.quotation_number || (evt ? store.getQuotationNumber(evt) : '');
+                      const showBankDetails = inv.show_bank_details !== false;
+                      const showPaymentDetails = inv.show_payment_details !== false;
+                      // STRICT RULE: Never show payment terms once invoice is fully paid
+                      const termsToDisplay =
+                        !isFullyPaid && showPaymentDetails
+                          ? evt?.payment_terms || state.settings.payment_terms || ''
+                          : '';
+
+                      return (
+                        <div
+                          id="invoice-printable-area"
+                          style={{
+                            width: '100%',
+                            maxWidth: '750px',
+                            minHeight: '260mm',
+                            padding: '2.5rem 2.25rem',
+                            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+                            color: '#111827',
+                            background: '#ffffff',
+                            margin: '0 auto',
+                            boxSizing: 'border-box',
+                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)'
+                          }}
+                        >
+                          {/* Header: Logo and Title */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.75rem', borderBottom: '2px solid #0f172a', paddingBottom: '1.25rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                              <img
+                                src="/logo.png"
+                                alt="IPPAS Food Service & Events"
+                                style={{ height: '64px', width: 'auto', objectFit: 'contain', display: 'block' }}
+                              />
+                              <div>
+                                <div style={{ fontWeight: 800, fontSize: '1.15rem', letterSpacing: '0.5px', color: '#0f172a' }}>
+                                  {state.settings.name || 'IPPAS FOOD SERVICE & EVENTS'}
+                                </div>
+                                <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                  Outdoor Catering &bull; Event Management &bull; Kerala
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                  Phone: {state.settings.phone} &bull; Email: {state.settings.email}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <h1
+                                style={{
+                                  fontFamily: "'Playfair Display', Georgia, serif",
+                                  fontSize: '2.1rem',
+                                  fontWeight: 700,
+                                  color: '#0f172a',
+                                  lineHeight: 1,
+                                  margin: 0
+                                }}
+                              >
+                                {isFinalSettlement ? 'FINAL SETTLEMENT' : 'INVOICE'}
+                              </h1>
+                              <div style={{ fontSize: '0.82rem', color: '#0f172a', marginTop: '0.3rem', fontWeight: 700 }}>
+                                Invoice #{inv.invoice_number}
+                              </div>
+                              {quoteRef && (
+                                <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                                  Quote Ref: #{quoteRef}
+                                </div>
+                              )}
+                              <div style={{ fontSize: '0.75rem', color: isFinalSettlement ? '#15803d' : '#475569', fontWeight: 600 }}>
+                                {isFinalSettlement ? 'Final Settlement Invoice' : 'Advance / Booking Invoice'}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Metadata: Billed To and Event Details */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1.5rem', marginBottom: '1.5rem', background: '#f8fafc', padding: '1rem 1.25rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', marginBottom: '0.3rem' }}>
+                                Billed To:
+                              </div>
+                              <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>
+                                {client?.name || 'Valued Client'}
+                              </div>
+                              {client?.company && <div style={{ fontSize: '0.85rem', color: '#334155' }}>🏢 {client.company}</div>}
+                              {client?.phone && <div style={{ fontSize: '0.85rem', color: '#334155' }}>📞 {client.phone}</div>}
+                              {client?.email && <div style={{ fontSize: '0.85rem', color: '#334155' }}>✉️ {client.email}</div>}
+                              <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '0.2rem' }}>
+                                📍 Venue: {evt?.venue || 'Kerala'}
+                              </div>
+                            </div>
+
+                            <div style={{ textAlign: 'right', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                              <div><strong>Event:</strong> {evt?.title || 'Catering Order'}</div>
+                              {evt?.event_date && (
+                                <div>
+                                  <strong>Event Date:</strong> {new Date(evt.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                </div>
+                              )}
+                              {evt?.guest_count && <div><strong>Guests:</strong> {evt.guest_count} Pax</div>}
+                              <div><strong>Issue Date:</strong> {new Date(inv.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                              {!isFullyPaid && (
+                                <div><strong>Due Date:</strong> {inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'On Receipt'}</div>
+                              )}
+                              <div style={{ marginTop: '0.35rem' }}>
+                                <span
+                                  style={{
+                                    display: 'inline-block',
+                                    padding: '0.15rem 0.5rem',
+                                    borderRadius: '4px',
+                                    fontSize: '0.72rem',
+                                    fontWeight: 700,
+                                    textTransform: 'uppercase',
+                                    background: isFullyPaid ? '#dcfce7' : '#fee2e2',
+                                    color: isFullyPaid ? '#15803d' : '#b91c1c'
+                                  }}
+                                >
+                                  Status: {isFullyPaid ? 'Fully Paid (Final Settlement)' : inv.status}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Particulars Table: Menu Items + Logistics, Transport & Extra Charges */}
+                          <div style={{ marginBottom: '1.25rem' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                              <thead>
+                                <tr style={{ borderBottom: '2px solid #0f172a', background: '#f1f5f9' }}>
+                                  <th style={{ textAlign: 'left', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Description</th>
+                                  <th style={{ textAlign: 'center', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Unit / Type</th>
+                                  <th style={{ textAlign: 'right', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Rate</th>
+                                  <th style={{ textAlign: 'right', padding: '0.6rem 0.5rem', fontWeight: 700 }}>Total (₹)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {evtItems.length > 0 || evtExtras.length > 0 ? (
+                                  <>
+                                    {evtItems.map((item) => {
+                                      const mi = state.menuItems.find((m) => m.id === item.menu_item_id);
+                                      const isPerKg = item.pricing_type === 'per_kg';
+                                      const qty = item.quantity !== undefined ? item.quantity : (isPerKg ? 1 : (evt?.guest_count || 1));
+                                      const rate = item.price_per_unit || item.price_per_guest || 0;
+                                      const lineTotal = rate * qty;
+
+                                      return (
+                                        <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                          <td style={{ padding: '0.55rem 0.5rem' }}>
+                                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{mi?.name || 'Menu Item'}</div>
+                                            {mi?.category && <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{mi.category}</div>}
+                                          </td>
+                                          <td style={{ textAlign: 'center', padding: '0.55rem 0.5rem', color: '#334155' }}>
+                                            {qty} {isPerKg ? 'Kg' : 'Pax'}
+                                          </td>
+                                          <td style={{ textAlign: 'right', padding: '0.55rem 0.5rem', color: '#334155' }}>
+                                            ₹{rate.toLocaleString('en-IN')} {isPerKg ? '/Kg' : '/Pax'}
+                                          </td>
+                                          <td style={{ textAlign: 'right', padding: '0.55rem 0.5rem', fontWeight: 600, color: '#0f172a' }}>
+                                            ₹{lineTotal.toLocaleString('en-IN')}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                    {evtExtras.map((ex) => (
+                                      <tr key={ex.id} style={{ borderBottom: '1px solid #e2e8f0', background: '#fcfcfd' }}>
+                                        <td style={{ padding: '0.55rem 0.5rem' }}>
+                                          <div style={{ fontWeight: 600, color: '#0f172a' }}>{ex.description}</div>
+                                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Logistics, Transport &amp; Additional Charges</div>
+                                        </td>
+                                        <td style={{ textAlign: 'center', padding: '0.55rem 0.5rem', color: '#334155' }}>
+                                          1 Lot
+                                        </td>
+                                        <td style={{ textAlign: 'right', padding: '0.55rem 0.5rem', color: '#334155' }}>
+                                          ₹{ex.amount.toLocaleString('en-IN')}
+                                        </td>
+                                        <td style={{ textAlign: 'right', padding: '0.55rem 0.5rem', fontWeight: 600, color: '#0f172a' }}>
+                                          ₹{ex.amount.toLocaleString('en-IN')}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </>
+                                ) : (
+                                  <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                    <td style={{ padding: '0.6rem 0.5rem' }}>
+                                      <div style={{ fontWeight: 600 }}>{evt?.title || 'Catering Package'}</div>
+                                      <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                                        {isFinalSettlement ? 'Final Event Settlement' : 'Advance Booking Invoice'}
+                                      </div>
+                                    </td>
+                                    <td style={{ textAlign: 'center', padding: '0.6rem 0.5rem' }}>1 Lot</td>
+                                    <td style={{ textAlign: 'right', padding: '0.6rem 0.5rem' }}>₹{subtotal.toLocaleString('en-IN')}</td>
+                                    <td style={{ textAlign: 'right', padding: '0.6rem 0.5rem', fontWeight: 600 }}>₹{subtotal.toLocaleString('en-IN')}</td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Totals Section with Discount & Discount Details */}
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.25rem' }}>
+                            <div style={{ width: '340px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0.4rem', fontSize: '0.85rem' }}>
+                                <span style={{ color: '#475569' }}>Subtotal:</span>
+                                <span style={{ fontWeight: 600 }}>₹{subtotal.toLocaleString('en-IN')}</span>
+                              </div>
+                              {discount > 0 && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0.4rem', fontSize: '0.85rem', color: '#16a34a' }}>
+                                  <span>Discount{inv.discount_note ? ` (${inv.discount_note})` : ''}:</span>
+                                  <span style={{ fontWeight: 700 }}>- ₹{discount.toLocaleString('en-IN')}</span>
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0.6rem', background: '#0f172a', color: '#ffffff', borderRadius: '4px', marginTop: '0.4rem' }}>
+                                <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>Net Invoice Total:</span>
+                                <span style={{ fontWeight: 800, fontSize: '1.1rem' }}>₹{netAmount.toLocaleString('en-IN')}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Part-Payments History on the SAME invoice (Controlled by show_payment_details) */}
+                          {showPaymentDetails && (
+                            <div style={{ marginBottom: '1.5rem', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0.85rem 1rem', background: '#f8fafc' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                <span style={{ fontWeight: 700, fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#0f172a' }}>
+                                  💳 Part-Payment &amp; Settlement Details
+                                </span>
+                                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                  {invPayments.length} installment{invPayments.length === 1 ? '' : 's'} recorded
+                                </span>
+                              </div>
+
+                              {invPayments.length === 0 ? (
+                                <div style={{ fontSize: '0.8rem', color: '#64748b', fontStyle: 'italic', padding: '0.4rem 0' }}>
+                                  No payments recorded yet against this invoice.
+                                </div>
+                              ) : (
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                                  <thead>
+                                    <tr style={{ borderBottom: '1px solid #cbd5e1', color: '#475569' }}>
+                                      <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Receipt Date</th>
+                                      <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Method &amp; Channel</th>
+                                      <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Account</th>
+                                      <th style={{ textAlign: 'left', padding: '0.35rem 0.25rem' }}>Note</th>
+                                      <th style={{ textAlign: 'right', padding: '0.35rem 0.25rem' }}>Amount Paid</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {invPayments.map((p) => {
+                                      const ch = store.inferPaymentChannel(p.method, p.payment_channel);
+                                      const acc = store.resolveDestinationAccount(p);
+                                      return (
+                                        <tr key={p.id} style={{ borderBottom: '1px dashed #e2e8f0' }}>
+                                          <td style={{ padding: '0.35rem 0.25rem' }}>
+                                            {new Date(p.paid_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                          </td>
+                                          <td style={{ padding: '0.35rem 0.25rem', fontWeight: 500 }}>
+                                            {p.method} ({ch === 'cash' ? 'Cash' : 'Bank'})
+                                          </td>
+                                          <td style={{ padding: '0.35rem 0.25rem', fontWeight: 600, color: '#0f172a' }}>
+                                            {acc}
+                                          </td>
+                                          <td style={{ padding: '0.35rem 0.25rem', color: '#64748b' }}>{p.note || '-'}</td>
+                                          <td style={{ textAlign: 'right', padding: '0.35rem 0.25rem', fontWeight: 600, color: '#16a34a' }}>
+                                            ₹{p.amount.toLocaleString('en-IN')}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.65rem', paddingTop: '0.5rem', borderTop: '1px solid #cbd5e1' }}>
+                                <div style={{ fontSize: '0.85rem' }}>
+                                  <span style={{ color: '#475569' }}>Total Paid: </span>
+                                  <strong style={{ color: '#16a34a' }}>₹{paymentsForThis.toLocaleString('en-IN')}</strong>
+                                </div>
+                                <div style={{ fontSize: '0.9rem' }}>
+                                  <span style={{ color: '#475569' }}>Balance Due: </span>
+                                  <strong style={{ color: balanceDue > 0 ? '#dc2626' : '#16a34a', fontSize: '1.05rem' }}>
+                                    {balanceDue === 0 && netAmount > 0 ? '₹0 (Settled in Full)' : `₹${balanceDue.toLocaleString('en-IN')}`}
+                                  </strong>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Bank Details, Payment Terms (NEVER shown when Fully Paid!) & Signature Footer */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '1.5rem', borderTop: '1px solid #e2e8f0', paddingTop: '1.25rem', alignItems: 'flex-end' }}>
+                            <div style={{ fontSize: '0.78rem', color: '#334155', lineHeight: 1.5 }}>
+                              {showBankDetails && (
+                                <div style={{ marginBottom: termsToDisplay ? '0.4rem' : 0 }}>
+                                  <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.2rem', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                                    Bank Account Details
+                                  </div>
+                                  <div>Bank: <strong>{state.settings.bank_name || 'Federal Bank / State Bank of India'}</strong></div>
+                                  <div>Account Name: <strong>{state.settings.account_name || state.settings.name}</strong></div>
+                                  <div>Account No: <strong>{state.settings.account_number || '9876-5432-1000'}</strong> &bull; IFSC: <strong>{state.settings.ifsc_code || 'FDRL0001234'}</strong></div>
+                                  <div>UPI ID: <strong>{state.settings.upi_id || 'ippas@upi'}</strong></div>
+                                </div>
+                              )}
+                              {termsToDisplay && (
+                                <div style={{ marginTop: '0.25rem', color: '#dc2626', fontSize: '0.74rem', fontWeight: 600 }}>
+                                  Payment Terms: {termsToDisplay}
+                                </div>
+                              )}
+                            </div>
+
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: '1.05rem', fontWeight: 700, color: '#0f172a' }}>
+                                {state.settings.name}
+                              </div>
+                              <div style={{ marginTop: '1.75rem', paddingTop: '0.4rem', borderTop: '1px dashed #94a3b8', display: 'inline-block', minWidth: '150px', textAlign: 'center', fontSize: '0.72rem', color: '#64748b' }}>
+                                Authorized Signatory
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -1027,6 +1154,17 @@ export default function InvoicesPage() {
                 </div>
               </div>
 
+              <div className="form-group">
+                <label className="form-label">Discount Details / Reason (Optional)</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. Special Client Offer, Wedding Package Discount"
+                  value={editInvForm.discount_note}
+                  onChange={(e) => setEditInvForm({ ...editInvForm, discount_note: e.target.value })}
+                />
+              </div>
+
               {/* Calculated Net Amount indicator */}
               <div style={{ background: '#f1f5f9', padding: '0.6rem 0.8rem', borderRadius: '6px', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.85rem', color: '#475569', fontWeight: 600 }}>Net Payable:</span>
@@ -1055,9 +1193,31 @@ export default function InvoicesPage() {
                   <option value="draft">Draft</option>
                   <option value="sent">Sent</option>
                   <option value="partially_paid">Partially Paid</option>
-                  <option value="paid">Paid</option>
+                  <option value="paid">Paid (Final Settlement)</option>
                   <option value="void">Void</option>
                 </select>
+              </div>
+
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '0.65rem 0.85rem', marginBottom: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#0f172a' }}>
+                  Invoice Visibility Options:
+                </div>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', cursor: 'pointer', fontWeight: 500 }}>
+                  <input
+                    type="checkbox"
+                    checked={editInvForm.show_bank_details}
+                    onChange={(e) => setEditInvForm({ ...editInvForm, show_bank_details: e.target.checked })}
+                  />
+                  🏦 Show Bank Details on Invoice
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', cursor: 'pointer', fontWeight: 500 }}>
+                  <input
+                    type="checkbox"
+                    checked={editInvForm.show_payment_details}
+                    onChange={(e) => setEditInvForm({ ...editInvForm, show_payment_details: e.target.checked })}
+                  />
+                  💳 Show Payment Details on Invoice (Payment Terms auto-hidden once Paid)
+                </label>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', marginTop: '1.25rem' }}>

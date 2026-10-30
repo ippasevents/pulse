@@ -1280,6 +1280,7 @@ class DataStore {
   private toEventSqlRow(e: EventRecord) {
     return {
       id: e.id,
+      quotation_number: e.quotation_number || null,
       client_id: e.client_id,
       title: e.title,
       event_date: e.event_date,
@@ -1289,6 +1290,9 @@ class DataStore {
       guest_count: Math.max(1, Math.round(Number(e.guest_count) || 1)),
       status: e.status,
       notes: e.notes || null,
+      payment_terms: e.payment_terms || null,
+      show_bank_details: e.show_bank_details !== false,
+      show_payment_details: e.show_payment_details !== false,
       created_at: e.created_at || new Date().toISOString()
     };
   }
@@ -1351,13 +1355,23 @@ class DataStore {
       id: inv.id,
       event_id: inv.event_id,
       invoice_number: inv.invoice_number,
+      quotation_number: inv.quotation_number || null,
       kind: inv.kind,
       subtotal: Number(inv.subtotal ?? inv.amount ?? 0),
       discount: Number(inv.discount || 0),
+      discount_note: inv.discount_note || null,
       amount: Number(inv.amount || 0),
       due_date: inv.due_date || null,
       status: inv.status,
+      show_bank_details: inv.show_bank_details !== false,
+      show_payment_details: inv.show_payment_details !== false,
       notes: inv.notes || null,
+      snapshot: {
+        quotation_number: inv.quotation_number || null,
+        discount_note: inv.discount_note || null,
+        show_bank_details: inv.show_bank_details !== false,
+        show_payment_details: inv.show_payment_details !== false
+      },
       created_at: inv.created_at || new Date().toISOString()
     };
   }
@@ -2221,20 +2235,81 @@ class DataStore {
           ingredient_id: r.ingredient_id,
           qty_per_guest: Number(r.qty_per_guest || 0)
         })),
-        events: (eventsRes?.data || []).map((e: any) => ({
-          id: e.id,
-          client_id: e.client_id,
-          title: e.title,
-          event_date: e.event_date,
-          start_time: e.start_time ? String(e.start_time).slice(0, 5) : '',
-          end_time: e.end_time ? String(e.end_time).slice(0, 5) : '',
-          venue: e.venue || '',
-          guest_count: Number(e.guest_count || 1),
-          status: e.status || 'inquiry',
-          notes: e.notes || '',
-          payment_terms: e.payment_terms || undefined,
-          created_at: e.created_at || new Date().toISOString()
-        })),
+        events: (() => {
+          const rawEvents = (eventsRes?.data || []) as any[];
+          const rawLogs = !activityLogsRes?.error ? ((activityLogsRes?.data || []) as any[]) : [];
+          // Sort chronologically to assign deterministic QTN-XXXX numbers when DB column isn't populated yet
+          const chronoIds = [...rawEvents]
+            .sort((a, b) => {
+              const tA = new Date(a.created_at || 0).getTime();
+              const tB = new Date(b.created_at || 0).getTime();
+              if (tA !== tB) return tA - tB;
+              return String(a.id).localeCompare(String(b.id));
+            })
+            .map((x) => String(x.id));
+
+          return rawEvents.map((e: any) => {
+            const existingLocal = this.state.events.find((old) => old.id === e.id);
+            let qtnFromLogs: string | undefined;
+            let bankFromLogs: boolean | undefined;
+            let payFromLogs: boolean | undefined;
+            let termsFromLogs: string | undefined;
+
+            for (const al of rawLogs) {
+              if (String(al.entity_id || '') === String(e.id) && al.details) {
+                const det = String(al.details);
+                if (qtnFromLogs === undefined) {
+                  const mQ = det.match(/Quote#:\s*(QTN-\d+)/i);
+                  if (mQ) qtnFromLogs = mQ[1].toUpperCase();
+                }
+                if (bankFromLogs === undefined) {
+                  const mB = det.match(/BankDetails:\s*(ON|OFF)/i);
+                  if (mB) bankFromLogs = mB[1].toUpperCase() === 'ON';
+                }
+                if (payFromLogs === undefined) {
+                  const mP = det.match(/PayDetails:\s*(ON|OFF)/i);
+                  if (mP) payFromLogs = mP[1].toUpperCase() === 'ON';
+                }
+                if (termsFromLogs === undefined) {
+                  const mT = det.match(/Terms:\s*([^•]+)/i);
+                  if (mT) termsFromLogs = mT[1].trim();
+                }
+              }
+            }
+
+            const chronoIdx = chronoIds.indexOf(String(e.id));
+            const fallbackQtn = `QTN-${String(Math.max(1, chronoIdx + 1)).padStart(4, '0')}`;
+
+            return {
+              id: e.id,
+              quotation_number:
+                e.quotation_number || qtnFromLogs || existingLocal?.quotation_number || fallbackQtn,
+              client_id: e.client_id,
+              title: e.title,
+              event_date: e.event_date,
+              start_time: e.start_time ? String(e.start_time).slice(0, 5) : '',
+              end_time: e.end_time ? String(e.end_time).slice(0, 5) : '',
+              venue: e.venue || '',
+              guest_count: Number(e.guest_count || 1),
+              status: e.status || 'inquiry',
+              notes: e.notes || '',
+              payment_terms: e.payment_terms || termsFromLogs || existingLocal?.payment_terms || undefined,
+              show_bank_details:
+                typeof e.show_bank_details === 'boolean'
+                  ? e.show_bank_details
+                  : bankFromLogs !== undefined
+                  ? bankFromLogs
+                  : existingLocal?.show_bank_details !== false,
+              show_payment_details:
+                typeof e.show_payment_details === 'boolean'
+                  ? e.show_payment_details
+                  : payFromLogs !== undefined
+                  ? payFromLogs
+                  : existingLocal?.show_payment_details !== false,
+              created_at: e.created_at || new Date().toISOString()
+            };
+          });
+        })(),
         eventItems: (eventItemsRes?.data || []).map((ei: any) => {
           const unitPrice = Number(ei.price_per_unit ?? ei.price_per_guest ?? 0);
           return {
@@ -2288,19 +2363,103 @@ class DataStore {
             }))
           : [],
         invoices: (invoicesRes?.data || []).map((inv: any) => {
+          const existingLocal = this.state.invoices.find((old) => old.id === inv.id);
+          const rawLogs = !activityLogsRes?.error ? ((activityLogsRes?.data || []) as any[]) : [];
+          const rawPayments = (paymentsRes?.data || []) as any[];
+          const paidSum = rawPayments
+            .filter((p) => String(p.invoice_id) === String(inv.id))
+            .reduce((s, p) => s + Number(p.amount || 0), 0);
+
           const amt = Number(inv.amount || 0);
           const disc = Number(inv.discount || 0);
           const sub = inv.subtotal != null ? Number(inv.subtotal) : amt + disc;
+          const snap = inv.snapshot && typeof inv.snapshot === 'object' ? inv.snapshot : {};
+
+          let qtnRefFromLogs: string | undefined;
+          let discNoteFromLogs: string | undefined;
+          let bankFromLogs: boolean | undefined;
+          let payFromLogs: boolean | undefined;
+
+          for (const al of rawLogs) {
+            if (String(al.entity_id || '') === String(inv.id) && al.details) {
+              const det = String(al.details);
+              if (qtnRefFromLogs === undefined) {
+                const mQ = det.match(/QuoteRef:\s*(QTN-\d+)/i);
+                if (mQ) qtnRefFromLogs = mQ[1].toUpperCase();
+              }
+              if (discNoteFromLogs === undefined) {
+                const mD = det.match(/DiscountNote:\s*([^•]+)/i);
+                if (mD) {
+                  const val = mD[1].trim();
+                  discNoteFromLogs = val.toLowerCase() === 'none' ? '' : val;
+                }
+              }
+              if (bankFromLogs === undefined) {
+                const mB = det.match(/BankDetails:\s*(ON|OFF)/i);
+                if (mB) bankFromLogs = mB[1].toUpperCase() === 'ON';
+              }
+              if (payFromLogs === undefined) {
+                const mP = det.match(/PayDetails:\s*(ON|OFF)/i);
+                if (mP) payFromLogs = mP[1].toUpperCase() === 'ON';
+              }
+            }
+          }
+
+          const isSettled = inv.status === 'paid' || (amt > 0 && paidSum >= amt);
+          const resolvedStatus =
+            inv.status === 'void'
+              ? 'void'
+              : isSettled
+              ? 'paid'
+              : paidSum > 0
+              ? 'partially_paid'
+              : inv.status || 'draft';
+          const resolvedKind: 'deposit' | 'final' = isSettled
+            ? 'final'
+            : inv.kind === 'deposit'
+            ? 'deposit'
+            : paidSum < amt && amt > 0
+            ? 'deposit'
+            : 'final';
+
           return {
             id: inv.id,
             event_id: inv.event_id,
             invoice_number: inv.invoice_number,
-            kind: inv.kind === 'deposit' ? 'deposit' : 'final',
+            quotation_number:
+              inv.quotation_number ||
+              snap.quotation_number ||
+              qtnRefFromLogs ||
+              existingLocal?.quotation_number ||
+              undefined,
+            kind: resolvedKind,
             subtotal: sub,
             discount: disc,
+            discount_note:
+              inv.discount_note ??
+              snap.discount_note ??
+              discNoteFromLogs ??
+              existingLocal?.discount_note ??
+              '',
             amount: amt,
             due_date: inv.due_date || '',
-            status: inv.status || 'draft',
+            status: resolvedStatus,
+            show_bank_details:
+              typeof inv.show_bank_details === 'boolean'
+                ? inv.show_bank_details
+                : typeof snap.show_bank_details === 'boolean'
+                ? snap.show_bank_details
+                : bankFromLogs !== undefined
+                ? bankFromLogs
+                : existingLocal?.show_bank_details !== false,
+            show_payment_details:
+              typeof inv.show_payment_details === 'boolean'
+                ? inv.show_payment_details
+                : typeof snap.show_payment_details === 'boolean'
+                ? snap.show_payment_details
+                : payFromLogs !== undefined
+                ? payFromLogs
+                : existingLocal?.show_payment_details !== false,
             created_at: inv.created_at || new Date().toISOString(),
             notes: inv.notes || ''
           };
@@ -3065,11 +3224,44 @@ class DataStore {
     }
   }
 
-  // Events
+  // Events & Quotations
+  public getQuotationNumber(eventOrId: EventRecord | string): string {
+    const evt =
+      typeof eventOrId === 'string'
+        ? this.state.events.find((e) => e.id === eventOrId)
+        : eventOrId;
+    if (evt?.quotation_number && evt.quotation_number.trim()) {
+      return evt.quotation_number.trim();
+    }
+    const targetId = typeof eventOrId === 'string' ? eventOrId : eventOrId.id;
+    const sorted = [...this.state.events].sort((a, b) => {
+      const tA = new Date(a.created_at || 0).getTime();
+      const tB = new Date(b.created_at || 0).getTime();
+      if (tA !== tB) return tA - tB;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    const idx = sorted.findIndex((e) => e.id === targetId);
+    const seq = idx >= 0 ? idx + 1 : this.state.events.length + 1;
+    return `QTN-${String(seq).padStart(4, '0')}`;
+  }
+
+  private getNextQuotationNumber(): string {
+    const maxExistingSeq = this.state.events.reduce((maxN, item) => {
+      const m = (item.quotation_number || '').match(/QTN-(\d+)/i);
+      const n = m ? parseInt(m[1], 10) : 0;
+      return n > maxN ? n : maxN;
+    }, this.state.events.length);
+    return `QTN-${String(maxExistingSeq + 1).padStart(4, '0')}`;
+  }
+
   public addEvent(eventData: Omit<EventRecord, 'id' | 'created_at'>) {
+    const quotation_number = eventData.quotation_number || this.getNextQuotationNumber();
     const newEvent: EventRecord = {
       ...eventData,
       id: generateUUID(),
+      quotation_number,
+      show_bank_details: eventData.show_bank_details !== false,
+      show_payment_details: eventData.show_payment_details !== false,
       created_at: new Date().toISOString()
     };
     this.state.events.unshift(newEvent);
@@ -3078,8 +3270,8 @@ class DataStore {
       entity_id: newEvent.id,
       parent_event_id: newEvent.id,
       action: 'create',
-      summary: `Created new event "${newEvent.title}"`,
-      details: `Date: ${newEvent.event_date} • ${newEvent.guest_count} Guests • Status: ${newEvent.status}`
+      summary: `Created new event "${newEvent.title}" (${quotation_number})`,
+      details: `Quote#: ${quotation_number} • Date: ${newEvent.event_date} • ${newEvent.guest_count} Guests • Status: ${newEvent.status} • BankDetails: ${newEvent.show_bank_details !== false ? 'ON' : 'OFF'} • PayDetails: ${newEvent.show_payment_details !== false ? 'ON' : 'OFF'}${newEvent.payment_terms ? ` • Terms: ${newEvent.payment_terms}` : ''}`
     });
     this.save();
 
@@ -3093,31 +3285,55 @@ class DataStore {
     return newEvent;
   }
 
-  public ensureEventInvoice(eventId: string, discount: number = 0): Invoice {
-    const existing = this.state.invoices.find((i) => i.event_id === eventId);
-    if (existing) return existing;
-
+  public ensureEventInvoice(
+    eventId: string,
+    discount: number = 0,
+    discountNote: string = ''
+  ): Invoice {
     const evt = this.state.events.find((e) => e.id === eventId);
+    const quoteNo = evt ? this.getQuotationNumber(evt) : undefined;
     const totals = this.getEventTotal(eventId);
     const subtotal = totals.grandTotal > 0 ? totals.grandTotal : 0;
+
+    const existing = this.state.invoices.find((i) => i.event_id === eventId && i.status !== 'void');
+    if (existing) {
+      const nextDiscount = discount > 0 && existing.discount === 0 ? discount : existing.discount || 0;
+      const nextDiscountNote = discountNote.trim() || existing.discount_note || '';
+      const nextSubtotal = subtotal > 0 ? subtotal : existing.subtotal || existing.amount;
+      this.updateInvoice(existing.id, {
+        quotation_number: existing.quotation_number || quoteNo,
+        subtotal: nextSubtotal,
+        discount: nextDiscount,
+        discount_note: nextDiscountNote
+      });
+      return this.state.invoices.find((i) => i.id === existing.id) || existing;
+    }
+
     const netAmount = Math.max(0, subtotal - discount);
 
     const newInv = this.addInvoice({
       event_id: eventId,
-      kind: 'final',
+      quotation_number: quoteNo,
+      kind: netAmount === 0 && subtotal > 0 ? 'final' : 'deposit',
       subtotal,
       discount,
+      discount_note: discountNote,
       amount: netAmount,
       due_date: evt?.event_date || new Date().toISOString().split('T')[0],
-      status: 'draft',
-      notes: evt?.payment_terms || this.state.settings.payment_terms || 'Advance on booking, balance on event completion.'
+      status: netAmount === 0 && subtotal > 0 ? 'paid' : 'sent',
+      show_bank_details: evt?.show_bank_details !== false,
+      show_payment_details: evt?.show_payment_details !== false,
+      notes:
+        evt?.payment_terms ||
+        this.state.settings.payment_terms ||
+        'Advance on booking, balance on event completion.'
     });
 
     return newInv;
   }
 
   public syncInvoiceWithEventTotal(eventId: string): Invoice | null {
-    const existing = this.state.invoices.find((i) => i.event_id === eventId);
+    const existing = this.state.invoices.find((i) => i.event_id === eventId && i.status !== 'void');
     if (!existing) return null;
 
     const totals = this.getEventTotal(eventId);
@@ -3126,12 +3342,13 @@ class DataStore {
     const netAmount = Math.max(0, subtotal - discount);
 
     this.updateInvoice(existing.id, {
+      quotation_number: existing.quotation_number || this.getQuotationNumber(eventId),
       subtotal,
       discount,
       amount: netAmount
     });
 
-    return existing;
+    return this.state.invoices.find((i) => i.id === existing.id) || existing;
   }
 
   public deductStockForCompletedEvent(eventId: string): { success: boolean; deductedCount: number } {
@@ -3184,30 +3401,40 @@ class DataStore {
 
   public updateEvent(id: string, updates: Partial<EventRecord>) {
     let updatedEvt: EventRecord | undefined;
+    let guestCountChanged = false;
     this.state.events = this.state.events.map((e) => {
       if (e.id !== id) return e;
-      updatedEvt = { ...e, ...updates };
+      if (updates.guest_count !== undefined && updates.guest_count !== e.guest_count) {
+        guestCountChanged = true;
+      }
+      updatedEvt = {
+        ...e,
+        ...updates,
+        quotation_number: updates.quotation_number || e.quotation_number || this.getQuotationNumber(e)
+      };
       return updatedEvt;
     });
 
     // Automatic actions based on event status transitions
     if (updates.status === 'confirmed') {
-      const hasInvoice = this.state.invoices.some((i) => i.event_id === id);
-      if (!hasInvoice) {
-        this.ensureEventInvoice(id);
-      }
-    } else if (updates.status === 'completed' && !updatedEvt?.stock_deducted) {
+      this.ensureEventInvoice(id);
+    } else if (guestCountChanged && this.state.invoices.some((i) => i.event_id === id && i.status !== 'void')) {
+      this.syncInvoiceWithEventTotal(id);
+    }
+
+    if (updates.status === 'completed' && !updatedEvt?.stock_deducted) {
       this.deductStockForCompletedEvent(id);
     }
 
+    const qtnNo = updatedEvt ? this.getQuotationNumber(updatedEvt) : '';
     this.logMutation({
       entity_type: 'event',
       entity_id: id,
       parent_event_id: id,
       action: 'update',
-      summary: `Updated event "${updatedEvt?.title || id}"`,
+      summary: `Updated event "${updatedEvt?.title || id}" (${qtnNo})`,
       details: updatedEvt
-        ? `Date: ${updatedEvt.event_date} • ${updatedEvt.guest_count} Pax • Status: ${updatedEvt.status}`
+        ? `Quote#: ${qtnNo} • Date: ${updatedEvt.event_date} • ${updatedEvt.guest_count} Pax • Status: ${updatedEvt.status} • BankDetails: ${updatedEvt.show_bank_details !== false ? 'ON' : 'OFF'} • PayDetails: ${updatedEvt.show_payment_details !== false ? 'ON' : 'OFF'}${updatedEvt.payment_terms ? ` • Terms: ${updatedEvt.payment_terms}` : ''}`
         : undefined
     });
     this.save();
@@ -3320,6 +3547,10 @@ class DataStore {
         }
       ]);
     }
+
+    if (this.state.invoices.some((i) => i.event_id === eventId && i.status !== 'void')) {
+      this.syncInvoiceWithEventTotal(eventId);
+    }
   }
 
   public updateEventItem(id: string, updates: Partial<EventItem>) {
@@ -3375,6 +3606,10 @@ class DataStore {
         }
       ]);
     }
+
+    if (updatedItem && this.state.invoices.some((i) => i.event_id === updatedItem!.event_id && i.status !== 'void')) {
+      this.syncInvoiceWithEventTotal(updatedItem.event_id);
+    }
   }
 
   public removeEventItem(eventId: string, menuItemId: string) {
@@ -3405,9 +3640,13 @@ class DataStore {
         }
       ]);
     }
+
+    if (this.state.invoices.some((i) => i.event_id === eventId && i.status !== 'void')) {
+      this.syncInvoiceWithEventTotal(eventId);
+    }
   }
 
-  // Event Extras
+  // Event Extras (Logistics, Transport & Additional Expenses)
   public addEventExtra(eventId: string, description: string, amount: number) {
     const evt = this.state.events.find((e) => e.id === eventId);
     const newExtra: EventExtra = {
@@ -3442,6 +3681,10 @@ class DataStore {
         }
       ]);
     }
+
+    if (this.state.invoices.some((i) => i.event_id === eventId && i.status !== 'void')) {
+      this.syncInvoiceWithEventTotal(eventId);
+    }
   }
 
   public removeEventExtra(id: string) {
@@ -3464,6 +3707,13 @@ class DataStore {
       this.enqueueSqlOperations('Remove Extra Charge', [
         { type: 'delete', table: 'event_extras', match: { id } }
       ]);
+    }
+
+    if (
+      existingExtra &&
+      this.state.invoices.some((i) => i.event_id === existingExtra.event_id && i.status !== 'void')
+    ) {
+      this.syncInvoiceWithEventTotal(existingExtra.event_id);
     }
   }
 
@@ -4648,12 +4898,16 @@ class DataStore {
   // Invoices & Part-Payments on Same Invoice
   public addInvoice(inv: {
     event_id: string;
+    quotation_number?: string;
     kind: 'deposit' | 'final';
     subtotal: number;
     discount?: number;
+    discount_note?: string;
     amount?: number;
     due_date?: string;
     status?: Invoice['status'];
+    show_bank_details?: boolean;
+    show_payment_details?: boolean;
     notes?: string;
   }) {
     const evt = this.state.events.find((e) => e.id === inv.event_id);
@@ -4664,6 +4918,7 @@ class DataStore {
     }, this.state.invoices.length);
     const seq = maxExistingSeq + 1;
     const invoice_number = 'INV-' + String(seq).padStart(4, '0');
+    const quotation_number = inv.quotation_number || (evt ? this.getQuotationNumber(evt) : undefined);
     const subtotal = Number(inv.subtotal || 0);
     const discount = Number(inv.discount || 0);
     const amount = Math.max(0, subtotal - discount);
@@ -4672,12 +4927,16 @@ class DataStore {
       id: generateUUID(),
       event_id: inv.event_id,
       invoice_number,
+      quotation_number,
       kind: inv.kind,
       subtotal,
       discount,
+      discount_note: inv.discount_note ? inv.discount_note.trim() : '',
       amount,
       due_date: inv.due_date || '',
-      status: inv.status || 'draft',
+      status: inv.status || 'sent',
+      show_bank_details: inv.show_bank_details !== false,
+      show_payment_details: inv.show_payment_details !== false,
       notes: inv.notes || '',
       created_at: new Date().toISOString()
     };
@@ -4687,8 +4946,8 @@ class DataStore {
       entity_id: newInv.id,
       parent_event_id: newInv.event_id,
       action: 'create',
-      summary: `Created ${newInv.kind === 'deposit' ? 'Advance' : 'Final'} Invoice ${newInv.invoice_number} (₹${newInv.amount.toLocaleString('en-IN')})`,
-      details: `Event: ${evt?.title || 'Event'}${newInv.discount > 0 ? ` • Discount: ₹${newInv.discount.toLocaleString('en-IN')}` : ''}`
+      summary: `Converted Quotation ${quotation_number || ''} to Invoice ${newInv.invoice_number} (₹${newInv.amount.toLocaleString('en-IN')})`,
+      details: `Event: ${evt?.title || 'Event'} • QuoteRef: ${quotation_number || 'N/A'} • Discount: ₹${newInv.discount.toLocaleString('en-IN')} • DiscountNote: ${newInv.discount_note || 'None'} • BankDetails: ${newInv.show_bank_details !== false ? 'ON' : 'OFF'} • PayDetails: ${newInv.show_payment_details !== false ? 'ON' : 'OFF'}`
     });
     this.save();
 
@@ -4702,6 +4961,35 @@ class DataStore {
     return newInv;
   }
 
+  private reconcileInvoiceSettlementState(inv: Invoice, explicitStatus?: Invoice['status']) {
+    if (explicitStatus === 'void' || inv.status === 'void') {
+      inv.status = 'void';
+      return;
+    }
+    const allPaymentsForInv = this.state.payments
+      .filter((p) => p.invoice_id === inv.id)
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+    if (inv.amount > 0 && allPaymentsForInv >= inv.amount) {
+      // Automatically convert same invoice into Final Settlement Invoice upon full payment
+      inv.status = 'paid';
+      inv.kind = 'final';
+    } else if (allPaymentsForInv > 0 && allPaymentsForInv < inv.amount) {
+      inv.status = 'partially_paid';
+      inv.kind = 'deposit';
+    } else if (explicitStatus === 'paid') {
+      inv.status = 'paid';
+      inv.kind = 'final';
+    } else {
+      if (inv.status === 'paid' || inv.status === 'partially_paid') {
+        inv.status = 'sent';
+      }
+      if (!explicitStatus && inv.amount > 0) {
+        inv.kind = 'deposit';
+      }
+    }
+  }
+
   public updateInvoice(id: string, updates: Partial<Invoice>) {
     let updatedInv: Invoice | undefined;
     this.state.invoices = this.state.invoices.map((inv) => {
@@ -4709,18 +4997,27 @@ class DataStore {
       const subtotal = updates.subtotal !== undefined ? Number(updates.subtotal) : inv.subtotal ?? inv.amount;
       const discount = updates.discount !== undefined ? Number(updates.discount) : inv.discount ?? 0;
       const amount = Math.max(0, subtotal - discount);
-      updatedInv = { ...inv, ...updates, subtotal, discount, amount };
+      const next: Invoice = {
+        ...inv,
+        ...updates,
+        subtotal,
+        discount,
+        amount
+      };
+      this.reconcileInvoiceSettlementState(next, updates.status);
+      updatedInv = next;
       return updatedInv;
     });
     if (updatedInv) {
       const evt = this.state.events.find((e) => e.id === updatedInv!.event_id);
+      const qtnRef = updatedInv.quotation_number || (evt ? this.getQuotationNumber(evt) : 'N/A');
       this.logMutation({
         entity_type: 'invoice',
         entity_id: id,
         parent_event_id: updatedInv.event_id,
         action: 'update',
-        summary: `Edited Invoice ${updatedInv.invoice_number} (₹${updatedInv.amount.toLocaleString('en-IN')})`,
-        details: `Event: ${evt?.title || 'Event'} • Discount: ₹${updatedInv.discount.toLocaleString('en-IN')} • Status: ${updatedInv.status}`
+        summary: `Updated Invoice ${updatedInv.invoice_number} (₹${updatedInv.amount.toLocaleString('en-IN')})`,
+        details: `Event: ${evt?.title || 'Event'} • QuoteRef: ${qtnRef} • Discount: ₹${updatedInv.discount.toLocaleString('en-IN')} • DiscountNote: ${updatedInv.discount_note?.trim() || 'None'} • Status: ${updatedInv.status} • BankDetails: ${updatedInv.show_bank_details !== false ? 'ON' : 'OFF'} • PayDetails: ${updatedInv.show_payment_details !== false ? 'ON' : 'OFF'}`
       });
     }
     this.save();
@@ -4912,28 +5209,21 @@ class DataStore {
 
     const invoice = this.state.invoices.find((i) => i.id === payment.invoice_id);
     if (invoice) {
-      const allPaymentsForInv = this.state.payments
-        .filter((p) => p.invoice_id === invoice.id)
-        .reduce((sum, p) => sum + p.amount, 0);
-
-      if (allPaymentsForInv >= invoice.amount) {
-        invoice.status = 'paid';
-      } else if (allPaymentsForInv > 0) {
-        invoice.status = 'partially_paid';
-      }
+      this.reconcileInvoiceSettlementState(invoice);
     }
+    const becameFinal = invoice?.status === 'paid' && invoice?.kind === 'final';
     this.logMutation({
       entity_type: 'payment',
       entity_id: newPayment.id,
       parent_event_id: invoice?.event_id,
       action: 'create',
-      summary: `Recorded ${channel.toUpperCase()} payment ₹${newPayment.amount.toLocaleString('en-IN')} on ${invoice?.invoice_number || 'Invoice'}`,
+      summary: `Recorded ${channel.toUpperCase()} payment ₹${newPayment.amount.toLocaleString('en-IN')} on ${invoice?.invoice_number || 'Invoice'}${becameFinal ? ' (Converted to Final Settlement)' : ''}`,
       details: `Account: ${destinationAccount} • Mode: ${newPayment.method}${newPayment.note ? ` • ${newPayment.note}` : ''}`
     });
     this.save();
 
     if (isValidUUID(newPayment.invoice_id)) {
-      this.enqueueSqlOperations('Record Invoice Payment', [
+      const ops: SqlOperation[] = [
         ...this.ensureInvoiceParentOps(newPayment.invoice_id),
         {
           type: 'upsert',
@@ -4950,7 +5240,16 @@ class DataStore {
           },
           onConflict: 'id'
         }
-      ]);
+      ];
+      if (invoice && isValidUUID(invoice.id)) {
+        ops.push({
+          type: 'upsert',
+          table: 'invoices',
+          values: this.toInvoiceSqlRow(invoice),
+          onConflict: 'id'
+        });
+      }
+      this.enqueueSqlOperations('Record Invoice Payment', ops);
     }
 
     return newPayment;
@@ -4964,17 +5263,7 @@ class DataStore {
 
     const invoice = this.state.invoices.find((i) => i.id === invId);
     if (invoice) {
-      const allPaymentsForInv = this.state.payments
-        .filter((p) => p.invoice_id === invoice.id)
-        .reduce((sum, p) => sum + p.amount, 0);
-
-      if (allPaymentsForInv >= invoice.amount) {
-        invoice.status = 'paid';
-      } else if (allPaymentsForInv > 0) {
-        invoice.status = 'partially_paid';
-      } else {
-        invoice.status = 'sent';
-      }
+      this.reconcileInvoiceSettlementState(invoice);
     }
     this.logMutation({
       entity_type: 'payment',

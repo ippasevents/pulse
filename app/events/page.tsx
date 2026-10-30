@@ -5,12 +5,14 @@ import Link from 'next/link';
 import { store } from '@/lib/store';
 import { EventRecord, EventStatus } from '@/lib/types';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
+import QuotationWhatsAppModal from '@/components/QuotationWhatsAppModal';
 
 export default function EventsPage() {
   const [state, setState] = useState(store.getState());
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedEventForQuoteWA, setSelectedEventForQuoteWA] = useState<EventRecord | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   // New Event Form State
@@ -58,10 +60,13 @@ export default function EventsPage() {
   const filteredEvents = state.events.filter((evt) => {
     const matchesStatus = statusFilter === 'all' || evt.status === statusFilter;
     const client = state.clients.find((c) => c.id === evt.client_id);
+    const quoteNo = store.getQuotationNumber(evt);
+    const q = search.toLowerCase();
     const matchesSearch =
-      evt.title.toLowerCase().includes(search.toLowerCase()) ||
-      (evt.venue && evt.venue.toLowerCase().includes(search.toLowerCase())) ||
-      (client && client.name.toLowerCase().includes(search.toLowerCase()));
+      evt.title.toLowerCase().includes(q) ||
+      quoteNo.toLowerCase().includes(q) ||
+      (evt.venue && evt.venue.toLowerCase().includes(q)) ||
+      (client && client.name.toLowerCase().includes(q));
     return matchesStatus && matchesSearch;
   });
 
@@ -207,12 +212,25 @@ export default function EventsPage() {
                 const displayTotal = isFinance ? grandTotal : menuTotal;
                 const auditSummary = role === 'owner' ? store.getEventAuditSummary(evt.id) : null;
 
+                const quoteNo = store.getQuotationNumber(evt);
+                const eventInvoice = state.invoices.find((i) => i.event_id === evt.id && i.status !== 'void');
+
                 return (
                   <tr key={evt.id}>
                     <td>
                       <div style={{ fontWeight: 600 }}>{evt.title}</div>
+                      <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.15rem' }}>
+                        <span className="badge" style={{ background: '#eff6ff', color: '#1d4ed8', fontSize: '0.68rem', fontWeight: 700 }}>
+                          Quote #{quoteNo}
+                        </span>
+                        {eventInvoice && (
+                          <span className="badge" style={{ background: '#f0fdf4', color: '#15803d', fontSize: '0.68rem', fontWeight: 700 }}>
+                            Inv #{eventInvoice.invoice_number}
+                          </span>
+                        )}
+                      </div>
                       {evt.notes && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '0.15rem' }}>
                           {evt.notes}
                         </div>
                       )}
@@ -271,9 +289,20 @@ export default function EventsPage() {
                       </td>
                     )}
                     <td style={{ textAlign: 'center' }}>
-                      <Link href={`/events/${evt.id}`} className="btn btn-secondary btn-sm">
-                        View Details &amp; Quote &rarr;
-                      </Link>
+                      <div style={{ display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
+                          title="Send Quotation directly to Client's WhatsApp"
+                          onClick={() => setSelectedEventForQuoteWA(evt)}
+                        >
+                          💬 Quote WA
+                        </button>
+                        <Link href={`/events/${evt.id}`} className="btn btn-secondary btn-sm">
+                          View Details &amp; Quote &rarr;
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -545,6 +574,12 @@ export default function EventsPage() {
           </div>
         </div>
       )}
+
+      <QuotationWhatsAppModal
+        event={selectedEventForQuoteWA}
+        isOpen={Boolean(selectedEventForQuoteWA)}
+        onClose={() => setSelectedEventForQuoteWA(null)}
+      />
     </div>
   );
 }
