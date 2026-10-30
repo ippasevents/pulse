@@ -6,12 +6,46 @@ import { store } from '@/lib/store';
 import { EventRecord, Shift, ShiftAttendanceStatus, StaffMember, StaffSalaryRecordType } from '@/lib/types';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import StaffWhatsAppModal from '@/components/StaffWhatsAppModal';
+import {
+  computeStaffPeriodReport,
+  downloadBatchStaffSalarySlipsPdf,
+  downloadSingleStaffSalarySlipPdf,
+  downloadStaffPayrollSummaryPdf,
+  formatDisplayDate,
+  formatPeriodLabel,
+  StaffPeriodReportRow
+} from '@/lib/staffSalaryPdfGenerator';
+
+function toLocalYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getInitialMonthBounds(): { start: string; end: string } {
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth(), 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return { start: toLocalYmd(first), end: toLocalYmd(last) };
+}
 
 export default function StaffPage() {
   const [state, setState] = useState(store.getState());
+  const [activeTab, setActiveTab] = useState<'roster' | 'report'>('roster');
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+
+  // Date-Range Salary Report & Payslips State
+  const initialBounds = getInitialMonthBounds();
+  const [reportStartDate, setReportStartDate] = useState<string>(initialBounds.start);
+  const [reportEndDate, setReportEndDate] = useState<string>(initialBounds.end);
+  const [reportStaffFilter, setReportStaffFilter] = useState<string>('');
+  const [reportSearch, setReportSearch] = useState<string>('');
+  const [reportActiveInPeriodOnly, setReportActiveInPeriodOnly] = useState<boolean>(false);
+  const [previewSlipStaffId, setPreviewSlipStaffId] = useState<string | null>(null);
+  const [pdfBusyKey, setPdfBusyKey] = useState<string | null>(null);
 
   // Salary Payment / Extra Wage Modal
   const [salaryModalOpen, setSalaryModalOpen] = useState(false);
@@ -179,16 +213,163 @@ export default function StaffPage() {
     showNotice(`Removed "${removedName}" from staff roster & database.`);
   };
 
+  // Date-range report computation & preset helpers
+  const applyDatePreset = (preset: 'this_month' | 'last_month' | 'next_month' | 'last_30' | 'this_year' | 'all') => {
+    const now = new Date();
+    if (preset === 'this_month') {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      setReportStartDate(toLocalYmd(start));
+      setReportEndDate(toLocalYmd(end));
+    } else if (preset === 'last_month') {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0);
+      setReportStartDate(toLocalYmd(start));
+      setReportEndDate(toLocalYmd(end));
+    } else if (preset === 'next_month') {
+      const start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+      setReportStartDate(toLocalYmd(start));
+      setReportEndDate(toLocalYmd(end));
+    } else if (preset === 'last_30') {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
+      setReportStartDate(toLocalYmd(start));
+      setReportEndDate(toLocalYmd(now));
+    } else if (preset === 'this_year') {
+      const start = new Date(now.getFullYear(), 0, 1);
+      const end = new Date(now.getFullYear(), 11, 31);
+      setReportStartDate(toLocalYmd(start));
+      setReportEndDate(toLocalYmd(end));
+    } else {
+      setReportStartDate('');
+      setReportEndDate('');
+    }
+  };
+
+  const fullPeriodReport = computeStaffPeriodReport(
+    state,
+    reportStartDate,
+    reportEndDate,
+    reportStaffFilter || undefined
+  );
+
+  const visibleReportRows = fullPeriodReport.rows.filter((r) => {
+    if (reportActiveInPeriodOnly && !r.hasActivityInRange) return false;
+    if (reportSearch.trim()) {
+      const q = reportSearch.trim().toLowerCase();
+      const matchName = r.staff.name.toLowerCase().includes(q);
+      const matchPhone = (r.staff.phone || '').includes(q);
+      const matchRole = (r.staff.role_title || '').toLowerCase().includes(q);
+      if (!matchName && !matchPhone && !matchRole) return false;
+    }
+    return true;
+  });
+
+  const visibleReportTotals = {
+    staffCount: visibleReportRows.length,
+    activeStaffInPeriod: visibleReportRows.filter((r) => r.hasActivityInRange).length,
+    attendedShiftsCount: visibleReportRows.reduce((s, r) => s + r.attendedShiftsCount, 0),
+    totalHoursWorked: Number(
+      visibleReportRows.reduce((s, r) => s + r.totalHoursWorked, 0).toFixed(2)
+    ),
+    shiftEarnings: visibleReportRows.reduce((s, r) => s + r.shiftEarnings, 0),
+    extraEarnings: visibleReportRows.reduce((s, r) => s + r.extraEarnings, 0),
+    totalEarnings: visibleReportRows.reduce((s, r) => s + r.totalEarnings, 0),
+    paymentsReceived: visibleReportRows.reduce((s, r) => s + r.paymentsReceived, 0),
+    paymentCount: visibleReportRows.reduce((s, r) => s + r.paymentRecords.length, 0),
+    periodPayable: visibleReportRows.reduce((s, r) => s + r.periodPayable, 0)
+  };
+
+  const previewSlipRow: StaffPeriodReportRow | null = previewSlipStaffId
+    ? computeStaffPeriodReport(state, reportStartDate, reportEndDate, previewSlipStaffId).rows[0] ||
+      null
+    : null;
+
+  const handleDownloadSingleSlip = async (row: StaffPeriodReportRow) => {
+    const key = `slip-${row.staff.id}`;
+    setPdfBusyKey(key);
+    try {
+      const ok = await downloadSingleStaffSalarySlipPdf(
+        row,
+        reportStartDate,
+        reportEndDate,
+        state
+      );
+      if (ok) {
+        showNotice(`Downloaded PDF salary slip for ${row.staff.name}.`);
+      }
+    } finally {
+      setPdfBusyKey(null);
+    }
+  };
+
+  const handleDownloadAllSlips = async () => {
+    if (visibleReportRows.length === 0) return;
+    setPdfBusyKey('batch-slips');
+    try {
+      const ok = await downloadBatchStaffSalarySlipsPdf(
+        visibleReportRows,
+        reportStartDate,
+        reportEndDate,
+        state
+      );
+      if (ok) {
+        showNotice(`Exported ${visibleReportRows.length} staff salary slip(s) as PDF.`);
+      }
+    } finally {
+      setPdfBusyKey(null);
+    }
+  };
+
+  const handleDownloadSummaryReport = async () => {
+    setPdfBusyKey('summary-report');
+    try {
+      const ok = await downloadStaffPayrollSummaryPdf(
+        visibleReportRows,
+        visibleReportTotals,
+        reportStartDate,
+        reportEndDate,
+        state
+      );
+      if (ok) {
+        showNotice('Exported Master Staff Payroll Report PDF.');
+      }
+    } finally {
+      setPdfBusyKey(null);
+    }
+  };
+
+  const openStaffSalarySlipReport = (staff: StaffMember, openPreview: boolean = true) => {
+    setActiveTab('report');
+    setReportStaffFilter(staff.id);
+    if (openPreview) {
+      setPreviewSlipStaffId(staff.id);
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
         <div>
           <h1 className="page-title">Staff Finance &amp; Attendance Register</h1>
           <p className="page-subtitle">
-            Track event shift attendance, shift wages (strictly shown &amp; counted only when Present), salary payouts, and pending balances.
+            Track event shift attendance, shift wages (strictly shown &amp; counted only when Present), salary payouts, and exportable PDF salary slips.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab(activeTab === 'report' ? 'roster' : 'report')}
+            className="btn btn-secondary"
+            style={{
+              fontWeight: 700,
+              background: activeTab === 'report' ? '#0f172a' : '#eff6ff',
+              color: activeTab === 'report' ? '#ffffff' : '#1d4ed8',
+              borderColor: activeTab === 'report' ? '#0f172a' : '#bfdbfe'
+            }}
+          >
+            {activeTab === 'report' ? '← Back to Roster & Attendance' : '📄 Salary Report & PDF Slips'}
+          </button>
           {canManageSalary && (
             <>
               <button
@@ -249,6 +430,602 @@ export default function StaffPage() {
         </div>
       )}
 
+      {/* View Mode Tabs */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '0.5rem',
+          marginBottom: '1.35rem',
+          borderBottom: '2px solid #e2e8f0',
+          paddingBottom: '0.5rem',
+          flexWrap: 'wrap'
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setActiveTab('roster')}
+          style={{
+            padding: '0.6rem 1.25rem',
+            borderRadius: '8px',
+            border: 'none',
+            fontWeight: 700,
+            fontSize: '0.93rem',
+            cursor: 'pointer',
+            background: activeTab === 'roster' ? '#0f172a' : '#f1f5f9',
+            color: activeTab === 'roster' ? '#ffffff' : '#475569',
+            transition: 'all 0.15s ease'
+          }}
+        >
+          🧑‍🍳 Staff Roster &amp; Shift Attendance
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('report')}
+          style={{
+            padding: '0.6rem 1.25rem',
+            borderRadius: '8px',
+            border: 'none',
+            fontWeight: 700,
+            fontSize: '0.93rem',
+            cursor: 'pointer',
+            background: activeTab === 'report' ? '#0f172a' : '#f1f5f9',
+            color: activeTab === 'report' ? '#ffffff' : '#475569',
+            transition: 'all 0.15s ease'
+          }}
+        >
+          📄 Salary Report &amp; Payslips (PDF)
+        </button>
+      </div>
+
+      {activeTab === 'report' ? (
+        <div>
+          {/* Date Range & Filter Controls */}
+          <div className="card" style={{ marginBottom: '1.25rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '1rem',
+                flexWrap: 'wrap',
+                marginBottom: '1rem'
+              }}
+            >
+              <div>
+                <h2 className="card-title" style={{ margin: 0 }}>
+                  📅 Staff Payroll Summary &amp; Salary Slip Generator
+                </h2>
+                <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                  Showing period: <strong>{formatPeriodLabel(reportStartDate, reportEndDate)}</strong> &bull; Only attended shifts marked <strong>Present</strong> are counted toward hours worked and shift wages.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {reportStaffFilter && visibleReportRows.length === 1 ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontWeight: 700 }}
+                      onClick={() => setPreviewSlipStaffId(visibleReportRows[0].staff.id)}
+                    >
+                      👁 Preview Salary Slip
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ fontWeight: 700 }}
+                      disabled={pdfBusyKey !== null}
+                      onClick={() => handleDownloadSingleSlip(visibleReportRows[0])}
+                    >
+                      {pdfBusyKey === `slip-${visibleReportRows[0].staff.id}`
+                        ? '⏳ Generating PDF...'
+                        : `📥 Export Salary Slip PDF (${visibleReportRows[0].staff.name})`}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{
+                        fontWeight: 700,
+                        background: '#f8fafc',
+                        borderColor: '#cbd5e1',
+                        color: '#0f172a'
+                      }}
+                      disabled={pdfBusyKey !== null || visibleReportRows.length === 0}
+                      onClick={handleDownloadSummaryReport}
+                    >
+                      {pdfBusyKey === 'summary-report'
+                        ? '⏳ Generating Report...'
+                        : '📊 Export Payroll Summary PDF'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ fontWeight: 700 }}
+                      disabled={pdfBusyKey !== null || visibleReportRows.length === 0}
+                      onClick={handleDownloadAllSlips}
+                    >
+                      {pdfBusyKey === 'batch-slips'
+                        ? '⏳ Building Salary Slips...'
+                        : `📑 Export All Salary Slips PDF (${visibleReportRows.length})`}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Date Pickers + Staff Selector + Search */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
+                gap: '0.85rem',
+                alignItems: 'end',
+                marginBottom: '0.9rem'
+              }}
+            >
+              <div>
+                <label className="form-label" style={{ fontSize: '0.78rem', marginBottom: '0.3rem', display: 'block' }}>
+                  Start Date (From)
+                </label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={reportStartDate}
+                  onChange={(e) => setReportStartDate(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontSize: '0.78rem', marginBottom: '0.3rem', display: 'block' }}>
+                  End Date (To)
+                </label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={reportEndDate}
+                  onChange={(e) => setReportEndDate(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontSize: '0.78rem', marginBottom: '0.3rem', display: 'block' }}>
+                  Staff Member
+                </label>
+                <select
+                  className="form-control"
+                  value={reportStaffFilter}
+                  onChange={(e) => setReportStaffFilter(e.target.value)}
+                >
+                  <option value="">All Staff Members ({state.staff.length})</option>
+                  {state.staff.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      {st.name} ({st.role_title || 'Crew'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontSize: '0.78rem', marginBottom: '0.3rem', display: 'block' }}>
+                  Search Crew
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Name, phone, or role..."
+                  value={reportSearch}
+                  onChange={(e) => setReportSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Quick Date Range Presets & Activity Filter */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '0.75rem',
+                flexWrap: 'wrap',
+                paddingTop: '0.75rem',
+                borderTop: '1px solid #e2e8f0'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b', marginRight: '0.2rem' }}>
+                  Quick Range:
+                </span>
+                {[
+                  { id: 'this_month', label: 'This Month' },
+                  { id: 'last_month', label: 'Last Month' },
+                  { id: 'next_month', label: 'Next Month' },
+                  { id: 'last_30', label: 'Last 30 Days' },
+                  { id: 'this_year', label: 'This Year' },
+                  { id: 'all', label: 'All Dates' }
+                ].map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: '0.76rem', fontWeight: 600 }}
+                    onClick={() =>
+                      applyDatePreset(
+                        p.id as 'this_month' | 'last_month' | 'next_month' | 'last_30' | 'this_year' | 'all'
+                      )
+                    }
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  color: '#334155',
+                  cursor: 'pointer',
+                  userSelect: 'none'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={reportActiveInPeriodOnly}
+                  onChange={(e) => setReportActiveInPeriodOnly(e.target.checked)}
+                  style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                />
+                <span>Show only staff with shifts/payments in period</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Period KPI Summary Cards */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '1rem',
+              marginBottom: '1.5rem'
+            }}
+          >
+            <div className="stats-card" style={{ borderLeft: '4px solid #475569' }}>
+              <span className="stats-label">Total Hours Worked</span>
+              <span className="stats-value" style={{ color: '#0f172a' }}>
+                {visibleReportTotals.totalHoursWorked} hrs
+              </span>
+              <span className="stats-sub">
+                Across {visibleReportTotals.attendedShiftsCount} attended shift{visibleReportTotals.attendedShiftsCount === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            <div className="stats-card" style={{ borderLeft: '4px solid #2563eb' }}>
+              <span className="stats-label">Total Earnings (Period)</span>
+              <span className="stats-value" style={{ color: '#2563eb' }}>
+                ₹{visibleReportTotals.totalEarnings.toLocaleString('en-IN')}
+              </span>
+              <span className="stats-sub">
+                ₹{visibleReportTotals.shiftEarnings.toLocaleString('en-IN')} shifts + ₹{visibleReportTotals.extraEarnings.toLocaleString('en-IN')} allowances
+              </span>
+            </div>
+
+            <div className="stats-card" style={{ borderLeft: '4px solid #059669' }}>
+              <span className="stats-label">Payments Received (Period)</span>
+              <span className="stats-value" style={{ color: '#059669' }}>
+                ₹{visibleReportTotals.paymentsReceived.toLocaleString('en-IN')}
+              </span>
+              <span className="stats-sub">
+                {visibleReportTotals.paymentCount} disbursement{visibleReportTotals.paymentCount === 1 ? '' : 's'} recorded
+              </span>
+            </div>
+
+            <div className="stats-card" style={{ borderLeft: '4px solid #dc2626' }}>
+              <span className="stats-label">Net Period Payable</span>
+              <span
+                className="stats-value"
+                style={{ color: visibleReportTotals.periodPayable > 0 ? '#dc2626' : '#059669' }}
+              >
+                ₹{visibleReportTotals.periodPayable.toLocaleString('en-IN')}
+              </span>
+              <span className="stats-sub">
+                Remaining unpaid earnings for selected range
+              </span>
+            </div>
+          </div>
+
+          {/* Staff Payroll Period Table */}
+          <div className="card" style={{ marginBottom: '1.5rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '0.9rem',
+                flexWrap: 'wrap',
+                gap: '0.5rem'
+              }}
+            >
+              <div>
+                <h2 className="card-title" style={{ margin: 0 }}>
+                  🧾 Staff Period Earnings, Hours &amp; Salary Slips
+                </h2>
+                <p style={{ fontSize: '0.83rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                  Click <strong>Preview Slip</strong> to inspect itemized duty shifts &amp; payouts, or <strong>PDF Slip</strong> to download an official A4 staff salary slip.
+                </p>
+              </div>
+              {reportStaffFilter && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setReportStaffFilter('')}
+                >
+                  Show All Staff
+                </button>
+              )}
+            </div>
+
+            <div className="data-table-container">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Staff Member &amp; Rate</th>
+                    <th style={{ textAlign: 'center' }}>Present Shifts</th>
+                    <th style={{ textAlign: 'center' }}>Total Hours Worked</th>
+                    <th style={{ textAlign: 'right' }}>Shift Wages</th>
+                    <th style={{ textAlign: 'right' }}>Allowances</th>
+                    <th style={{ textAlign: 'right' }}>Total Earnings</th>
+                    <th style={{ textAlign: 'right' }}>Payments Received</th>
+                    <th style={{ textAlign: 'right' }}>Period Balance</th>
+                    <th style={{ textAlign: 'center' }}>Salary Slip (PDF)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleReportRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                        <div>No staff records match the selected date range and filters.</div>
+                        {(reportActiveInPeriodOnly || reportSearch || reportStaffFilter) && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ marginTop: '0.6rem' }}
+                            onClick={() => {
+                              setReportActiveInPeriodOnly(false);
+                              setReportSearch('');
+                              setReportStaffFilter('');
+                            }}
+                          >
+                            Reset Filters
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ) : (
+                    visibleReportRows.map((row) => (
+                      <tr key={row.staff.id}>
+                        <td>
+                          <div style={{ fontWeight: 700, color: '#0f172a' }}>{row.staff.name}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            {row.staff.role_title || 'Service Crew'} &bull; ₹{row.staff.hourly_rate}/hr
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <span style={{ fontWeight: 700, color: '#0f172a' }}>
+                            {row.attendedShiftsCount}
+                          </span>
+                          {(row.absentShiftsCount > 0 || row.pendingShiftsCount > 0) && (
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                              {row.absentShiftsCount > 0 ? `${row.absentShiftsCount} abs` : ''}
+                              {row.absentShiftsCount > 0 && row.pendingShiftsCount > 0 ? ' • ' : ''}
+                              {row.pendingShiftsCount > 0 ? `${row.pendingShiftsCount} pend` : ''}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: '#0f172a' }}>
+                          {row.totalHoursWorked} hrs
+                        </td>
+                        <td style={{ textAlign: 'right', color: '#334155', fontWeight: 600 }}>
+                          ₹{row.shiftEarnings.toLocaleString('en-IN')}
+                        </td>
+                        <td style={{ textAlign: 'right', color: '#2563eb', fontWeight: 600 }}>
+                          ₹{row.extraEarnings.toLocaleString('en-IN')}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 800, color: '#0f172a' }}>
+                          ₹{row.totalEarnings.toLocaleString('en-IN')}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#059669' }}>
+                          ₹{row.paymentsReceived.toLocaleString('en-IN')}
+                          {row.paymentRecords.length > 0 && (
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                              {row.paymentRecords.length} payment{row.paymentRecords.length === 1 ? '' : 's'}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div
+                            style={{
+                              fontWeight: 800,
+                              color: row.periodPayable > 0 ? '#dc2626' : '#059669'
+                            }}
+                          >
+                            ₹{row.periodPayable.toLocaleString('en-IN')}
+                          </div>
+                          {row.periodAdvanceExcess > 0 && (
+                            <div style={{ fontSize: '0.7rem', color: '#7c3aed', fontWeight: 600 }}>
+                              Advance: +₹{row.periodAdvanceExcess.toLocaleString('en-IN')}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => setPreviewSlipStaffId(row.staff.id)}
+                              title="Preview itemized salary slip for this period"
+                            >
+                              👁 Preview Slip
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              disabled={pdfBusyKey !== null}
+                              onClick={() => handleDownloadSingleSlip(row)}
+                              title="Download official A4 Salary Slip PDF"
+                            >
+                              {pdfBusyKey === `slip-${row.staff.id}` ? '⏳...' : '📥 PDF Slip'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                {visibleReportRows.length > 0 && (
+                  <tfoot>
+                    <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', fontWeight: 800 }}>
+                      <td>TOTAL ({visibleReportRows.length} Staff)</td>
+                      <td style={{ textAlign: 'center' }}>{visibleReportTotals.attendedShiftsCount}</td>
+                      <td style={{ textAlign: 'center' }}>{visibleReportTotals.totalHoursWorked} hrs</td>
+                      <td style={{ textAlign: 'right' }}>
+                        ₹{visibleReportTotals.shiftEarnings.toLocaleString('en-IN')}
+                      </td>
+                      <td style={{ textAlign: 'right', color: '#2563eb' }}>
+                        ₹{visibleReportTotals.extraEarnings.toLocaleString('en-IN')}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        ₹{visibleReportTotals.totalEarnings.toLocaleString('en-IN')}
+                      </td>
+                      <td style={{ textAlign: 'right', color: '#059669' }}>
+                        ₹{visibleReportTotals.paymentsReceived.toLocaleString('en-IN')}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: 'right',
+                          color: visibleReportTotals.periodPayable > 0 ? '#dc2626' : '#059669'
+                        }}
+                      >
+                        ₹{visibleReportTotals.periodPayable.toLocaleString('en-IN')}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+
+          {/* Inline Itemized Breakdown when a single staff member is selected */}
+          {reportStaffFilter && visibleReportRows.length === 1 && (() => {
+            const singleRow = visibleReportRows[0];
+            return (
+              <div className="grid-2" style={{ gap: '1.25rem', marginBottom: '1.5rem' }}>
+                <div className="card">
+                  <h3 className="card-title" style={{ fontSize: '1rem' }}>
+                    🧑‍🍳 {singleRow.staff.name} — Shifts &amp; Allowances ({singleRow.attendedShifts.length + singleRow.allowanceRecords.length})
+                  </h3>
+                  {singleRow.attendedShifts.length === 0 && singleRow.allowanceRecords.length === 0 ? (
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      No attended shifts or allowances recorded in this period.
+                    </p>
+                  ) : (
+                    <div className="data-table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Event / Duty</th>
+                            <th style={{ textAlign: 'center' }}>Hours</th>
+                            <th style={{ textAlign: 'right' }}>Earned</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {singleRow.attendedShifts.map((s) => (
+                            <tr key={s.shift.id}>
+                              <td style={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{formatDisplayDate(s.date)}</td>
+                              <td>
+                                <div style={{ fontWeight: 600 }}>{s.event?.title || 'Event Shift'}</div>
+                                <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                                  {s.shift.role_label || singleRow.staff.role_title} &bull; ₹{s.hourlyRate}/hr
+                                </div>
+                              </td>
+                              <td style={{ textAlign: 'center', fontWeight: 600 }}>{s.hours} hrs</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
+                                ₹{s.earnedAmount.toLocaleString('en-IN')}
+                              </td>
+                            </tr>
+                          ))}
+                          {singleRow.allowanceRecords.map((al) => (
+                            <tr key={al.id}>
+                              <td style={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{formatDisplayDate(al.recorded_at)}</td>
+                              <td>
+                                <div style={{ fontWeight: 600, color: '#1d4ed8' }}>{al.method}</div>
+                                {al.note && (
+                                  <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>{al.note}</div>
+                                )}
+                              </td>
+                              <td style={{ textAlign: 'center', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                Fixed
+                              </td>
+                              <td style={{ textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>
+                                ₹{al.amount.toLocaleString('en-IN')}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="card">
+                  <h3 className="card-title" style={{ fontSize: '1rem' }}>
+                    💸 {singleRow.staff.name} — Payments Received ({singleRow.paymentRecords.length})
+                  </h3>
+                  {singleRow.paymentRecords.length === 0 ? (
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      No salary payments recorded in this period.
+                    </p>
+                  ) : (
+                    <div className="data-table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Method</th>
+                            <th>Note</th>
+                            <th style={{ textAlign: 'right' }}>Received</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {singleRow.paymentRecords.map((pay) => (
+                            <tr key={pay.id}>
+                              <td style={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{formatDisplayDate(pay.recorded_at)}</td>
+                              <td style={{ fontWeight: 600 }}>{pay.method}</td>
+                              <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{pay.note || '—'}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700, color: '#059669' }}>
+                                ₹{pay.amount.toLocaleString('en-IN')}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      ) : (
+        <>
       {/* Top Salary & Crew KPI Cards */}
       <div
         style={{
@@ -456,6 +1233,20 @@ export default function StaffPage() {
                           onClick={() => setStatementStaff(staff)}
                         >
                           📋 Ledger
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{
+                            background: '#eff6ff',
+                            borderColor: '#bfdbfe',
+                            color: '#1d4ed8',
+                            fontWeight: 600
+                          }}
+                          title="Open Date-Range Salary Slip & Export PDF"
+                          onClick={() => openStaffSalarySlipReport(staff, true)}
+                        >
+                          📄 Slip
                         </button>
                         {canEditStaff && (
                           <>
@@ -905,6 +1696,238 @@ export default function StaffPage() {
           </div>
         )}
       </div>
+        </>
+      )}
+
+      {/* Interactive Staff Salary Slip Preview & PDF Export Modal */}
+      {previewSlipRow && (
+        <div className="modal-overlay" onClick={() => setPreviewSlipStaffId(null)}>
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '760px', width: '96%' }}
+          >
+            <div className="modal-header">
+              <div>
+                <h2 style={{ fontSize: '1.22rem', fontWeight: 800, margin: 0 }}>
+                  📄 Staff Salary Slip — {previewSlipRow.staff.name}
+                </h2>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                  Period: <strong>{formatPeriodLabel(reportStartDate, reportEndDate)}</strong> &bull; {previewSlipRow.staff.role_title || 'Crew'} &bull; Rate: ₹{previewSlipRow.staff.hourly_rate}/hr
+                </p>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => setPreviewSlipStaffId(null)}>
+                ✕
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                gap: '0.75rem',
+                marginBottom: '1rem'
+              }}
+            >
+              <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                <div style={{ fontSize: '0.73rem', color: '#475569', fontWeight: 700 }}>Total Hours Worked</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>
+                  {previewSlipRow.totalHoursWorked} hrs
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                  {previewSlipRow.attendedShiftsCount} attended shift{previewSlipRow.attendedShiftsCount === 1 ? '' : 's'}
+                </div>
+              </div>
+
+              <div style={{ background: '#eff6ff', padding: '0.75rem', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                <div style={{ fontSize: '0.73rem', color: '#1e40af', fontWeight: 700 }}>Total Earnings</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1e3a8a' }}>
+                  ₹{previewSlipRow.totalEarnings.toLocaleString('en-IN')}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#1e40af' }}>
+                  Shifts + Allowances
+                </div>
+              </div>
+
+              <div style={{ background: '#ecfdf5', padding: '0.75rem', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                <div style={{ fontSize: '0.73rem', color: '#065f46', fontWeight: 700 }}>Payments Received</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#059669' }}>
+                  ₹{previewSlipRow.paymentsReceived.toLocaleString('en-IN')}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#065f46' }}>
+                  {previewSlipRow.paymentRecords.length} payment{previewSlipRow.paymentRecords.length === 1 ? '' : 's'}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: previewSlipRow.periodPayable > 0 ? '#fef2f2' : '#f8fafc',
+                  padding: '0.75rem',
+                  borderRadius: '8px',
+                  border: `1px solid ${previewSlipRow.periodPayable > 0 ? '#fecaca' : '#cbd5e1'}`
+                }}
+              >
+                <div style={{ fontSize: '0.73rem', color: previewSlipRow.periodPayable > 0 ? '#991b1b' : '#334155', fontWeight: 700 }}>
+                  Net Period Payable
+                </div>
+                <div
+                  style={{
+                    fontSize: '1.2rem',
+                    fontWeight: 800,
+                    color: previewSlipRow.periodPayable > 0 ? '#dc2626' : '#059669'
+                  }}
+                >
+                  ₹{previewSlipRow.periodPayable.toLocaleString('en-IN')}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                  {previewSlipRow.periodPayable > 0 ? 'Balance due for period' : 'Period settled'}
+                </div>
+              </div>
+            </div>
+
+            <h3 style={{ fontSize: '0.92rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+              1. Attended Shifts &amp; Allowances ({previewSlipRow.attendedShifts.length + previewSlipRow.allowanceRecords.length})
+            </h3>
+            {previewSlipRow.attendedShifts.length === 0 && previewSlipRow.allowanceRecords.length === 0 ? (
+              <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                No attended shifts or allowances recorded in this date range.
+              </p>
+            ) : (
+              <div className="data-table-container" style={{ maxHeight: '200px', overflowY: 'auto', marginBottom: '1rem' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Event / Allowance</th>
+                      <th style={{ textAlign: 'center' }}>Hours / Type</th>
+                      <th style={{ textAlign: 'right' }}>Rate</th>
+                      <th style={{ textAlign: 'right' }}>Earned</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewSlipRow.attendedShifts.map((s) => (
+                      <tr key={s.shift.id}>
+                        <td>{formatDisplayDate(s.date)}</td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{s.event?.title || 'Event Shift'}</div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            {s.shift.role_label || previewSlipRow.staff.role_title} ({(s.shift.starts_at || '').slice(11, 16)}–{(s.shift.ends_at || '').slice(11, 16)})
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 600 }}>{s.hours} hrs</td>
+                        <td style={{ textAlign: 'right' }}>₹{s.hourlyRate}/hr</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
+                          ₹{s.earnedAmount.toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                    {previewSlipRow.allowanceRecords.map((al) => (
+                      <tr key={al.id}>
+                        <td>{formatDisplayDate(al.recorded_at)}</td>
+                        <td>
+                          <div style={{ fontWeight: 600, color: '#1d4ed8' }}>{al.method}</div>
+                          {al.note && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{al.note}</div>}
+                        </td>
+                        <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Allowance</td>
+                        <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>Fixed</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>
+                          ₹{al.amount.toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <h3 style={{ fontSize: '0.92rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+              2. Payments Received in Period ({previewSlipRow.paymentRecords.length})
+            </h3>
+            {previewSlipRow.paymentRecords.length === 0 ? (
+              <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                No salary payments recorded in this date range.
+              </p>
+            ) : (
+              <div className="data-table-container" style={{ maxHeight: '180px', overflowY: 'auto', marginBottom: '1rem' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Method</th>
+                      <th>Note</th>
+                      <th style={{ textAlign: 'right' }}>Received</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewSlipRow.paymentRecords.map((pay) => (
+                      <tr key={pay.id}>
+                        <td>{formatDisplayDate(pay.recorded_at)}</td>
+                        <td style={{ fontWeight: 600 }}>{pay.method}</td>
+                        <td>{pay.note || '—'}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#059669' }}>
+                          ₹{pay.amount.toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '0.75rem',
+                paddingTop: '0.85rem',
+                borderTop: '1px solid #e2e8f0',
+                flexWrap: 'wrap'
+              }}
+            >
+              <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                Overall Account Balance (All Dates):{' '}
+                <strong style={{ color: previewSlipRow.overallBalancePayable > 0 ? '#dc2626' : '#059669' }}>
+                  ₹{previewSlipRow.overallBalancePayable.toLocaleString('en-IN')}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {canManageSalary && previewSlipRow.periodPayable > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      const target = previewSlipRow.staff;
+                      setPreviewSlipStaffId(null);
+                      openSalaryModal('payment', target);
+                    }}
+                  >
+                    💸 Record Payment
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ fontWeight: 700 }}
+                  disabled={pdfBusyKey !== null}
+                  onClick={() => handleDownloadSingleSlip(previewSlipRow)}
+                >
+                  {pdfBusyKey === `slip-${previewSlipRow.staff.id}`
+                    ? '⏳ Generating PDF...'
+                    : '📥 Download Salary Slip PDF'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setPreviewSlipStaffId(null)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Record Salary Payment / Extra Wage Modal */}
       {salaryModalOpen && (
@@ -1249,7 +2272,24 @@ export default function StaffPage() {
                     </button>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{
+                      background: '#eff6ff',
+                      borderColor: '#bfdbfe',
+                      color: '#1d4ed8',
+                      fontWeight: 700
+                    }}
+                    onClick={() => {
+                      const target = statementStaff;
+                      setStatementStaff(null);
+                      openStaffSalarySlipReport(target, true);
+                    }}
+                  >
+                    📄 Export Salary Slip PDF
+                  </button>
                   {canManageSalary && (
                     <button
                       type="button"
