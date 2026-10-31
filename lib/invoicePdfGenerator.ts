@@ -509,7 +509,8 @@ export async function shareInvoicePdfToWhatsApp(
       blob: prebuiltPdf.blob,
       filename: `${liveInv.invoice_number}.pdf`,
       messageText,
-      cleanPhone
+      cleanPhone,
+      docId: `inv-${liveInv.id}`
     });
   }
 
@@ -527,6 +528,7 @@ export async function shareInvoicePdfToWhatsApp(
     blob: pdfResult.blob,
     filename: `${liveInv.invoice_number}.pdf`,
     messageText,
-    cleanPhone
+    cleanPhone,
+    docId: `inv-${liveInv.id}`
   });
 }

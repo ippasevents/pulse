@@ -93,10 +93,11 @@ export default function Navbar() {
           { label: 'Dashboard', href: '/dashboard' },
           { label: 'Invoices', href: '/invoices' },
           { label: 'Events', href: '/events' },
-          { label: 'Clients', href: '/clients' },
-          { label: 'Staff', href: '/staff' }
+          { label: 'Staff', href: '/staff' },
+          { label: 'Vendors', href: '/stock' }
         ],
         more: [
+          { label: 'Clients Directory', href: '/clients', desc: 'Customer contacts & bookings', accent: '#2563eb' },
           { label: 'മലയാളം യൂസർ മാനുവൽ (PDF)', href: '/manuals', desc: 'Malayalam PDF user guide', accent: '#059669' }
         ]
       };

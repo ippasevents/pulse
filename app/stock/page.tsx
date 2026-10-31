@@ -119,16 +119,24 @@ export default function StockPage() {
 
   // View Purchase Details modal
   const [viewingPurchase, setViewingPurchase] = useState<StockPurchase | null>(null);
+  const [confirmDeletePurchaseId, setConfirmDeletePurchaseId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = store.subscribe(() => {
       setState(store.getState());
     });
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('tab') === 'purchases' || store.getState().currentRole === 'accountant') {
+        setActiveTab('purchases');
+      }
+    }
     return unsub;
   }, []);
 
   const role = state.currentRole;
   const canManageStock = role === 'owner' || role === 'manager' || role === 'super_admin';
+  const canPayVendors = canManageStock || role === 'accountant';
 
   // Calculations for Inventory
   const lowStockItems = state.ingredients.filter((i) => i.stock_qty <= i.low_stock_level);
@@ -418,70 +426,93 @@ export default function StockPage() {
               📥 Export Inventory &amp; Shortage CSV
             </button>
           )}
-          {canManageStock && (
+          {canManageStock && activeTab === 'inventory' && (
             <>
-              {activeTab === 'inventory' ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setBulkError(null);
-                      setBulkModalSearch('');
-                      setIsBulkModalOpen(true);
-                    }}
-                    className="btn btn-secondary"
+              <button
+                type="button"
+                onClick={() => {
+                  setBulkError(null);
+                  setBulkModalSearch('');
+                  setIsBulkModalOpen(true);
+                }}
+                className="btn btn-secondary"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  fontWeight: 700,
+                  borderColor: selectedIngIds.length > 0 ? '#6366f1' : undefined,
+                  background: selectedIngIds.length > 0 ? '#eef2ff' : undefined,
+                  color: selectedIngIds.length > 0 ? '#3730a3' : undefined
+                }}
+              >
+                ⚡ Bulk Update
+                {selectedIngIds.length > 0 && (
+                  <span
                     style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.4rem',
-                      fontWeight: 700,
-                      borderColor: selectedIngIds.length > 0 ? '#6366f1' : undefined,
-                      background: selectedIngIds.length > 0 ? '#eef2ff' : undefined,
-                      color: selectedIngIds.length > 0 ? '#3730a3' : undefined
+                      background: '#4f46e5',
+                      color: '#ffffff',
+                      fontSize: '0.72rem',
+                      padding: '1px 7px',
+                      borderRadius: '10px'
                     }}
                   >
-                    ⚡ Bulk Update
-                    {selectedIngIds.length > 0 && (
-                      <span
-                        style={{
-                          background: '#4f46e5',
-                          color: '#ffffff',
-                          fontSize: '0.72rem',
-                          padding: '1px 7px',
-                          borderRadius: '10px'
-                        }}
-                      >
-                        {selectedIngIds.length}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setEditingIng(null);
-                      setIngFormData({
-                        name: '',
-                        unit: 'kg',
-                        cost_per_unit: 100,
-                        stock_qty: 50,
-                        low_stock_level: 15,
-                        expiry_date: ''
-                      });
-                      setIsIngModalOpen(true);
-                    }}
-                    className="btn btn-primary"
-                  >
-                    + Add Raw Ingredient
-                  </button>
-                </>
-              ) : (
+                    {selectedIngIds.length}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingIng(null);
+                  setIngFormData({
+                    name: '',
+                    unit: 'kg',
+                    cost_per_unit: 100,
+                    stock_qty: 50,
+                    low_stock_level: 15,
+                    expiry_date: ''
+                  });
+                  setIsIngModalOpen(true);
+                }}
+                className="btn btn-primary"
+              >
+                + Add Raw Ingredient
+              </button>
+            </>
+          )}
+          {activeTab === 'purchases' && canPayVendors && (
+            <>
+              {purchasesList.some((p) => p.balance_amount > 0) && (
                 <button
-                  onClick={() => setIsPurchaseModalOpen(true)}
-                  className="btn btn-primary"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                  type="button"
+                  onClick={() => {
+                    const firstDue = purchasesList.find((p) => p.balance_amount > 0);
+                    if (firstDue) handleOpenPayVendor(firstDue);
+                  }}
+                  className="btn btn-secondary"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    fontWeight: 700,
+                    background: '#ecfdf5',
+                    borderColor: '#6ee7b7',
+                    color: '#047857',
+                    whiteSpace: 'nowrap'
+                  }}
                 >
-                  🛒 + Record Stock Purchase
+                  💳 Pay Vendor Bill
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setIsPurchaseModalOpen(true)}
+                className="btn btn-primary"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', whiteSpace: 'nowrap' }}
+              >
+                🛒 + Record Stock Purchase
+              </button>
             </>
           )}
         </div>
@@ -1326,14 +1357,15 @@ export default function StockPage() {
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <div style={{ display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
-                            {hasDues && canManageStock && (
+                            {hasDues && canPayVendors && (
                               <button
+                                type="button"
                                 className="btn btn-secondary btn-sm"
-                                style={{ background: '#ecfdf5', borderColor: '#a7f3d0', color: '#065f46', fontWeight: 600 }}
+                                style={{ background: '#ecfdf5', borderColor: '#a7f3d0', color: '#065f46', fontWeight: 700, whiteSpace: 'nowrap' }}
                                 title="Pay Vendor Installment"
                                 onClick={() => handleOpenPayVendor(purchase)}
                               >
-                                + Pay Vendor
+                                💳 Pay Vendor
                               </button>
                             )}
 
@@ -1355,6 +1387,7 @@ export default function StockPage() {
                             </button>
 
                             <button
+                              type="button"
                               className="btn btn-secondary btn-sm"
                               title="View Purchase Details & Receipts"
                               onClick={() => setViewingPurchase(purchase)}
@@ -1363,18 +1396,39 @@ export default function StockPage() {
                             </button>
 
                             {canManageStock && (
-                              <button
-                                className="btn btn-secondary btn-sm"
-                                style={{ color: '#dc2626' }}
-                                title="Delete purchase"
-                                onClick={() => {
-                                  if (confirm(`Delete purchase bill from ${purchase.vendor_name}?`)) {
-                                    store.deleteStockPurchase(purchase.id);
-                                  }
-                                }}
-                              >
-                                ✕
-                              </button>
+                              confirmDeletePurchaseId === purchase.id ? (
+                                <span style={{ display: 'inline-flex', gap: '0.25rem', alignItems: 'center' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger btn-sm"
+                                    style={{ fontSize: '0.72rem', padding: '0.22rem 0.5rem', whiteSpace: 'nowrap' }}
+                                    onClick={() => {
+                                      store.deleteStockPurchase(purchase.id);
+                                      setConfirmDeletePurchaseId(null);
+                                    }}
+                                  >
+                                    Delete?
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    style={{ fontSize: '0.72rem', padding: '0.22rem 0.45rem' }}
+                                    onClick={() => setConfirmDeletePurchaseId(null)}
+                                  >
+                                    No
+                                  </button>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ color: '#dc2626' }}
+                                  title="Delete purchase"
+                                  onClick={() => setConfirmDeletePurchaseId(purchase.id)}
+                                >
+                                  ✕
+                                </button>
+                              )
                             )}
                           </div>
                         </td>
@@ -2176,6 +2230,30 @@ export default function StockPage() {
                 ✕
               </button>
             </div>
+
+            {purchasesList.filter((p) => p.balance_amount > 0).length > 1 && (
+              <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+                <label className="form-label" style={{ fontSize: '0.78rem' }}>
+                  Select Unpaid Vendor Bill
+                </label>
+                <select
+                  className="form-control"
+                  value={payingPurchase.id}
+                  onChange={(e) => {
+                    const selected = purchasesList.find((p) => p.id === e.target.value);
+                    if (selected) handleOpenPayVendor(selected);
+                  }}
+                >
+                  {purchasesList
+                    .filter((p) => p.balance_amount > 0)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.vendor_name} {p.bill_number ? `(#${p.bill_number})` : ''} — Due: ₹{p.balance_amount.toLocaleString('en-IN')}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
 
             {/* Dues summary box */}
             <div style={{ background: '#f8fafc', padding: '0.85rem', borderRadius: '6px', border: '1px solid #e2e8f0', marginBottom: '1rem', fontSize: '0.85rem' }}>

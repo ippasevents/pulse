@@ -6,12 +6,16 @@ import { store } from '@/lib/store';
 import { normalizeWhatsAppPhone } from '@/lib/invoicePdfGenerator';
 import {
   formatWhatsAppQuotationMessage,
-  generateQuotationPdfBlob,
-  shareQuotationPdfToWhatsApp
+  generateQuotationPdfBlob
 } from '@/lib/quotationPdfGenerator';
 import {
+  composeWhatsAppMessageWithPdfLink,
   isDesktopWebView,
-  triggerPdfBlobDownload
+  isTouchCapableOrMobile,
+  sharePdfWithCaptionToWhatsApp,
+  shareRawPdfFileViaOsSheet,
+  triggerPdfBlobDownload,
+  uploadSharedPdfForWhatsApp
 } from '@/lib/whatsappDeviceShare';
 
 interface QuotationWhatsAppModalProps {
@@ -36,15 +40,18 @@ export default function QuotationWhatsAppModal({
     file: File;
     quoteNumber: string;
   } | null>(null);
+  const [uploadedPdfUrl, setUploadedPdfUrl] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<{
     type: 'info' | 'success' | 'error';
     text: string;
   } | null>(null);
   const [copiedText, setCopiedText] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
 
   useEffect(() => {
     setIsDesktop(isDesktopWebView());
+    setIsMobileDevice(isTouchCapableOrMobile());
     const unsub = store.subscribe(() => {
       setState(store.getState());
     });
@@ -61,6 +68,7 @@ export default function QuotationWhatsAppModal({
   useEffect(() => {
     if (!isOpen || !event) {
       setPreparedPdf(null);
+      setUploadedPdfUrl(null);
       setStatusMsg(null);
       setIsMessageEdited(false);
       return;
@@ -93,18 +101,31 @@ export default function QuotationWhatsAppModal({
     state
   ]);
 
-  // Pre-build Quotation PDF immediately so tapping the WhatsApp button attaches PDF + Text synchronously!
+  // Pre-build Quotation PDF AND pre-upload so tapping Send opens Client's WhatsApp immediately!
   useEffect(() => {
     if (!isOpen || !liveEvent) return;
 
     let cancelled = false;
     setIsPreparingPdf(true);
     setPreparedPdf(null);
+    setUploadedPdfUrl(null);
+
+    const docKey = `qtn-${liveEvent.id}-${Date.now().toString(36)}`;
 
     generateQuotationPdfBlob(liveEvent, state)
-      .then((res) => {
+      .then(async (res) => {
+        if (cancelled || !res) {
+          if (!cancelled) setIsPreparingPdf(false);
+          return;
+        }
+        setPreparedPdf(res);
+        const pubUrl = await uploadSharedPdfForWhatsApp(
+          res.blob,
+          `${res.quoteNumber}.pdf`,
+          docKey
+        );
         if (!cancelled) {
-          setPreparedPdf(res);
+          setUploadedPdfUrl(pubUrl);
           setIsPreparingPdf(false);
         }
       })
@@ -134,6 +155,7 @@ export default function QuotationWhatsAppModal({
   const showBankDetails = liveEvent.show_bank_details !== false;
   const showPaymentDetails = liveEvent.show_payment_details !== false;
   const cleanPhone = normalizeWhatsAppPhone(phoneInput);
+  const pdfFilename = `${quoteNumber}.pdf`;
 
   const handleToggleOption = (
     field: 'show_bank_details' | 'show_payment_details',
@@ -142,43 +164,80 @@ export default function QuotationWhatsAppModal({
     store.updateEvent(liveEvent.id, { [field]: checked });
   };
 
-  // Unified 1-click handler: Attaches BOTH Quotation PDF AND Message Text together on WhatsApp
+  // Primary Direct-to-Client WhatsApp Send: Attaches BOTH Proposal Text + Official Quotation PDF directly to Client's Number
   const handleSendWhatsAppWithPdfAndText = async () => {
-    setIsSharing(true);
-    setStatusMsg(null);
-
-    const adjustedState = {
-      ...state,
-      clients: state.clients.map((c) =>
-        c.id === client?.id ? { ...c, phone: phoneInput } : c
-      )
-    };
-
-    const result = await shareQuotationPdfToWhatsApp(
-      liveEvent,
-      adjustedState,
-      preparedPdf || undefined,
-      messageText
-    );
-    setIsSharing(false);
-
-    if (!result.success) {
+    if (!cleanPhone || cleanPhone.replace(/\D/g, '').length < 10) {
       setStatusMsg({
         type: 'error',
-        text: result.error || 'Could not share quotation PDF & text.'
+        text: 'Please enter the client’s 10-digit WhatsApp mobile number above so both Proposal Text & PDF open directly in their WhatsApp chat.'
       });
       return;
     }
 
-    if (result.sharedDirectlyWithFile) {
+    setIsSharing(true);
+    setStatusMsg(null);
+
+    // Persist updated phone number to client record if changed
+    if (client && phoneInput.trim() && phoneInput.trim() !== client.phone) {
+      store.updateClient(client.id, { phone: phoneInput.trim() });
+    }
+
+    const pdfData =
+      preparedPdf || (await generateQuotationPdfBlob(liveEvent, state));
+    if (!pdfData) {
+      setIsSharing(false);
       setStatusMsg({
-        type: 'success',
-        text: `✓ ${quoteNumber}.pdf and proposal message attached together! Select WhatsApp and your client to send.`
+        type: 'error',
+        text: 'Could not generate Quotation PDF.'
       });
-    } else {
+      return;
+    }
+
+    const outcome = await sharePdfWithCaptionToWhatsApp({
+      file: pdfData.file,
+      blob: pdfData.blob,
+      filename: `${pdfData.quoteNumber}.pdf`,
+      messageText,
+      cleanPhone,
+      docId: `qtn-${liveEvent.id}`,
+      preUploadedPdfUrl: uploadedPdfUrl
+    });
+
+    setIsSharing(false);
+
+    if (!outcome.success) {
+      setStatusMsg({
+        type: 'error',
+        text: outcome.error || 'Could not open client WhatsApp chat.'
+      });
+      return;
+    }
+
+    if (liveEvent.status === 'inquiry') {
+      store.updateEvent(liveEvent.id, { status: 'quoted' });
+    }
+
+    if (outcome.pdfPublicUrl && !uploadedPdfUrl) {
+      setUploadedPdfUrl(outcome.pdfPublicUrl);
+    }
+
+    setStatusMsg({
+      type: 'success',
+      text: isDesktop
+        ? `✓ Opened ${client?.name || 'Client'}'s WhatsApp (+${cleanPhone}) with BOTH proposal text & official ${pdfData.quoteNumber}.pdf attached (and saved PDF to Downloads)!`
+        : `✓ Opened ${client?.name || 'Client'}'s WhatsApp (+${cleanPhone}) directly with BOTH proposal text & official ${pdfData.quoteNumber}.pdf attached together! Just tap Send in WhatsApp.`
+    });
+  };
+
+  const handleShareRawFileSheet = async () => {
+    const pdfData =
+      preparedPdf || (await generateQuotationPdfBlob(liveEvent, state));
+    if (!pdfData) return;
+    const res = await shareRawPdfFileViaOsSheet(pdfData.file, messageText);
+    if (res.shared) {
       setStatusMsg({
         type: 'info',
-        text: `📥 ${quoteNumber}.pdf downloaded & WhatsApp opened with proposal text pre-filled! Attach the downloaded PDF in chat and press Send.`
+        text: `📎 Raw Quotation PDF opened in Share Sheet (proposal text also copied to clipboard).`
       });
     }
   };
@@ -200,7 +259,12 @@ export default function QuotationWhatsAppModal({
 
   const handleCopyMessage = async () => {
     try {
-      await navigator.clipboard.writeText(messageText);
+      const fullCopy = composeWhatsAppMessageWithPdfLink(
+        messageText,
+        pdfFilename,
+        uploadedPdfUrl
+      );
+      await navigator.clipboard.writeText(fullCopy);
       setCopiedText(true);
       setTimeout(() => setCopiedText(false), 2000);
     } catch {
@@ -215,7 +279,7 @@ export default function QuotationWhatsAppModal({
         style={{ maxWidth: '580px', width: '96%', padding: 0, overflow: 'hidden' }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Vibrant Emerald Header */}
+        {/* Emerald Header */}
         <div
           style={{
             background: 'linear-gradient(135deg, #059669 0%, #0d9488 100%)',
@@ -229,10 +293,10 @@ export default function QuotationWhatsAppModal({
         >
           <div>
             <h2 style={{ fontSize: '1.12rem', fontWeight: 800, margin: 0 }}>
-              💬 Send Quotation PDF + Text on WhatsApp
+              💬 Send Quotation PDF + Text to Client WhatsApp
             </h2>
             <p style={{ fontSize: '0.78rem', opacity: 0.92, marginTop: '0.2rem' }}>
-              Catering Proposal #{quoteNumber} • PDF &amp; proposal text attach together
+              Catering Proposal #{quoteNumber} • Direct to client&apos;s WhatsApp number
             </p>
           </div>
           <button
@@ -252,7 +316,7 @@ export default function QuotationWhatsAppModal({
           </button>
         </div>
 
-        <div style={{ padding: '1.25rem 1.35rem', maxHeight: '80vh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.35rem', maxHeight: '82vh', overflowY: 'auto' }}>
           {/* PDF + Text Bundle Summary Card */}
           <div
             style={{
@@ -270,9 +334,9 @@ export default function QuotationWhatsAppModal({
           >
             <div>
               <div style={{ fontWeight: 800, color: '#065f46', fontSize: '0.92rem' }}>
-                📎 {quoteNumber}.pdf + Proposal Text
+                📎 {pdfFilename} + Proposal Text
               </div>
-              <div style={{ fontSize: '0.78rem', color: '#047857', marginTop: '0.15rem' }}>
+              <div style={{ fontSize: '0.78rem', color: '#047857', marginTop: '0.15rem', fontVariantNumeric: 'tabular-nums' }}>
                 Menu ₹{menuTotal.toLocaleString('en-IN')} + Extras ₹{extrasTotal.toLocaleString('en-IN')} = Total ₹{grandTotal.toLocaleString('en-IN')}
               </div>
             </div>
@@ -288,7 +352,7 @@ export default function QuotationWhatsAppModal({
                   whiteSpace: 'nowrap'
                 }}
               >
-                {isPreparingPdf ? '⏳ Preparing PDF...' : '✓ PDF + Text Ready'}
+                {isPreparingPdf ? '⏳ Attaching PDF...' : '✓ PDF + Text Attached'}
               </span>
             </div>
           </div>
@@ -334,10 +398,14 @@ export default function QuotationWhatsAppModal({
           {/* Client WhatsApp Number */}
           <div className="form-group" style={{ marginBottom: '0.9rem' }}>
             <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>Client WhatsApp Number ({client?.name || 'Client'})</span>
-              {cleanPhone && (
-                <span style={{ color: '#059669', fontWeight: 700, fontSize: '0.75rem' }}>
-                  +{cleanPhone}
+              <span>Client WhatsApp Number ({client?.name || 'Client'}) *</span>
+              {cleanPhone ? (
+                <span style={{ color: '#059669', fontWeight: 700, fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
+                  Direct Chat: +{cleanPhone}
+                </span>
+              ) : (
+                <span style={{ color: '#dc2626', fontWeight: 700, fontSize: '0.74rem' }}>
+                  Enter 10-digit mobile number
                 </span>
               )}
             </label>
@@ -362,7 +430,7 @@ export default function QuotationWhatsAppModal({
               }}
             >
               <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155' }}>
-                Attached Proposal Text (Sent Together with PDF)
+                Proposal Text + Official PDF Attachment
               </span>
               <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                 {isMessageEdited && (
@@ -405,6 +473,35 @@ export default function QuotationWhatsAppModal({
                 fontFamily: 'inherit'
               }}
             />
+            {uploadedPdfUrl && (
+              <div
+                style={{
+                  marginTop: '0.4rem',
+                  padding: '0.45rem 0.7rem',
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: '6px',
+                  fontSize: '0.74rem',
+                  color: '#166534',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.5rem'
+                }}
+              >
+                <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  📄 Auto-attached with text: {pdfFilename}
+                </span>
+                <a
+                  href={uploadedPdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#047857', fontWeight: 700, textDecoration: 'underline', whiteSpace: 'nowrap' }}
+                >
+                  Preview PDF
+                </a>
+              </div>
+            )}
           </div>
 
           {/* Status Feedback */}
@@ -441,7 +538,7 @@ export default function QuotationWhatsAppModal({
             </div>
           )}
 
-          {/* Unified Primary WhatsApp Send CTA */}
+          {/* Direct Client WhatsApp CTA */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
             <button
               type="button"
@@ -456,7 +553,7 @@ export default function QuotationWhatsAppModal({
                 border: 'none',
                 fontWeight: 800,
                 padding: '0.85rem 1rem',
-                fontSize: '0.94rem',
+                fontSize: '0.92rem',
                 borderRadius: '10px',
                 cursor: isPreparingPdf ? 'wait' : 'pointer',
                 display: 'flex',
@@ -468,27 +565,40 @@ export default function QuotationWhatsAppModal({
               }}
             >
               {isPreparingPdf
-                ? '⏳ Preparing PDF & Text...'
+                ? '⏳ Attaching PDF & Text...'
                 : isSharing
-                ? '⏳ Opening WhatsApp...'
-                : '📲 Send PDF & Text Together on WhatsApp'}
+                ? '⏳ Opening Client WhatsApp...'
+                : cleanPhone
+                ? `📲 Send Text + PDF to +${cleanPhone}`
+                : '📲 Send Text + PDF to Client WhatsApp'}
             </button>
 
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {isMobileDevice && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleShareRawFileSheet}
+                  disabled={isSharing || isPreparingPdf}
+                  style={{ flex: 1, fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}
+                >
+                  📎 Share Raw PDF File
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-secondary"
                 onClick={handleDownloadPdfOnly}
                 disabled={isSharing || isPreparingPdf}
-                style={{ flex: 1, fontSize: '0.83rem', fontWeight: 600 }}
+                style={{ flex: 1, fontSize: '0.82rem', fontWeight: 600, whiteSpace: 'nowrap' }}
               >
-                📥 Download PDF Only
+                📥 Download PDF
               </button>
               <button
                 type="button"
                 className="btn btn-secondary"
                 onClick={onClose}
-                style={{ fontSize: '0.83rem', fontWeight: 600 }}
+                style={{ fontSize: '0.82rem', fontWeight: 600, whiteSpace: 'nowrap' }}
               >
                 Close
               </button>

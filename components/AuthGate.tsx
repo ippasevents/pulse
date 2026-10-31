@@ -33,7 +33,8 @@ function isRouteAllowed(role: UserRole, pathname: string): boolean {
       pathname.startsWith('/events') ||
       pathname.startsWith('/clients') ||
       pathname.startsWith('/invoices') ||
-      pathname.startsWith('/staff')
+      pathname.startsWith('/staff') ||
+      pathname.startsWith('/stock')
     );
   }
   return false;
@@ -48,10 +49,22 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [isOnline, setIsOnline] = useState(true);
   const [isDbReady, setIsDbReady] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
+
+  // Login State
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loginSuccessMsg, setLoginSuccessMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Staff Forgot Password Self-Service Reset State
+  const [isResetMode, setIsResetMode] = useState(false);
+  const [resetPhone, setResetPhone] = useState('');
+  const [resetName, setResetName] = useState('');
+  const [resetNewPass, setResetNewPass] = useState('');
+  const [resetConfirmPass, setResetConfirmPass] = useState('');
+  const [resetError, setResetError] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
@@ -122,6 +135,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     setError('');
+    setLoginSuccessMsg('');
     setIsLoading(true);
 
     await store.syncFromSupabase(true);
@@ -138,7 +152,58 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // STRICT OFFLINE / DISCONNECTED GATE: Never show any page when internet or Supabase is disconnected
+  const handleStaffResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setIsOnline(false);
+      return;
+    }
+
+    setResetError('');
+    if (resetNewPass.trim().length < 4) {
+      setResetError('New password must be at least 4 characters long.');
+      return;
+    }
+    if (resetNewPass.trim() !== resetConfirmPass.trim()) {
+      setResetError('New password and confirm password do not match.');
+      return;
+    }
+
+    setIsResetting(true);
+    await store.syncFromSupabase(true);
+    if (!store.isOnline()) {
+      setIsResetting(false);
+      setIsOnline(false);
+      return;
+    }
+
+    const res = store.resetStaffPasswordSelfService(
+      resetPhone,
+      resetName,
+      resetNewPass.trim()
+    );
+    setIsResetting(false);
+
+    if (!res.success) {
+      setResetError(res.error || 'Could not reset password.');
+      return;
+    }
+
+    // Pre-fill login form and return to Sign In with confirmation message
+    setUsername(res.loginPhone || resetPhone.trim());
+    setPassword(resetNewPass.trim());
+    setIsResetMode(false);
+    setError('');
+    setLoginSuccessMsg(
+      `✓ Password reset for ${res.staffName || 'Staff'}! Tap Sign In below to continue.`
+    );
+    setResetPhone('');
+    setResetName('');
+    setResetNewPass('');
+    setResetConfirmPass('');
+  };
+
+  // STRICT OFFLINE / DISCONNECTED GATE
   if (isMounted && !isOnline) {
     return (
       <div
@@ -237,6 +302,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           <img
             src="/logo.png"
             alt="IPPAS Pulse"
+            referrerPolicy="no-referrer"
             style={{ height: '50px', marginBottom: '1rem', objectFit: 'contain' }}
           />
           <div style={{ color: '#0f172a', fontWeight: 600, fontSize: '0.95rem' }}>
@@ -250,7 +316,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Login Screen (online only)
+  // Login Screen (with Staff Forgot Password Self-Service Reset)
   if (!isAuthenticated) {
     return (
       <div
@@ -267,7 +333,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       >
         <div
           style={{
-            maxWidth: '410px',
+            maxWidth: '420px',
             width: '100%',
             background: '#ffffff',
             color: '#0f172a',
@@ -284,90 +350,266 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
             }}
           />
           <div style={{ padding: '2rem 2rem 2.15rem 2rem' }}>
-          <div style={{ textAlign: 'center', marginBottom: '1.65rem' }}>
-            <img
-              src="/logo.png"
-              alt="IPPAS Food Service & Events"
-              referrerPolicy="no-referrer"
-              style={{ height: '50px', width: 'auto', margin: '0 auto 0.75rem auto', display: 'block' }}
-            />
-            <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
-              IPPAS Pulse
-            </h1>
-            <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.3rem', fontWeight: 500 }}>
-              Outdoor Catering • Event Management • Calicut
-            </p>
-          </div>
-
-          {error && (
-            <div
-              style={{
-                background: '#fee2e2',
-                border: '1px solid #fecaca',
-                color: '#dc2626',
-                padding: '0.65rem 0.85rem',
-                borderRadius: '8px',
-                fontSize: '0.85rem',
-                marginBottom: '1.25rem',
-                fontWeight: 500,
-                textAlign: 'center'
-              }}
-            >
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleLogin}>
-            <div className="form-group" style={{ marginBottom: '1.15rem' }}>
-              <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
-                Username or Phone Number
-              </label>
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Username or Staff Phone"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
-                autoFocus
-                style={{ padding: '0.7rem 0.85rem', fontSize: '0.95rem' }}
+            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+              <img
+                src="/logo.png"
+                alt="IPPAS Food Service & Events"
+                referrerPolicy="no-referrer"
+                style={{ height: '50px', width: 'auto', margin: '0 auto 0.75rem auto', display: 'block' }}
               />
+              <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
+                IPPAS Pulse
+              </h1>
+              <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.3rem', fontWeight: 500 }}>
+                Outdoor Catering • Event Management • Calicut
+              </p>
             </div>
 
-            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-              <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
-                Password
-              </label>
-              <input
-                type="password"
-                className="form-control"
-                placeholder="Enter password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                style={{ padding: '0.7rem 0.85rem', fontSize: '0.95rem' }}
-              />
-            </div>
+            {isResetMode ? (
+              <div>
+                <div
+                  style={{
+                    background: '#f5f3ff',
+                    border: '1px solid #ddd6fe',
+                    borderRadius: '10px',
+                    padding: '0.75rem 0.9rem',
+                    marginBottom: '1rem'
+                  }}
+                >
+                  <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#5b21b6' }}>
+                    🔑 Staff Password Reset (സ്റ്റാഫ് പാസ്‌വേഡ് റീസെറ്റ്)
+                  </div>
+                  <div style={{ fontSize: '0.76rem', color: '#6d28d9', marginTop: '0.2rem', lineHeight: 1.4 }}>
+                    Enter your registered mobile number and full name to set a new login password.
+                  </div>
+                </div>
 
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={isLoading}
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                fontSize: '0.95rem',
-                fontWeight: 700,
-                borderRadius: '8px'
-              }}
-            >
-              {isLoading ? 'Authenticating...' : 'Sign In'}
-            </button>
-          </form>
+                {resetError && (
+                  <div
+                    style={{
+                      background: '#fee2e2',
+                      border: '1px solid #fecaca',
+                      color: '#dc2626',
+                      padding: '0.65rem 0.85rem',
+                      borderRadius: '8px',
+                      fontSize: '0.82rem',
+                      marginBottom: '1rem',
+                      fontWeight: 600
+                    }}
+                  >
+                    {resetError}
+                  </div>
+                )}
 
-          <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
-            <PWAInstallButton variant="login" />
-          </div>
+                <form onSubmit={handleStaffResetPassword}>
+                  <div className="form-group" style={{ marginBottom: '0.9rem' }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.82rem' }}>
+                      Registered Staff Mobile Number *
+                    </label>
+                    <input
+                      type="tel"
+                      className="form-control"
+                      placeholder="e.g. 9745111001"
+                      value={resetPhone}
+                      onChange={(e) => setResetPhone(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '0.9rem' }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.82rem' }}>
+                      Full Name (as registered) *
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. Shyam Kumar"
+                      value={resetName}
+                      onChange={(e) => setResetName(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="grid-2" style={{ gap: '0.65rem', marginBottom: '1.15rem' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                        New Password *
+                      </label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Min 4 chars"
+                        value={resetNewPass}
+                        onChange={(e) => setResetNewPass(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                        Confirm Password *
+                      </label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        placeholder="Re-enter"
+                        value={resetConfirmPass}
+                        onChange={(e) => setResetConfirmPass(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={isResetting}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      fontSize: '0.92rem',
+                      fontWeight: 700,
+                      borderRadius: '8px',
+                      background: '#7c3aed',
+                      borderColor: '#7c3aed'
+                    }}
+                  >
+                    {isResetting ? 'Resetting Password...' : 'Save New Password'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsResetMode(false);
+                      setResetError('');
+                    }}
+                    className="btn btn-secondary"
+                    style={{
+                      width: '100%',
+                      marginTop: '0.55rem',
+                      padding: '0.65rem',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      borderRadius: '8px'
+                    }}
+                  >
+                    ← Back to Sign In
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <>
+                {loginSuccessMsg && (
+                  <div
+                    style={{
+                      background: '#dcfce7',
+                      border: '1px solid #86efac',
+                      color: '#166534',
+                      padding: '0.65rem 0.85rem',
+                      borderRadius: '8px',
+                      fontSize: '0.83rem',
+                      marginBottom: '1rem',
+                      fontWeight: 600,
+                      textAlign: 'center'
+                    }}
+                  >
+                    {loginSuccessMsg}
+                  </div>
+                )}
+
+                {error && (
+                  <div
+                    style={{
+                      background: '#fee2e2',
+                      border: '1px solid #fecaca',
+                      color: '#dc2626',
+                      padding: '0.65rem 0.85rem',
+                      borderRadius: '8px',
+                      fontSize: '0.85rem',
+                      marginBottom: '1.25rem',
+                      fontWeight: 500,
+                      textAlign: 'center'
+                    }}
+                  >
+                    {error}
+                  </div>
+                )}
+
+                <form onSubmit={handleLogin}>
+                  <div className="form-group" style={{ marginBottom: '1.15rem' }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                      Username or Phone Number
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="Username or Staff Phone"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      required
+                      autoFocus
+                      style={{ padding: '0.7rem 0.85rem', fontSize: '0.95rem' }}
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '0.6rem' }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      className="form-control"
+                      placeholder="Enter password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      style={{ padding: '0.7rem 0.85rem', fontSize: '0.95rem' }}
+                    />
+                  </div>
+
+                  <div style={{ textAlign: 'right', marginBottom: '1.2rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetPhone(username);
+                        setResetError('');
+                        setIsResetMode(true);
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: '#7c3aed',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        textDecoration: 'underline'
+                      }}
+                    >
+                      Forgot Staff Password? (പാസ്‌വേഡ് മറന്നുപോയോ?)
+                    </button>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={isLoading}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      fontSize: '0.95rem',
+                      fontWeight: 700,
+                      borderRadius: '8px'
+                    }}
+                  >
+                    {isLoading ? 'Authenticating...' : 'Sign In'}
+                  </button>
+                </form>
+
+                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
+                  <PWAInstallButton variant="login" />
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

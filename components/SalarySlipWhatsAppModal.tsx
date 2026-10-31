@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { AppState } from '@/lib/store';
+import { AppState, store } from '@/lib/store';
 import { normalizeWhatsAppPhone } from '@/lib/invoicePdfGenerator';
 import {
   formatPeriodLabel,
@@ -10,9 +10,13 @@ import {
   StaffPeriodReportRow
 } from '@/lib/staffSalaryPdfGenerator';
 import {
+  composeWhatsAppMessageWithPdfLink,
   isDesktopWebView,
+  isTouchCapableOrMobile,
   sharePdfWithCaptionToWhatsApp,
-  triggerPdfBlobDownload
+  shareRawPdfFileViaOsSheet,
+  triggerPdfBlobDownload,
+  uploadSharedPdfForWhatsApp
 } from '@/lib/whatsappDeviceShare';
 
 interface SalarySlipWhatsAppModalProps {
@@ -39,20 +43,24 @@ export default function SalarySlipWhatsAppModal({
     file: File;
     filename: string;
   } | null>(null);
+  const [uploadedPdfUrl, setUploadedPdfUrl] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<{
     type: 'info' | 'success' | 'error';
     text: string;
   } | null>(null);
   const [copiedText, setCopiedText] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
 
   useEffect(() => {
     setIsDesktop(isDesktopWebView());
+    setIsMobileDevice(isTouchCapableOrMobile());
   }, []);
 
   useEffect(() => {
     if (!row) {
       setPreparedPdf(null);
+      setUploadedPdfUrl(null);
       setStatusMsg(null);
       return;
     }
@@ -66,11 +74,20 @@ export default function SalarySlipWhatsAppModal({
     let cancelled = false;
     setIsPreparingPdf(true);
     setPreparedPdf(null);
+    setUploadedPdfUrl(null);
+
+    const docKey = `slip-${row.staff.id}-${Date.now().toString(36)}`;
 
     generateSingleStaffSalarySlipPdfBlob(row, startDate, endDate, state)
-      .then((res) => {
+      .then(async (res) => {
+        if (cancelled || !res) {
+          if (!cancelled) setIsPreparingPdf(false);
+          return;
+        }
+        setPreparedPdf(res);
+        const pubUrl = await uploadSharedPdfForWhatsApp(res.blob, res.filename, docKey);
         if (!cancelled) {
-          setPreparedPdf(res);
+          setUploadedPdfUrl(pubUrl);
           setIsPreparingPdf(false);
         }
       })
@@ -91,15 +108,29 @@ export default function SalarySlipWhatsAppModal({
 
   const handleSendWhatsAppWithPdfAndText = async () => {
     if (!preparedPdf) return;
+    if (!cleanPhone || cleanPhone.replace(/\D/g, '').length < 10) {
+      setStatusMsg({
+        type: 'error',
+        text: 'Please enter a valid 10-digit WhatsApp number so both Salary Text & PDF open directly in their chat.'
+      });
+      return;
+    }
+
     setIsSharing(true);
     setStatusMsg(null);
+
+    if (phoneInput.trim() && phoneInput.trim() !== row.staff.phone) {
+      store.updateStaff(row.staff.id, { phone: phoneInput.trim() });
+    }
 
     const outcome = await sharePdfWithCaptionToWhatsApp({
       file: preparedPdf.file,
       blob: preparedPdf.blob,
       filename: preparedPdf.filename,
       messageText,
-      cleanPhone
+      cleanPhone,
+      docId: `slip-${row.staff.id}`,
+      preUploadedPdfUrl: uploadedPdfUrl
     });
 
     setIsSharing(false);
@@ -107,20 +138,30 @@ export default function SalarySlipWhatsAppModal({
     if (!outcome.success) {
       setStatusMsg({
         type: 'error',
-        text: outcome.error || 'Could not share Salary Slip PDF & text.'
+        text: outcome.error || 'Could not open WhatsApp chat.'
       });
       return;
     }
 
-    if (outcome.sharedDirectlyWithFile) {
-      setStatusMsg({
-        type: 'success',
-        text: `✓ ${preparedPdf.filename} and salary summary text attached together! Select WhatsApp and ${row.staff.name} to send.`
-      });
-    } else {
+    if (outcome.pdfPublicUrl && !uploadedPdfUrl) {
+      setUploadedPdfUrl(outcome.pdfPublicUrl);
+    }
+
+    setStatusMsg({
+      type: 'success',
+      text: isDesktop
+        ? `✓ Opened ${row.staff.name}'s WhatsApp (+${cleanPhone}) with BOTH salary text & official ${preparedPdf.filename} attached (and saved PDF to Downloads)!`
+        : `✓ Opened ${row.staff.name}'s WhatsApp (+${cleanPhone}) directly with BOTH salary text & official ${preparedPdf.filename} attached together!`
+    });
+  };
+
+  const handleShareRawFileSheet = async () => {
+    if (!preparedPdf) return;
+    const res = await shareRawPdfFileViaOsSheet(preparedPdf.file, messageText);
+    if (res.shared) {
       setStatusMsg({
         type: 'info',
-        text: `📥 ${preparedPdf.filename} downloaded & WhatsApp opened with text pre-filled! Attach the downloaded PDF in chat and press Send.`
+        text: `📎 Raw Salary Slip PDF opened in Share Sheet (summary text also copied to clipboard).`
       });
     }
   };
@@ -168,7 +209,7 @@ export default function SalarySlipWhatsAppModal({
           </button>
         </div>
 
-        <div style={{ padding: '1.25rem 1.35rem', maxHeight: '80vh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.35rem', maxHeight: '82vh', overflowY: 'auto' }}>
           <div
             style={{
               background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfeff 100%)',
@@ -187,7 +228,7 @@ export default function SalarySlipWhatsAppModal({
               <div style={{ fontWeight: 800, color: '#065f46', fontSize: '0.9rem' }}>
                 📎 Salary Slip PDF + Summary Text
               </div>
-              <div style={{ fontSize: '0.78rem', color: '#047857', marginTop: '0.15rem' }}>
+              <div style={{ fontSize: '0.78rem', color: '#047857', marginTop: '0.15rem', fontVariantNumeric: 'tabular-nums' }}>
                 Earned ₹{row.totalEarnings.toLocaleString('en-IN')} • Paid ₹{row.paymentsReceived.toLocaleString('en-IN')} • Balance ₹{row.periodPayable.toLocaleString('en-IN')}
               </div>
             </div>
@@ -202,16 +243,20 @@ export default function SalarySlipWhatsAppModal({
                 whiteSpace: 'nowrap'
               }}
             >
-              {isPreparingPdf ? '⏳ Preparing PDF...' : '✓ PDF + Text Ready'}
+              {isPreparingPdf ? '⏳ Attaching PDF...' : '✓ PDF + Text Attached'}
             </span>
           </div>
 
           <div className="form-group" style={{ marginBottom: '0.9rem' }}>
             <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>Staff WhatsApp Number ({row.staff.name})</span>
-              {cleanPhone && (
-                <span style={{ color: '#059669', fontWeight: 700, fontSize: '0.75rem' }}>
-                  +{cleanPhone}
+              <span>Staff WhatsApp Number ({row.staff.name}) *</span>
+              {cleanPhone ? (
+                <span style={{ color: '#059669', fontWeight: 700, fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
+                  Direct Chat: +{cleanPhone}
+                </span>
+              ) : (
+                <span style={{ color: '#dc2626', fontWeight: 700, fontSize: '0.74rem' }}>
+                  Enter 10-digit mobile number
                 </span>
               )}
             </label>
@@ -234,7 +279,7 @@ export default function SalarySlipWhatsAppModal({
               }}
             >
               <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155' }}>
-                Attached Salary Text (Sent Together with PDF)
+                Salary Text + Official PDF Attachment
               </span>
               {isDesktop && (
                 <button
@@ -242,7 +287,12 @@ export default function SalarySlipWhatsAppModal({
                   className="btn btn-secondary btn-sm"
                   onClick={async () => {
                     try {
-                      await navigator.clipboard.writeText(messageText);
+                      const fullCopy = composeWhatsAppMessageWithPdfLink(
+                        messageText,
+                        preparedPdf?.filename || 'Salary-Slip.pdf',
+                        uploadedPdfUrl
+                      );
+                      await navigator.clipboard.writeText(fullCopy);
                       setCopiedText(true);
                       setTimeout(() => setCopiedText(false), 2000);
                     } catch {
@@ -267,6 +317,35 @@ export default function SalarySlipWhatsAppModal({
                 fontFamily: 'inherit'
               }}
             />
+            {uploadedPdfUrl && preparedPdf && (
+              <div
+                style={{
+                  marginTop: '0.4rem',
+                  padding: '0.45rem 0.7rem',
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: '6px',
+                  fontSize: '0.74rem',
+                  color: '#166534',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.5rem'
+                }}
+              >
+                <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  📄 Auto-attached with text: {preparedPdf.filename}
+                </span>
+                <a
+                  href={uploadedPdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#047857', fontWeight: 700, textDecoration: 'underline', whiteSpace: 'nowrap' }}
+                >
+                  Preview PDF
+                </a>
+              </div>
+            )}
           </div>
 
           {statusMsg && (
@@ -315,7 +394,7 @@ export default function SalarySlipWhatsAppModal({
                 border: 'none',
                 fontWeight: 800,
                 padding: '0.85rem 1rem',
-                fontSize: '0.94rem',
+                fontSize: '0.92rem',
                 borderRadius: '10px',
                 cursor: isPreparingPdf ? 'wait' : 'pointer',
                 display: 'flex',
@@ -327,13 +406,26 @@ export default function SalarySlipWhatsAppModal({
               }}
             >
               {isPreparingPdf
-                ? '⏳ Preparing Salary Slip PDF...'
+                ? '⏳ Attaching Salary Slip PDF...'
                 : isSharing
-                ? '⏳ Opening WhatsApp...'
-                : '📲 Send PDF & Text Together on WhatsApp'}
+                ? '⏳ Opening Staff WhatsApp...'
+                : cleanPhone
+                ? `📲 Send Text + PDF to +${cleanPhone}`
+                : '📲 Send Text + PDF on WhatsApp'}
             </button>
 
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {isMobileDevice && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={isPreparingPdf || !preparedPdf}
+                  onClick={handleShareRawFileSheet}
+                  style={{ flex: 1, fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}
+                >
+                  📎 Share Raw PDF File
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -343,15 +435,15 @@ export default function SalarySlipWhatsAppModal({
                     triggerPdfBlobDownload(preparedPdf.blob, preparedPdf.filename);
                   }
                 }}
-                style={{ flex: 1, fontSize: '0.83rem', fontWeight: 600 }}
+                style={{ flex: 1, fontSize: '0.82rem', fontWeight: 600, whiteSpace: 'nowrap' }}
               >
-                📥 Download PDF Only
+                📥 Download PDF
               </button>
               <button
                 type="button"
                 className="btn btn-secondary"
                 onClick={onClose}
-                style={{ fontSize: '0.83rem', fontWeight: 600 }}
+                style={{ fontSize: '0.82rem', fontWeight: 600, whiteSpace: 'nowrap' }}
               >
                 Close
               </button>

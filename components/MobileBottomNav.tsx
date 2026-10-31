@@ -57,8 +57,8 @@ export default function MobileBottomNav() {
       return [
         { label: 'Home', href: '/dashboard', icon: '📊' },
         { label: 'Invoices', href: '/invoices', icon: '🧾' },
-        { label: 'Events', href: '/events', icon: '📅' },
         { label: 'Staff', href: '/staff', icon: '🧑‍🍳' },
+        { label: 'Vendors', href: '/stock', icon: '📦' },
         { label: 'More', href: '#more', icon: '☰', isMore: true }
       ];
     }
@@ -86,8 +86,9 @@ export default function MobileBottomNav() {
   const navItems = getNavItems();
 
   const allMoreTiles = [
+    { label: 'Events & Quotes', href: '/events', icon: '📅', bg: '#fff1f2', border: '#fecdd3', color: '#be123c', roles: ['accountant'] },
     { label: 'Menu & Recipes', href: '/menu', icon: '🍽️', bg: '#fff1f2', border: '#fecdd3', color: '#be123c', roles: ['super_admin', 'owner', 'manager'] },
-    { label: 'Stock & Inventory', href: '/stock', icon: '📦', bg: '#fffbeb', border: '#fde68a', color: '#b45309', roles: ['super_admin', 'owner', 'manager'] },
+    { label: 'Vendor Bills & Stock', href: '/stock', icon: '📦', bg: '#fffbeb', border: '#fde68a', color: '#b45309', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
     { label: 'Clients', href: '/clients', icon: '👥', bg: '#eff6ff', border: '#bfdbfe', color: '#1d4ed8', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
     { label: 'Profit & Loss', href: '/pnl', icon: '📈', bg: '#ecfdf5', border: '#a7f3d0', color: '#047857', roles: ['super_admin', 'owner'] },
     { label: 'Staff & Payroll', href: '/staff', icon: '🧑‍🍳', bg: '#f5f3ff', border: '#ddd6fe', color: '#6d28d9', roles: ['super_admin', 'owner', 'manager', 'accountant'] },

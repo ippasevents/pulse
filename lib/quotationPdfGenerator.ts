@@ -428,7 +428,8 @@ export async function shareQuotationPdfToWhatsApp(
       blob: prebuiltPdf.blob,
       filename: `${quoteNumber}.pdf`,
       messageText,
-      cleanPhone
+      cleanPhone,
+      docId: `qtn-${liveEvent.id}`
     });
     if (shareOutcome.success && liveEvent.status === 'inquiry') {
       store.updateEvent(liveEvent.id, { status: 'quoted' });
@@ -454,7 +455,8 @@ export async function shareQuotationPdfToWhatsApp(
     blob: pdfResult.blob,
     filename: `${quoteNumber}.pdf`,
     messageText,
-    cleanPhone
+    cleanPhone,
+    docId: `qtn-${liveEvent.id}`
   });
 
   if (shareOutcome.success && liveEvent.status === 'inquiry') {

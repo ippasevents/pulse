@@ -24,6 +24,7 @@ export default function DashboardPage() {
   const [accountantSearch, setAccountantSearch] = useState('');
   const [ownerChartRange, setOwnerChartRange] = useState<'all' | '6m'>('all');
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [staffSectionTab, setStaffSectionTab] = useState<'all' | 'upcoming' | 'attended' | 'payments'>('all');
 
   useEffect(() => {
     setIsMounted(true);
@@ -125,101 +126,165 @@ export default function DashboardPage() {
           earningRecords: []
         };
 
-    const staffShifts = state.shifts
-      .filter((sh) => sh.staff_member_id === currentUser?.id)
-      .map((sh) => {
-        const event = state.events.find((e) => e.id === sh.event_id);
-        return { shift: sh, event };
+    const nowDate = new Date();
+    const todayYmd = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(
+      nowDate.getDate()
+    ).padStart(2, '0')}`;
+
+    const upcomingDuties = salarySummary.shiftItems
+      .filter((si) => {
+        if (!si.event || si.event.status === 'cancelled') return false;
+        if (si.event.status === 'completed') return false;
+        if (si.attendanceStatus === 'present' || si.attendanceStatus === 'absent') return false;
+        return si.event.event_date >= todayYmd || si.event.status === 'confirmed' || si.event.status === 'inquiry';
       })
-      .filter((item) => item.event && item.event.status !== 'cancelled' && item.event.status !== 'completed')
       .sort((a, b) => (a.event?.event_date || '').localeCompare(b.event?.event_date || ''));
 
-    const nextAssignment = staffShifts[0];
-    const otherAssignments = staffShifts.slice(1);
+    const attendedDuties = salarySummary.shiftItems
+      .filter((si) => {
+        if (!si.event || si.event.status === 'cancelled') return false;
+        if (si.isAttended) return true;
+        return (
+          (si.event.status === 'completed' || si.event.event_date < todayYmd) &&
+          si.attendanceStatus !== 'absent' &&
+          !upcomingDuties.some((u) => u.shift.id === si.shift.id)
+        );
+      })
+      .sort((a, b) => (b.event?.event_date || '').localeCompare(a.event?.event_date || ''));
+
+    const nextAssignment = upcomingDuties[0];
+    const otherUpcoming = upcomingDuties.slice(1);
+
+    const showUpcomingSection = staffSectionTab === 'all' || staffSectionTab === 'upcoming';
+    const showAttendedSection = staffSectionTab === 'all' || staffSectionTab === 'attended';
+    const showPaymentsSection = staffSectionTab === 'all' || staffSectionTab === 'payments';
 
     return (
-      <div style={{ maxWidth: '880px', margin: '0 auto', paddingBottom: '2rem' }}>
-        <div className="page-header" style={{ marginBottom: '1.25rem' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
-              <span className="role-tag-badge" style={{ background: '#7c3aed', color: '#fff', fontSize: '0.75rem' }}>
-                STAFF DUTY &amp; SALARY PORTAL
-              </span>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                Staff Member: <strong>{currentUser?.full_name}</strong> ({currentUser?.phone})
-                {staffRecord?.hourly_rate ? ` • Rate: ₹${staffRecord.hourly_rate}/hr` : ''}
-              </span>
+      <div style={{ maxWidth: '940px', margin: '0 auto', paddingBottom: '2.5rem' }}>
+        {/* Clean Simplified Staff Header */}
+        <div
+          className="card"
+          style={{
+            background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 55%, #9333ea 100%)',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: '14px',
+            padding: '1.35rem 1.5rem',
+            marginBottom: '1.25rem',
+            boxShadow: '0 10px 25px -8px rgba(79, 70, 229, 0.35)'
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '0.85rem'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '0.78rem', fontWeight: 600, opacity: 0.9, marginBottom: '0.2rem' }}>
+                Staff Duty &amp; Salary Portal · {currentUser?.phone || 'Crew'}
+                {staffRecord?.hourly_rate ? ` · ₹${staffRecord.hourly_rate}/hr` : ''}
+              </div>
+              <h1 style={{ fontSize: '1.45rem', fontWeight: 800, margin: 0, letterSpacing: '-0.02em', color: '#ffffff' }}>
+                👋 {currentUser?.full_name || 'Staff Member'}
+              </h1>
+              <div style={{ fontSize: '0.84rem', opacity: 0.92, marginTop: '0.2rem' }}>
+                വരാനിരിക്കുന്ന പരിപാടികളും ഇതുവരെ പങ്കെടുത്ത പരിപാടികളും ശമ്പള വിവരങ്ങളും ഒറ്റനോട്ടത്തിൽ
+              </div>
             </div>
-            <h1 className="page-title">My Duty Schedule &amp; Salary Summary</h1>
-            <p className="page-subtitle">
-              View your salary received, pending balance receivable, and upcoming catering venue assignments.
-            </p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <Link
-              href="/manuals"
-              className="btn btn-primary btn-sm"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                fontWeight: 700,
-                fontSize: '0.82rem',
-                padding: '0.45rem 0.85rem'
-              }}
-            >
-              📘 മലയാളം യൂസർ മാനുവൽ (PDF)
-            </Link>
-            <button
-              type="button"
-              onClick={() => setIsChangePasswordOpen(true)}
-              className="btn btn-secondary btn-sm"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                fontWeight: 700,
-                fontSize: '0.82rem',
-                padding: '0.45rem 0.85rem'
-              }}
-            >
-              🔑 Change Password
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <Link
+                href="/manuals"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  background: '#ffffff',
+                  color: '#4f46e5',
+                  padding: '0.48rem 0.85rem',
+                  borderRadius: '8px',
+                  fontWeight: 700,
+                  fontSize: '0.8rem',
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                📘 മലയാളം മാനുവൽ (PDF)
+              </Link>
+              <button
+                type="button"
+                onClick={() => setIsChangePasswordOpen(true)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  background: 'rgba(255,255,255,0.18)',
+                  border: '1px solid rgba(255,255,255,0.35)',
+                  color: '#ffffff',
+                  padding: '0.48rem 0.85rem',
+                  borderRadius: '8px',
+                  fontWeight: 700,
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                🔑 Change Password
+              </button>
+            </div>
           </div>
         </div>
 
         <PWAInstallBanner />
 
-        {/* STAFF SALARY SUMMARY CARDS */}
+        {/* 3 Simplified Colourful Salary KPI Cards */}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: '1rem',
-            marginBottom: '1.5rem'
+            gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))',
+            gap: '0.9rem',
+            marginBottom: '1.25rem'
           }}
         >
-          <div className="stats-card" style={{ borderTop: '3px solid #2563eb', background: 'linear-gradient(180deg, #eff6ff 0%, #ffffff 65%)' }}>
-            <span className="stats-label" style={{ color: '#1d4ed8' }}>Total Salary Earned</span>
-            <span className="stats-value" style={{ color: '#1d4ed8' }}>
+          <div
+            className="stats-card"
+            style={{
+              borderTop: '3px solid #2563eb',
+              background: 'linear-gradient(180deg, #eff6ff 0%, #ffffff 70%)'
+            }}
+          >
+            <span className="stats-label" style={{ color: '#1d4ed8' }}>
+              Total Salary Earned
+            </span>
+            <span className="stats-value" style={{ color: '#1d4ed8', fontVariantNumeric: 'tabular-nums' }}>
               ₹{salarySummary.totalEarned.toLocaleString('en-IN')}
             </span>
-            <span className="stats-sub">
-              {salarySummary.attendedShiftsCount} attended shift{salarySummary.attendedShiftsCount === 1 ? '' : 's'} ({salarySummary.totalShiftHours} hrs)
+            <span className="stats-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {salarySummary.attendedShiftsCount} attended ({salarySummary.totalShiftHours} hrs)
               {salarySummary.extraEarnings > 0
-                ? ` + ₹${salarySummary.extraEarnings.toLocaleString('en-IN')} bonus`
+                ? ` · +₹${salarySummary.extraEarnings.toLocaleString('en-IN')} allowance`
                 : ''}
             </span>
           </div>
 
-          <div className="stats-card" style={{ borderTop: '3px solid #059669', background: 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 65%)' }}>
-            <span className="stats-label" style={{ color: '#047857' }}>Salary Received</span>
-            <span className="stats-value" style={{ color: '#059669' }}>
+          <div
+            className="stats-card"
+            style={{
+              borderTop: '3px solid #059669',
+              background: 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 70%)'
+            }}
+          >
+            <span className="stats-label" style={{ color: '#047857' }}>
+              Salary Received
+            </span>
+            <span className="stats-value" style={{ color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
               ₹{salarySummary.totalPaid.toLocaleString('en-IN')}
             </span>
-            <span className="stats-sub">
-              {salarySummary.paymentRecords.length} payment
-              {salarySummary.paymentRecords.length === 1 ? '' : 's'} received so far
+            <span className="stats-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {salarySummary.paymentRecords.length} payment{salarySummary.paymentRecords.length === 1 ? '' : 's'} received
             </span>
           </div>
 
@@ -227,19 +292,28 @@ export default function DashboardPage() {
             className="stats-card"
             style={{
               borderTop: `3px solid ${salarySummary.balancePayable > 0 ? '#e11d48' : '#059669'}`,
-              background: salarySummary.balancePayable > 0
-                ? 'linear-gradient(180deg, #fff1f2 0%, #ffffff 65%)'
-                : 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 65%)'
+              background:
+                salarySummary.balancePayable > 0
+                  ? 'linear-gradient(180deg, #fff1f2 0%, #ffffff 70%)'
+                  : 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 70%)'
             }}
           >
-            <span className="stats-label" style={{ color: salarySummary.balancePayable > 0 ? '#be123c' : '#047857' }}>Pending Salary Balance</span>
+            <span
+              className="stats-label"
+              style={{ color: salarySummary.balancePayable > 0 ? '#be123c' : '#047857' }}
+            >
+              Pending Balance Payable
+            </span>
             <span
               className="stats-value"
-              style={{ color: salarySummary.balancePayable > 0 ? '#dc2626' : '#059669' }}
+              style={{
+                color: salarySummary.balancePayable > 0 ? '#dc2626' : '#059669',
+                fontVariantNumeric: 'tabular-nums'
+              }}
             >
               ₹{salarySummary.balancePayable.toLocaleString('en-IN')}
             </span>
-            <span className="stats-sub">
+            <span className="stats-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
               {salarySummary.balancePayable > 0
                 ? 'Remaining salary payable to you'
                 : salarySummary.advanceExcess > 0
@@ -249,216 +323,436 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {nextAssignment ? (
-          <div>
-            {/* Prominent Next Function Card */}
-            <div
-              className="card"
-              style={{
-                border: '2px solid #7c3aed',
-                background: 'linear-gradient(to bottom, #ffffff 0%, #faf5ff 100%)',
-                boxShadow: '0 10px 15px -3px rgba(124, 58, 237, 0.1)',
-                padding: '1.75rem',
-                marginBottom: '1.5rem',
-                borderRadius: '12px'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
-                <span
-                  style={{
-                    background: '#7c3aed',
-                    color: '#ffffff',
-                    padding: '0.35rem 0.85rem',
-                    borderRadius: '20px',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}
-                >
-                  ⭐ Next Assigned Function
-                </span>
-
-                <span className="badge" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 600 }}>
-                  Confirmed Assignment
-                </span>
-              </div>
-
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#0f172a', margin: '0 0 0.5rem 0' }}>
-                {nextAssignment.event?.title}
-              </h2>
-
-              {/* Venue & Location Highlight */}
-              <div
+        {/* Clean Segmented Filter Bar */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '0.4rem',
+            padding: '0.35rem',
+            background: '#f1f5f9',
+            borderRadius: '10px',
+            marginBottom: '1.25rem',
+            overflowX: 'auto'
+          }}
+        >
+          {[
+            { id: 'all' as const, label: 'All Overview' },
+            { id: 'upcoming' as const, label: `📅 Upcoming Events (${upcomingDuties.length})` },
+            { id: 'attended' as const, label: `✅ Attended Events (${attendedDuties.length})` },
+            { id: 'payments' as const, label: `💸 Salary Received (${salarySummary.paymentRecords.length})` }
+          ].map((tab) => {
+            const active = staffSectionTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setStaffSectionTab(tab.id)}
                 style={{
-                  background: '#ffffff',
-                  border: '1.5px solid #e9d5ff',
-                  borderRadius: '10px',
-                  padding: '1.25rem',
-                  marginTop: '1.25rem',
-                  marginBottom: '1.25rem'
+                  padding: '0.5rem 0.9rem',
+                  borderRadius: '7px',
+                  border: 'none',
+                  background: active ? '#ffffff' : 'transparent',
+                  color: active ? '#0f172a' : '#475569',
+                  fontWeight: active ? 700 : 600,
+                  fontSize: '0.82rem',
+                  boxShadow: active ? '0 1px 3px rgba(15,23,42,0.08)' : 'none',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
                 }}
               >
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6b21a8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.35rem' }}>
-                  Function Location &amp; Venue:
-                </div>
-                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1e1b4b', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span>📍</span>
-                  <span>{nextAssignment.event?.venue || 'Venue to be confirmed'}</span>
-                </div>
-                {nextAssignment.event?.venue && (
-                  <div style={{ marginTop: '0.75rem' }}>
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* SECTION 1: UPCOMING EVENTS (വരാനിരിക്കുന്ന പരിപാടികൾ) */}
+        {showUpcomingSection && (
+          <div
+            className="card"
+            style={{
+              borderTop: '3px solid #7c3aed',
+              marginBottom: '1.25rem',
+              padding: '1.25rem'
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                marginBottom: '0.9rem'
+              }}
+            >
+              <div>
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                  📅 വരാനിരിക്കുന്ന പരിപാടികൾ · Upcoming Events ({upcomingDuties.length})
+                </h2>
+                <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.15rem 0 0 0' }}>
+                  Your scheduled catering duties, reporting timings, and venue locations
+                </p>
+              </div>
+            </div>
+
+            {nextAssignment ? (
+              <div>
+                <div
+                  style={{
+                    background: 'linear-gradient(135deg, #faf5ff 0%, #eef2ff 100%)',
+                    border: '1px solid #ddd6fe',
+                    borderRadius: '10px',
+                    padding: '1.1rem 1.2rem',
+                    marginBottom: otherUpcoming.length > 0 ? '1rem' : 0
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '0.5rem',
+                      marginBottom: '0.45rem'
+                    }}
+                  >
+                    <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#6d28d9' }}>
+                      Next Scheduled Duty ·{' '}
+                      {new Date(nextAssignment.event!.event_date).toLocaleDateString('en-GB', {
+                        weekday: 'short',
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric'
+                      })}
+                    </span>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#4338ca' }}>
+                      {nextAssignment.shift.role_label || currentUser?.role_title || 'Service Crew'}
+                    </span>
+                  </div>
+
+                  <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a', marginBottom: '0.35rem' }}>
+                    {nextAssignment.event?.title}
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '0.85rem',
+                      fontSize: '0.84rem',
+                      color: '#334155',
+                      marginBottom: '0.75rem',
+                      fontVariantNumeric: 'tabular-nums'
+                    }}
+                  >
+                    <span>📍 {nextAssignment.event?.venue || 'Venue TBD'}</span>
+                    <span>·</span>
+                    <span>
+                      ⏰{' '}
+                      {nextAssignment.shift.starts_at
+                        ? nextAssignment.shift.starts_at.slice(11, 16)
+                        : nextAssignment.event?.start_time || 'On Call'}
+                      {nextAssignment.shift.ends_at ? ` – ${nextAssignment.shift.ends_at.slice(11, 16)}` : ''}
+                    </span>
+                    <span>·</span>
+                    <span>👥 {nextAssignment.event?.guest_count || 0} Pax</span>
+                  </div>
+
+                  {nextAssignment.shift.duty_note && (
+                    <div
+                      style={{
+                        fontSize: '0.8rem',
+                        color: '#475569',
+                        background: '#ffffff',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '7px',
+                        padding: '0.5rem 0.75rem',
+                        marginBottom: '0.75rem'
+                      }}
+                    >
+                      <strong>Duty Note:</strong> {nextAssignment.shift.duty_note}
+                    </div>
+                  )}
+
+                  {nextAssignment.event?.venue && (
                     <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(nextAssignment.event.venue)}`}
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                        nextAssignment.event.venue
+                      )}`}
                       target="_blank"
                       rel="noreferrer"
                       className="btn btn-primary btn-sm"
                       style={{
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '0.4rem',
-                        background: '#7c3aed',
-                        borderColor: '#7c3aed',
-                        fontWeight: 600
+                        gap: '0.35rem',
+                        background: '#6d28d9',
+                        borderColor: '#6d28d9',
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap'
                       }}
                     >
-                      🗺️ Open Location in Google Maps &rarr;
+                      🗺️ Open Venue in Google Maps
                     </a>
+                  )}
+                </div>
+
+                {otherUpcoming.length > 0 && (
+                  <div className="data-table-container">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Date &amp; Time</th>
+                          <th>Event &amp; Venue</th>
+                          <th>Role</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {otherUpcoming.map((item) => (
+                          <tr key={item.shift.id}>
+                            <td style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                              <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                                {new Date(item.event!.event_date).toLocaleDateString('en-GB', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric'
+                                })}
+                              </div>
+                              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                {(item.shift.starts_at || '').slice(11, 16) || item.event?.start_time || '—'}
+                                {item.shift.ends_at ? ` – ${item.shift.ends_at.slice(11, 16)}` : ''}
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ fontWeight: 700, color: '#0f172a' }}>{item.event?.title}</div>
+                              <div style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                                📍 {item.event?.venue || 'Venue TBD'}
+                              </div>
+                            </td>
+                            <td style={{ fontWeight: 600, color: '#6d28d9', fontSize: '0.82rem' }}>
+                              {item.shift.role_label || currentUser?.role_title || 'Service Crew'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
-
-              {/* Date & Duty Particulars Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
-                <div style={{ background: '#ffffff', padding: '0.85rem', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
-                    Event Date
-                  </div>
-                  <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0f172a', marginTop: '0.2rem' }}>
-                    📅 {new Date(nextAssignment.event!.event_date).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
-                  </div>
-                </div>
-
-                <div style={{ background: '#ffffff', padding: '0.85rem', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
-                    Duty Reporting Timing
-                  </div>
-                  <div style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a', marginTop: '0.2rem' }}>
-                    ⏰ {nextAssignment.shift.starts_at ? nextAssignment.shift.starts_at.slice(11, 16) : (nextAssignment.event?.start_time || 'Report on call')}
-                    {nextAssignment.shift.ends_at && ` - ${nextAssignment.shift.ends_at.slice(11, 16)}`}
-                  </div>
-                </div>
-
-                <div style={{ background: '#ffffff', padding: '0.85rem', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
-                    Your Assigned Role
-                  </div>
-                  <div style={{ fontSize: '1rem', fontWeight: 700, color: '#7c3aed', marginTop: '0.2rem' }}>
-                    🧑‍🍳 {nextAssignment.shift.role_label || currentUser?.role_title || 'Service Crew'}
-                  </div>
-                </div>
-
-                <div style={{ background: '#ffffff', padding: '0.85rem', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
-                    Expected Guests
-                  </div>
-                  <div style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a', marginTop: '0.2rem' }}>
-                    👥 {nextAssignment.event?.guest_count} Pax
-                  </div>
-                </div>
-              </div>
-
-              {nextAssignment.event?.notes && (
-                <div style={{ marginTop: '1rem', padding: '0.85rem', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1', fontSize: '0.85rem', color: '#475569' }}>
-                  <strong>Special Instructions:</strong> {nextAssignment.event.notes}
-                </div>
-              )}
-            </div>
-
-            {/* Other Upcoming Assignments if any */}
-            {otherAssignments.length > 0 && (
-              <div className="card" style={{ marginBottom: '1.5rem' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '0.75rem', color: '#0f172a' }}>
-                  📋 Other Upcoming Assigned Functions ({otherAssignments.length})
-                </h3>
-                <div className="data-table-container">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Event Title</th>
-                        <th>Venue / Location</th>
-                        <th>Assigned Duty</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {otherAssignments.map((item, idx) => (
-                        <tr key={idx}>
-                          <td style={{ fontWeight: 600 }}>
-                            {new Date(item.event!.event_date).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </td>
-                          <td style={{ fontWeight: 600, color: '#0f172a' }}>{item.event?.title}</td>
-                          <td>📍 {item.event?.venue}</td>
-                          <td>
-                            <span className="badge" style={{ background: '#f3e8ff', color: '#7c3aed', fontWeight: 600 }}>
-                              {item.shift.role_label || 'Service Crew'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+            ) : (
+              <div
+                style={{
+                  padding: '1.35rem',
+                  textAlign: 'center',
+                  background: '#f8fafc',
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0',
+                  color: '#64748b',
+                  fontSize: '0.86rem'
+                }}
+              >
+                നിലവിൽ പുതിയ വരാനിരിക്കുന്ന പരിപാടികൾ ഒന്നും അസൈൻ ചെയ്തിട്ടില്ല · No upcoming events assigned right now.
               </div>
             )}
           </div>
-        ) : (
-          <div className="card" style={{ textAlign: 'center', padding: '2.5rem 1.5rem', marginBottom: '1.5rem' }}>
-            <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📅</div>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.4rem' }}>
-              No Upcoming Catering Functions Assigned Yet
-            </h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', maxWidth: '460px', margin: '0 auto' }}>
-              You do not have any upcoming catering functions currently scheduled. Check your salary statement and payment receipts below.
-            </p>
-          </div>
         )}
 
-        {/* STAFF SALARY RECEIVED & DUTY EARNINGS HISTORY */}
-        <div className="grid-2">
-          <div className="card">
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '0.75rem', color: '#0f172a' }}>
-              💸 Salary Payments Received ({salarySummary.paymentRecords.length})
-            </h3>
-            {salarySummary.paymentRecords.length === 0 ? (
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                No salary payouts recorded yet.
-              </p>
+        {/* SECTION 2: EVENTS ATTENDED SO FAR (ഇതുവരെ പങ്കെടുത്ത പരിപാടികൾ) */}
+        {showAttendedSection && (
+          <div
+            className="card"
+            style={{
+              borderTop: '3px solid #059669',
+              marginBottom: '1.25rem',
+              padding: '1.25rem'
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                marginBottom: '0.9rem'
+              }}
+            >
+              <div>
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                  ✅ ഇതുവരെ പങ്കെടുത്ത പരിപാടികൾ · Events Attended So Far ({attendedDuties.length})
+                </h2>
+                <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.15rem 0 0 0' }}>
+                  Completed catering functions, hours worked, bonuses, and wages earned
+                </p>
+              </div>
+              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#047857', fontVariantNumeric: 'tabular-nums' }}>
+                Total Worked: {salarySummary.totalShiftHours} hrs
+              </div>
+            </div>
+
+            {attendedDuties.length === 0 && salarySummary.earningRecords.length === 0 ? (
+              <div
+                style={{
+                  padding: '1.35rem',
+                  textAlign: 'center',
+                  background: '#f8fafc',
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0',
+                  color: '#64748b',
+                  fontSize: '0.86rem'
+                }}
+              >
+                ഇതുവരെ പൂർത്തിയായ ഡ്യൂട്ടികൾ രേഖപ്പെടുത്തിയിട്ടില്ല · No attended past events recorded yet.
+              </div>
             ) : (
               <div className="data-table-container">
                 <table className="data-table">
                   <thead>
                     <tr>
                       <th>Date</th>
-                      <th>Method &amp; Note</th>
-                      <th style={{ textAlign: 'right' }}>Received</th>
+                      <th>Event &amp; Venue</th>
+                      <th>Role &amp; Hours</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: 'right' }}>Earned (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attendedDuties.map((si) => (
+                      <tr key={si.shift.id}>
+                        <td style={{ fontSize: '0.82rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                          {si.event?.event_date
+                            ? new Date(si.event.event_date).toLocaleDateString('en-GB', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric'
+                              })
+                            : '—'}
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.86rem' }}>
+                            {si.event?.title || 'Event Shift'}
+                          </div>
+                          {si.event?.venue && (
+                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📍 {si.event.venue}</div>
+                          )}
+                        </td>
+                        <td style={{ fontSize: '0.82rem', fontVariantNumeric: 'tabular-nums' }}>
+                          <div style={{ fontWeight: 600 }}>{si.shift.role_label || currentUser?.role_title || 'Crew'}</div>
+                          <div style={{ fontSize: '0.74rem', color: '#64748b' }}>{si.hours} hrs</div>
+                        </td>
+                        <td style={{ fontSize: '0.78rem', fontWeight: 700 }}>
+                          {si.isAttended ? (
+                            <span style={{ color: '#059669' }}>✓ Attended</span>
+                          ) : (
+                            <span style={{ color: '#b45309' }}>⏳ Attendance Pending</span>
+                          )}
+                        </td>
+                        <td
+                          style={{
+                            textAlign: 'right',
+                            fontWeight: 700,
+                            fontVariantNumeric: 'tabular-nums',
+                            color: si.isAttended ? '#059669' : '#64748b'
+                          }}
+                        >
+                          {si.isAttended ? `₹${si.earnedAmount.toLocaleString('en-IN')}` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                    {salarySummary.earningRecords.map((er) => (
+                      <tr key={er.id}>
+                        <td style={{ fontSize: '0.82rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                          {new Date(er.recorded_at).toLocaleDateString('en-GB', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric'
+                          })}
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 700, color: '#1d4ed8', fontSize: '0.86rem' }}>{er.method}</div>
+                          {er.note && <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{er.note}</div>}
+                        </td>
+                        <td style={{ fontSize: '0.8rem', color: '#64748b' }}>Allowance / Bonus</td>
+                        <td style={{ fontSize: '0.78rem', fontWeight: 700, color: '#1d4ed8' }}>+ Bonus</td>
+                        <td
+                          style={{
+                            textAlign: 'right',
+                            fontWeight: 700,
+                            color: '#1d4ed8',
+                            fontVariantNumeric: 'tabular-nums'
+                          }}
+                        >
+                          ₹{er.amount.toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SECTION 3: SALARY PAYMENTS RECEIVED (ലഭിച്ച ശമ്പള വിവരങ്ങൾ) */}
+        {showPaymentsSection && (
+          <div
+            className="card"
+            style={{
+              borderTop: '3px solid #2563eb',
+              padding: '1.25rem'
+            }}
+          >
+            <h2 style={{ fontSize: '1.08rem', fontWeight: 800, margin: '0 0 0.85rem 0', color: '#0f172a' }}>
+              💸 ലഭിച്ച ശമ്പള വിവരങ്ങൾ · Salary Payments Received ({salarySummary.paymentRecords.length})
+            </h2>
+            {salarySummary.paymentRecords.length === 0 ? (
+              <div
+                style={{
+                  padding: '1.25rem',
+                  textAlign: 'center',
+                  background: '#f8fafc',
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0',
+                  color: '#64748b',
+                  fontSize: '0.86rem'
+                }}
+              >
+                No salary payouts recorded yet.
+              </div>
+            ) : (
+              <div className="data-table-container">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Payment Method &amp; Note</th>
+                      <th style={{ textAlign: 'right' }}>Amount Received (₹)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {salarySummary.paymentRecords.map((p) => (
                       <tr key={p.id}>
-                        <td style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+                        <td style={{ fontSize: '0.82rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
                           {new Date(p.recorded_at).toLocaleDateString('en-GB', {
-                            day: 'numeric',
+                            day: '2-digit',
                             month: 'short',
                             year: 'numeric'
                           })}
                         </td>
-                        <td style={{ fontSize: '0.82rem' }}>
-                          <div style={{ fontWeight: 600 }}>{p.method}</div>
-                          {p.note && <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{p.note}</div>}
+                        <td style={{ fontSize: '0.84rem' }}>
+                          <div style={{ fontWeight: 600, color: '#0f172a' }}>{p.method}</div>
+                          {p.note && <div style={{ color: '#64748b', fontSize: '0.75rem' }}>{p.note}</div>}
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#059669' }}>
+                        <td
+                          style={{
+                            textAlign: 'right',
+                            fontWeight: 700,
+                            color: '#059669',
+                            fontVariantNumeric: 'tabular-nums'
+                          }}
+                        >
                           ₹{p.amount.toLocaleString('en-IN')}
                         </td>
                       </tr>
@@ -468,97 +762,8 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
+        )}
 
-          <div className="card">
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '0.75rem', color: '#0f172a' }}>
-              🧑‍🍳 Duty Attendance &amp; Salary Earned ({salarySummary.shiftItems.length + salarySummary.earningRecords.length})
-            </h3>
-            {salarySummary.shiftItems.length === 0 && salarySummary.earningRecords.length === 0 ? (
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                No duty earnings recorded yet.
-              </p>
-            ) : (
-              <div className="data-table-container">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Function / Duty</th>
-                      <th>Attendance</th>
-                      <th style={{ textAlign: 'right' }}>Earned</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {salarySummary.earningRecords.map((er) => (
-                      <tr key={er.id}>
-                        <td style={{ fontSize: '0.82rem' }}>
-                          {new Date(er.recorded_at).toLocaleDateString('en-GB', {
-                            day: 'numeric',
-                            month: 'short'
-                          })}
-                        </td>
-                        <td style={{ fontSize: '0.82rem' }}>
-                          <div style={{ fontWeight: 600 }}>{er.method}</div>
-                          {er.note && <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{er.note}</div>}
-                        </td>
-                        <td>
-                          <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#2563eb' }}>
-                            Bonus / Allowance
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#2563eb' }}>
-                          ₹{er.amount.toLocaleString('en-IN')}
-                        </td>
-                      </tr>
-                    ))}
-                    {salarySummary.shiftItems.map((si) => (
-                      <tr key={si.shift.id}>
-                        <td style={{ fontSize: '0.82rem' }}>
-                          {si.event?.event_date
-                            ? new Date(si.event.event_date).toLocaleDateString('en-GB', {
-                                day: 'numeric',
-                                month: 'short'
-                              })
-                            : '—'}
-                        </td>
-                        <td style={{ fontSize: '0.82rem' }}>
-                          <div style={{ fontWeight: 600 }}>{si.event?.title || 'Event Shift'}</div>
-                          <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                            {si.hours} hrs ({si.shift.role_label || 'Crew'})
-                          </div>
-                        </td>
-                        <td>
-                          {si.attendanceStatus === 'present' ? (
-                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#15803d' }}>
-                              ✓ Present
-                            </span>
-                          ) : si.attendanceStatus === 'absent' ? (
-                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#dc2626' }}>
-                              ✕ Absent
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#b45309' }}>
-                              ⏳ Pending
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                          {si.isAttended ? (
-                            <span style={{ color: '#059669' }}>
-                              ₹{si.earnedAmount.toLocaleString('en-IN')}
-                            </span>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>—</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
         <ChangePasswordModal
           isOpen={isChangePasswordOpen}
           onClose={() => setIsChangePasswordOpen(false)}
@@ -863,11 +1068,34 @@ export default function DashboardPage() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <Link href="/invoices" className="btn btn-primary">
+            <Link href="/invoices" className="btn btn-primary" style={{ whiteSpace: 'nowrap' }}>
               🧾 Invoices &amp; Billing
             </Link>
-            <Link href="/events" className="btn btn-secondary">
-              📅 All Events &amp; Quotes
+            <Link
+              href="/staff"
+              className="btn btn-secondary"
+              style={{
+                background: '#f5f3ff',
+                borderColor: '#c4b5fd',
+                color: '#5b21b6',
+                fontWeight: 700,
+                whiteSpace: 'nowrap'
+              }}
+            >
+              💸 Pay Staff Salary
+            </Link>
+            <Link
+              href="/stock?tab=purchases"
+              className="btn btn-secondary"
+              style={{
+                background: '#ecfdf5',
+                borderColor: '#6ee7b7',
+                color: '#047857',
+                fontWeight: 700,
+                whiteSpace: 'nowrap'
+              }}
+            >
+              💳 Pay Vendor Bills
             </Link>
           </div>
         </div>
@@ -879,7 +1107,7 @@ export default function DashboardPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
           <div className="stats-card" style={{ borderTop: '3px solid #e11d48', background: 'linear-gradient(180deg, #fff1f2 0%, #ffffff 65%)' }}>
             <span className="stats-label" style={{ color: '#be123c' }}>Total Projected Sales</span>
-            <span className="stats-value" style={{ color: '#e11d48' }}>
+            <span className="stats-value" style={{ color: '#e11d48', fontVariantNumeric: 'tabular-nums' }}>
               ₹{totalSales.toLocaleString('en-IN')}
             </span>
             <span className="stats-sub">From {state.events.length} booked banquet functions</span>
@@ -887,17 +1115,17 @@ export default function DashboardPage() {
 
           <div className="stats-card" style={{ borderTop: '3px solid #059669', background: 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 65%)' }}>
             <span className="stats-label" style={{ color: '#047857' }}>Client Payments Received</span>
-            <span className="stats-value" style={{ color: '#059669' }}>
+            <span className="stats-value" style={{ color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
               ₹{totalPaid.toLocaleString('en-IN')}
             </span>
-            <span className="stats-sub">Invoiced: ₹{totalInvoiced.toLocaleString('en-IN')}</span>
+            <span className="stats-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>Invoiced: ₹{totalInvoiced.toLocaleString('en-IN')}</span>
           </div>
 
           <div className="stats-card" style={{ borderTop: '3px solid #d97706', background: 'linear-gradient(180deg, #fffbeb 0%, #ffffff 65%)' }}>
             <span className="stats-label" style={{ color: '#b45309' }}>Receivables from Clients</span>
             <span
               className="stats-value"
-              style={{ color: totalPending > 0 ? '#dc2626' : 'var(--text-main)' }}
+              style={{ color: totalPending > 0 ? '#dc2626' : 'var(--text-main)', fontVariantNumeric: 'tabular-nums' }}
             >
               ₹{totalPending.toLocaleString('en-IN')}
             </span>
@@ -908,12 +1136,15 @@ export default function DashboardPage() {
             <span className="stats-label" style={{ color: '#b91c1c' }}>Vendor Dues</span>
             <span
               className="stats-value"
-              style={{ color: totalVendorDues > 0 ? '#dc2626' : 'var(--success)' }}
+              style={{ color: totalVendorDues > 0 ? '#dc2626' : 'var(--success)', fontVariantNumeric: 'tabular-nums' }}
             >
               ₹{totalVendorDues.toLocaleString('en-IN')}
             </span>
-            <span className="stats-sub">
-              Purchases: ₹{totalStockPurchases.toLocaleString('en-IN')} &bull; Paid: ₹{totalVendorPaid.toLocaleString('en-IN')}
+            <span className="stats-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              Paid: ₹{totalVendorPaid.toLocaleString('en-IN')} ·{' '}
+              <Link href="/stock?tab=purchases" style={{ color: '#047857', fontWeight: 700, textDecoration: 'underline' }}>
+                Pay Vendors &rarr;
+              </Link>
             </span>
           </div>
 
@@ -921,14 +1152,14 @@ export default function DashboardPage() {
             <span className="stats-label" style={{ color: '#6d28d9' }}>Staff Salary Payable</span>
             <span
               className="stats-value"
-              style={{ color: totalStaffSalaryPayable > 0 ? '#dc2626' : 'var(--success)' }}
+              style={{ color: totalStaffSalaryPayable > 0 ? '#dc2626' : 'var(--success)', fontVariantNumeric: 'tabular-nums' }}
             >
               ₹{totalStaffSalaryPayable.toLocaleString('en-IN')}
             </span>
-            <span className="stats-sub">
-              Paid: ₹{totalStaffSalaryPaid.toLocaleString('en-IN')} &bull;{' '}
-              <Link href="/staff" style={{ color: 'var(--primary)', textDecoration: 'underline' }}>
-                Manage &rarr;
+            <span className="stats-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              Paid: ₹{totalStaffSalaryPaid.toLocaleString('en-IN')} ·{' '}
+              <Link href="/staff" style={{ color: '#6d28d9', fontWeight: 700, textDecoration: 'underline' }}>
+                Pay Salary &rarr;
               </Link>
             </span>
           </div>

@@ -3033,6 +3033,125 @@ class DataStore {
     return { success: true };
   }
 
+  // Self-service Staff Forgot Password Reset (verifies registered phone + full name)
+  public resetStaffPasswordSelfService(
+    phone: string,
+    fullName: string,
+    newPassword: string
+  ): { success: boolean; error?: string; staffName?: string; loginPhone?: string } {
+    const cleanDigits = (s: string) => (s || '').replace(/\D/g, '').replace(/^91/, '');
+    const normalizeName = (s: string) => (s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+    const phoneDigits = cleanDigits(phone);
+    const inputName = normalizeName(fullName);
+    const nextPass = (newPassword || '').trim();
+
+    if (phoneDigits.length < 7) {
+      return { success: false, error: 'Please enter your registered mobile phone number.' };
+    }
+    if (!inputName) {
+      return { success: false, error: 'Please enter your registered full name.' };
+    }
+    if (!nextPass || nextPass.length < 4) {
+      return { success: false, error: 'New password must be at least 4 characters long.' };
+    }
+
+    const staffMember = this.state.staff.find((s) => {
+      const sDigits = cleanDigits(s.phone);
+      return (
+        (phoneDigits.length >= 7 && sDigits === phoneDigits) ||
+        (s.phone && s.phone.replace(/\s+/g, '') === (phone || '').replace(/\s+/g, ''))
+      );
+    });
+
+    if (!staffMember) {
+      return {
+        success: false,
+        error: 'No staff account found with this mobile number. Please check your number or contact the Manager.'
+      };
+    }
+
+    const storedName = normalizeName(staffMember.name);
+    if (storedName !== inputName) {
+      return {
+        success: false,
+        error: 'Registered name does not match this mobile number. Please enter your exact registered name.'
+      };
+    }
+
+    const updatedStaff: StaffMember = { ...staffMember, password: nextPass };
+    this.state.staff = this.state.staff.map((s) =>
+      s.id === staffMember.id ? updatedStaff : s
+    );
+
+    this.logMutation({
+      entity_type: 'staff',
+      entity_id: staffMember.id,
+      action: 'update',
+      summary: `Staff member "${staffMember.name}" reset forgotten password`,
+      details: `Staff Phone: ${staffMember.phone}`
+    });
+    this.save();
+
+    this.enqueueSqlOperations('Self-Service Reset Staff Password', [
+      {
+        type: 'upsert',
+        table: 'staff_members',
+        values: this.toStaffSqlRow(updatedStaff),
+        onConflict: 'id'
+      }
+    ]);
+    this.flushPendingSqlWrites();
+
+    return {
+      success: true,
+      staffName: staffMember.name,
+      loginPhone: staffMember.phone
+    };
+  }
+
+  // Manager / Owner 1-click Staff Password Reset
+  public adminResetStaffPassword(
+    staffId: string,
+    newPassword: string
+  ): { success: boolean; error?: string } {
+    const nextPass = (newPassword || '').trim();
+    if (!nextPass || nextPass.length < 4) {
+      return { success: false, error: 'New password must be at least 4 characters long.' };
+    }
+
+    const staffMember = this.state.staff.find((s) => s.id === staffId);
+    if (!staffMember) {
+      return { success: false, error: 'Staff member not found.' };
+    }
+
+    const updatedStaff: StaffMember = { ...staffMember, password: nextPass };
+    this.state.staff = this.state.staff.map((s) =>
+      s.id === staffMember.id ? updatedStaff : s
+    );
+
+    this.logMutation({
+      entity_type: 'staff',
+      entity_id: staffMember.id,
+      action: 'update',
+      summary: `Reset login password for staff "${staffMember.name}"`,
+      details: `Staff Phone: ${staffMember.phone}`
+    });
+    this.save();
+
+    this.enqueueSqlOperations('Admin Reset Staff Password', [
+      {
+        type: 'upsert',
+        table: 'staff_members',
+        values: this.toStaffSqlRow(updatedStaff),
+        onConflict: 'id'
+      }
+    ]);
+    this.flushPendingSqlWrites();
+
+    return { success: true };
+  }
+
   public addProfile(profileData: {
     full_name: string;
     username: string;
