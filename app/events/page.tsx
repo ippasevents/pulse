@@ -1,25 +1,64 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { store } from '@/lib/store';
 import { EventRecord, EventStatus } from '@/lib/types';
-import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import QuotationWhatsAppModal from '@/components/QuotationWhatsAppModal';
+
+type EventsTimelineView = 'split' | 'upcoming' | 'previous';
+
+function getLocalTodayIso(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function formatReadableDate(isoDate: string): string {
+  if (!isoDate) return '—';
+  const parts = isoDate.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return isoDate;
+  const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+  return dt.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+function getRelativeDayLabel(isoDate: string, todayIso: string): string {
+  if (!isoDate || !todayIso) return '';
+  const [y1, m1, d1] = isoDate.split('-').map(Number);
+  const [y2, m2, d2] = todayIso.split('-').map(Number);
+  if ([y1, m1, d1, y2, m2, d2].some(isNaN)) return '';
+  const target = new Date(y1, m1 - 1, d1).getTime();
+  const today = new Date(y2, m2 - 1, d2).getTime();
+  const diffDays = Math.round((target - today) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays > 1 && diffDays <= 30) return `In ${diffDays} days`;
+  if (diffDays === -1) return 'Yesterday';
+  if (diffDays < -1) return `${Math.abs(diffDays)} days ago`;
+  return '';
+}
 
 export default function EventsPage() {
   const [state, setState] = useState(store.getState());
+  const [timelineView, setTimelineView] = useState<EventsTimelineView>('split');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedEventForQuoteWA, setSelectedEventForQuoteWA] = useState<EventRecord | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [todayIso, setTodayIso] = useState<string>(() => getLocalTodayIso());
 
   // New Event Form State
   const [formData, setFormData] = useState({
     client_id: '',
     title: '',
-    event_date: new Date().toISOString().split('T')[0],
+    event_date: getLocalTodayIso(),
     start_time: '18:00',
     end_time: '22:00',
     venue: '',
@@ -47,6 +86,7 @@ export default function EventsPage() {
   ];
 
   useEffect(() => {
+    setTodayIso(getLocalTodayIso());
     const unsub = store.subscribe(() => {
       setState(store.getState());
     });
@@ -56,19 +96,54 @@ export default function EventsPage() {
   const role = state.currentRole;
   const canEdit = role === 'owner' || role === 'manager' || role === 'super_admin';
   const isFinance = role === 'owner' || role === 'accountant' || role === 'super_admin';
+  const isOwnerView = role === 'owner' || role === 'super_admin';
 
-  const filteredEvents = state.events.filter((evt) => {
-    const matchesStatus = statusFilter === 'all' || evt.status === statusFilter;
-    const client = state.clients.find((c) => c.id === evt.client_id);
-    const quoteNo = store.getQuotationNumber(evt);
-    const q = search.toLowerCase();
-    const matchesSearch =
-      evt.title.toLowerCase().includes(q) ||
-      quoteNo.toLowerCase().includes(q) ||
-      (evt.venue && evt.venue.toLowerCase().includes(q)) ||
-      (client && client.name.toLowerCase().includes(q));
-    return matchesStatus && matchesSearch;
-  });
+  // Filter events by search & status first, then cleanly split into Upcoming vs Previous
+  const { upcomingEvents, previousEvents, allUpcomingCount, allConfirmedUpcomingCount, allPreviousCount, totalUpcomingGuests } =
+    useMemo(() => {
+      const q = search.trim().toLowerCase();
+
+      const isUpcomingRecord = (evt: EventRecord) =>
+        evt.status !== 'completed' &&
+        evt.status !== 'cancelled' &&
+        evt.event_date >= todayIso;
+
+      const rawUpcoming = state.events.filter(isUpcomingRecord);
+      const rawPrevious = state.events.filter((e) => !isUpcomingRecord(e));
+
+      const matchesFilters = (evt: EventRecord) => {
+        const matchesStatus = statusFilter === 'all' || evt.status === statusFilter;
+        if (!matchesStatus) return false;
+        if (!q) return true;
+        const client = state.clients.find((c) => c.id === evt.client_id);
+        const quoteNo = store.getQuotationNumber(evt);
+        return (
+          evt.title.toLowerCase().includes(q) ||
+          quoteNo.toLowerCase().includes(q) ||
+          Boolean(evt.venue && evt.venue.toLowerCase().includes(q)) ||
+          Boolean(client && client.name.toLowerCase().includes(q))
+        );
+      };
+
+      const upcoming = rawUpcoming
+        .filter(matchesFilters)
+        .sort((a, b) => a.event_date.localeCompare(b.event_date));
+
+      const previous = rawPrevious
+        .filter(matchesFilters)
+        .sort((a, b) => b.event_date.localeCompare(a.event_date));
+
+      return {
+        upcomingEvents: upcoming,
+        previousEvents: previous,
+        allUpcomingCount: rawUpcoming.length,
+        allConfirmedUpcomingCount: rawUpcoming.filter((e) => e.status === 'confirmed').length,
+        allPreviousCount: rawPrevious.length,
+        totalUpcomingGuests: rawUpcoming.reduce((sum, e) => sum + (e.guest_count || 0), 0)
+      };
+    }, [state.events, state.clients, search, statusFilter, todayIso]);
+
+  const nextUpcomingEvent = upcomingEvents[0] || null;
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,7 +170,7 @@ export default function EventsPage() {
       targetClientId = createdClient.id;
     } else {
       if (!targetClientId) {
-        setFormError('Please select a client from the list or switch to "+ Add New Client".');
+        setFormError('Please select a client from the list or switch to "+ Register New Client".');
         return;
       }
     }
@@ -109,11 +184,10 @@ export default function EventsPage() {
     setIsModalOpen(false);
     setIsNewClientMode(false);
     setNewClientData({ name: '', phone: '', email: '', company: '', notes: '' });
-    // Reset form
     setFormData({
       client_id: state.clients[0]?.id || '',
       title: '',
-      event_date: new Date().toISOString().split('T')[0],
+      event_date: getLocalTodayIso(),
       start_time: '18:00',
       end_time: '22:00',
       venue: '',
@@ -124,194 +198,527 @@ export default function EventsPage() {
     });
   };
 
-  return (
-    <div>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Catering Events &amp; Bookings</h1>
-          <p className="page-subtitle">
-            Manage inquiry pipeline, confirmed banquet functions, and quote packages.
-          </p>
+  const renderEventsTable = (eventsList: EventRecord[], sectionKind: 'upcoming' | 'previous') => {
+    if (eventsList.length === 0) {
+      return (
+        <div
+          style={{
+            padding: '2.2rem 1.25rem',
+            textAlign: 'center',
+            color: '#64748b',
+            fontSize: '0.88rem'
+          }}
+        >
+          {sectionKind === 'upcoming'
+            ? 'വരാനിരിക്കുന്ന ഇവന്റുകൾ നിലവിലില്ല (No upcoming catering bookings match your filter).'
+            : 'കഴിഞ്ഞുപോയ ഇവന്റുകൾ കണ്ടെത്താനായില്ല (No previous events match your filter).'}
         </div>
-        <div>
-          {canEdit && (
-            <button
-              onClick={() => {
-                setFormData((prev) => ({
-                  ...prev,
-                  client_id: state.clients[0]?.id || ''
-                }));
-                setIsModalOpen(true);
-              }}
-              className="btn btn-primary"
-            >
-              + Create New Event
-            </button>
-          )}
-        </div>
-      </div>
+      );
+    }
 
-      {/* Filter and Search Bar */}
-      <div className="card" style={{ marginBottom: '1.25rem', padding: '1rem' }}>
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ flex: 1, minWidth: '240px' }}>
-            <input
-              type="text"
-              placeholder="Search by event title, venue, client name..."
-              className="form-control"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Status:</span>
-            <select
-              className="form-control"
-              style={{ width: 'auto' }}
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="all">All Statuses</option>
-              <option value="inquiry">Inquiry</option>
-              <option value="quoted">Quoted</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Events Table */}
-      <div className="data-table-container">
+    return (
+      <div style={{ overflowX: 'auto' }}>
         <table className="data-table">
           <thead>
             <tr>
-              <th>Event Title</th>
-              <th>Client</th>
-              <th>Date &amp; Schedule</th>
-              <th>Venue</th>
-              <th>Guests</th>
+              <th>Date &amp; Time</th>
+              <th>Event &amp; Venue</th>
+              <th>Client &amp; Guests</th>
               <th>Status</th>
-              <th style={{ textAlign: 'right' }}>Total Quote</th>
-              {role !== 'staff' && <th style={{ textAlign: 'right' }}>Total Spent (incl. Allowances)</th>}
-              <th style={{ textAlign: 'center' }}>Action</th>
+              <th style={{ textAlign: 'right' }}>
+                {sectionKind === 'upcoming' ? 'Quote / Amount' : 'Bill & Expenditure'}
+              </th>
+              <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filteredEvents.length === 0 ? (
-              <tr>
-                <td colSpan={role !== 'staff' ? 9 : 8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                  No catering events matching criteria.
-                </td>
-              </tr>
-            ) : (
-              filteredEvents.map((evt) => {
-                const client = state.clients.find((c) => c.id === evt.client_id);
-                const { grandTotal, menuTotal } = store.getEventTotal(evt.id);
-                const displayTotal = isFinance ? grandTotal : menuTotal;
-                const finSummary = role !== 'staff' ? store.getEventFinancialSummary(evt.id) : null;
-                const isOwnerView = role === 'owner' || role === 'super_admin';
+            {eventsList.map((evt) => {
+              const client = state.clients.find((c) => c.id === evt.client_id);
+              const { grandTotal, menuTotal } = store.getEventTotal(evt.id);
+              const displayTotal = isFinance ? grandTotal : menuTotal;
+              const finSummary =
+                role !== 'staff' ? store.getEventFinancialSummary(evt.id) : null;
+              const quoteNo = store.getQuotationNumber(evt);
+              const eventInvoice = state.invoices.find(
+                (i) => i.event_id === evt.id && i.status !== 'void'
+              );
+              const relDay = getRelativeDayLabel(evt.event_date, todayIso);
 
-                const quoteNo = store.getQuotationNumber(evt);
-                const eventInvoice = state.invoices.find((i) => i.event_id === evt.id && i.status !== 'void');
-
-                return (
-                  <tr key={evt.id}>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{evt.title}</div>
-                      <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.15rem' }}>
-                        <span className="badge" style={{ background: '#eff6ff', color: '#1d4ed8', fontSize: '0.68rem', fontWeight: 700 }}>
-                          Quote #{quoteNo}
+              return (
+                <tr key={evt.id}>
+                  {/* 1. Date & Schedule */}
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <div
+                      className="tabular-nums"
+                      style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.88rem' }}
+                    >
+                      {formatReadableDate(evt.event_date)}
+                    </div>
+                    <div
+                      className="tabular-nums"
+                      style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.12rem' }}
+                    >
+                      {evt.start_time || '--:--'} – {evt.end_time || '--:--'}
+                      {relDay && (
+                        <span
+                          style={{
+                            marginLeft: '0.4rem',
+                            color:
+                              sectionKind === 'upcoming'
+                                ? relDay === 'Today' || relDay === 'Tomorrow'
+                                  ? '#be123c'
+                                  : '#4f46e5'
+                                : '#64748b',
+                            fontWeight: 700
+                          }}
+                        >
+                          &middot; {relDay}
                         </span>
-                        {eventInvoice && (
-                          <span className="badge" style={{ background: '#f0fdf4', color: '#15803d', fontSize: '0.68rem', fontWeight: 700 }}>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* 2. Event Title, Venue & Clean Reference Metadata */}
+                  <td>
+                    <Link
+                      href={`/events/${evt.id}`}
+                      style={{
+                        fontWeight: 700,
+                        color: '#0f172a',
+                        fontSize: '0.92rem',
+                        textDecoration: 'none'
+                      }}
+                    >
+                      {evt.title}
+                    </Link>
+                    <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: '0.15rem' }}>
+                      {evt.venue || 'Venue TBD'}
+                    </div>
+                    <div
+                      className="tabular-nums"
+                      style={{ fontSize: '0.73rem', color: '#64748b', marginTop: '0.15rem' }}
+                    >
+                      <span>Quote #{quoteNo}</span>
+                      {eventInvoice && (
+                        <>
+                          <span aria-hidden="true"> &middot; </span>
+                          <span style={{ color: '#047857', fontWeight: 600 }}>
                             Inv #{eventInvoice.invoice_number}
                           </span>
-                        )}
-                      </div>
-                      {evt.notes && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '0.15rem' }}>
-                          {evt.notes}
+                        </>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* 3. Client & Guest Count */}
+                  <td>
+                    <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '0.87rem' }}>
+                      {client ? client.name : 'Unknown Client'}
+                    </div>
+                    <div
+                      className="tabular-nums"
+                      style={{ fontSize: '0.76rem', color: '#64748b', marginTop: '0.12rem' }}
+                    >
+                      <strong style={{ color: '#334155' }}>{evt.guest_count} Guests</strong>
+                      {client?.phone ? ` · ${client.phone}` : ''}
+                    </div>
+                  </td>
+
+                  {/* 4. Status */}
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <span className={`badge badge-${evt.status}`}>{evt.status}</span>
+                  </td>
+
+                  {/* 5. Financials */}
+                  <td className="tabular-nums" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.92rem' }}>
+                      ₹{displayTotal.toLocaleString('en-IN')}
+                    </div>
+                    {role !== 'staff' &&
+                      finSummary &&
+                      (sectionKind === 'previous' || finSummary.totalExpenditure > 0) && (
+                        <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '0.12rem' }}>
+                          Spent: ₹{finSummary.totalExpenditure.toLocaleString('en-IN')}
+                          {isOwnerView && evt.status === 'completed' && (
+                            <span
+                              style={{
+                                marginLeft: '0.35rem',
+                                fontWeight: 700,
+                                color: finSummary.netProfit >= 0 ? '#059669' : '#dc2626'
+                              }}
+                            >
+                              &middot; {finSummary.netProfit >= 0 ? '+' : '-'}₹
+                              {Math.abs(finSummary.netProfit).toLocaleString('en-IN')}
+                            </span>
+                          )}
                         </div>
                       )}
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 500 }}>{client ? client.name : 'Unknown Client'}</div>
-                      {client?.phone && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{client.phone}</div>
-                      )}
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 500 }}>{evt.event_date}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        {evt.start_time || '--:--'} - {evt.end_time || '--:--'}
-                      </div>
-                    </td>
-                    <td>{evt.venue || 'TBD'}</td>
-                    <td style={{ fontWeight: 600 }}>{evt.guest_count} pax</td>
-                    <td>
-                      <span className={`badge badge-${evt.status}`}>{evt.status}</span>
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                      ₹{displayTotal.toLocaleString('en-IN')}
-                    </td>
-                    {role !== 'staff' && finSummary && (
-                      <td style={{ textAlign: 'right' }}>
-                        {evt.status === 'completed' || finSummary.totalExpenditure > 0 ? (
-                          <div>
-                            <div style={{ fontWeight: 700, color: '#0f172a' }}>
-                              ₹{finSummary.totalExpenditure.toLocaleString('en-IN')}
-                            </div>
-                            {isOwnerView && evt.status === 'completed' && (
-                              <div
-                                style={{
-                                  fontSize: '0.72rem',
-                                  fontWeight: 700,
-                                  color: finSummary.netProfit >= 0 ? '#059669' : '#dc2626'
-                                }}
-                              >
-                                {finSummary.netProfit >= 0 ? 'Profit' : 'Loss'}: ₹
-                                {Math.abs(finSummary.netProfit).toLocaleString('en-IN')}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>—</span>
-                        )}
-                      </td>
-                    )}
-                    <td style={{ textAlign: 'center' }}>
-                      <div style={{ display: 'inline-flex', gap: '0.35rem', flexWrap: 'wrap', justifyContent: 'center' }}>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
-                          title="Send Quotation directly to Client's WhatsApp"
-                          onClick={() => setSelectedEventForQuoteWA(evt)}
-                        >
-                          💬 Quote WA
-                        </button>
-                        <Link href={`/events/${evt.id}`} className="btn btn-secondary btn-sm">
-                          View Details &amp; Costs &rarr;
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
+                  </td>
+
+                  {/* 6. Clean Single-Line Actions */}
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        gap: '0.4rem',
+                        alignItems: 'center',
+                        justifyContent: 'flex-end'
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{
+                          background: '#ecfdf5',
+                          borderColor: '#a7f3d0',
+                          color: '#047857',
+                          fontWeight: 700,
+                          whiteSpace: 'nowrap'
+                        }}
+                        title="Send Quotation PDF + Text on WhatsApp"
+                        onClick={() => setSelectedEventForQuoteWA(evt)}
+                      >
+                        💬 Quote
+                      </button>
+                      <Link
+                        href={`/events/${evt.id}`}
+                        className="btn btn-secondary btn-sm"
+                        style={{ fontWeight: 700, whiteSpace: 'nowrap' }}
+                      >
+                        Open &rarr;
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
+    );
+  };
 
-      {/* Create Modal */}
+  return (
+    <div style={{ paddingBottom: '2rem' }}>
+      {/* Clean Page Header */}
+      <div className="page-header" style={{ marginBottom: '1.25rem' }}>
+        <div>
+          <h1 className="page-title">Catering Events &amp; Bookings</h1>
+          <p className="page-subtitle">
+            വരാനിരിക്കുന്ന ബുക്കിംഗുകളും (Upcoming) കഴിഞ്ഞുപോയ ഇവന്റുകളും (Previous) പ്രത്യേകം വേർതിരിച്ച് കൈകാര്യം ചെയ്യാം.
+          </p>
+        </div>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => {
+              setFormData((prev) => ({
+                ...prev,
+                client_id: state.clients[0]?.id || '',
+                event_date: getLocalTodayIso()
+              }));
+              setIsModalOpen(true);
+            }}
+            className="btn btn-primary"
+            style={{ whiteSpace: 'nowrap', fontWeight: 700 }}
+          >
+            + New Booking
+          </button>
+        )}
+      </div>
+
+      {/* Simplified 3-Card Colourful Summary Strip */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: '1rem',
+          marginBottom: '1.25rem'
+        }}
+      >
+        <div
+          className="stats-card"
+          style={{
+            borderTop: '3px solid #4f46e5',
+            background: 'linear-gradient(180deg, #eef2ff 0%, #ffffff 72%)'
+          }}
+        >
+          <span className="stats-label" style={{ color: '#4338ca' }}>
+            Upcoming Bookings (വരാനിരിക്കുന്നവ)
+          </span>
+          <span className="stats-value" style={{ color: '#312e81' }}>
+            {allUpcomingCount}
+          </span>
+          <span className="stats-sub">
+            Total {totalUpcomingGuests.toLocaleString('en-IN')} guests scheduled
+          </span>
+        </div>
+
+        <div
+          className="stats-card"
+          style={{
+            borderTop: '3px solid #10b981',
+            background: 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 72%)'
+          }}
+        >
+          <span className="stats-label" style={{ color: '#047857' }}>
+            Confirmed Functions
+          </span>
+          <span className="stats-value" style={{ color: '#065f46' }}>
+            {allConfirmedUpcomingCount}
+          </span>
+          <span className="stats-sub">
+            {nextUpcomingEvent
+              ? `Next: ${formatReadableDate(nextUpcomingEvent.event_date)} (${nextUpcomingEvent.guest_count} pax)`
+              : 'No upcoming dates scheduled'}
+          </span>
+        </div>
+
+        <div
+          className="stats-card"
+          style={{
+            borderTop: '3px solid #d97706',
+            background: 'linear-gradient(180deg, #fffbeb 0%, #ffffff 72%)'
+          }}
+        >
+          <span className="stats-label" style={{ color: '#b45309' }}>
+            Previous Events (കഴിഞ്ഞുപോയവ)
+          </span>
+          <span className="stats-value" style={{ color: '#92400e' }}>
+            {allPreviousCount}
+          </span>
+          <span className="stats-sub">
+            Completed &amp; past catering functions
+          </span>
+        </div>
+      </div>
+
+      {/* Unified Segmented View Switcher + Search & Status Filter */}
+      <div
+        className="card"
+        style={{
+          marginBottom: '1.35rem',
+          padding: '0.85rem 1rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '0.85rem',
+          flexWrap: 'wrap'
+        }}
+      >
+        {/* Interactive Timeline Segmented Controls */}
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.25rem',
+            padding: '0.25rem',
+            background: '#f1f5f9',
+            borderRadius: '10px',
+            flexWrap: 'wrap'
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setTimelineView('split')}
+            style={{
+              padding: '0.45rem 0.85rem',
+              fontSize: '0.81rem',
+              fontWeight: timelineView === 'split' ? 700 : 600,
+              borderRadius: '8px',
+              border: 'none',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              background: timelineView === 'split' ? '#ffffff' : 'transparent',
+              color: timelineView === 'split' ? '#0f172a' : '#475569',
+              boxShadow:
+                timelineView === 'split' ? '0 1px 3px rgba(15, 23, 42, 0.1)' : 'none'
+            }}
+          >
+            Split View (രണ്ടും വെവ്വേറെ)
+          </button>
+          <button
+            type="button"
+            onClick={() => setTimelineView('upcoming')}
+            style={{
+              padding: '0.45rem 0.85rem',
+              fontSize: '0.81rem',
+              fontWeight: timelineView === 'upcoming' ? 700 : 600,
+              borderRadius: '8px',
+              border: 'none',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              background: timelineView === 'upcoming' ? '#4f46e5' : 'transparent',
+              color: timelineView === 'upcoming' ? '#ffffff' : '#475569'
+            }}
+          >
+            Upcoming ({upcomingEvents.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setTimelineView('previous')}
+            style={{
+              padding: '0.45rem 0.85rem',
+              fontSize: '0.81rem',
+              fontWeight: timelineView === 'previous' ? 700 : 600,
+              borderRadius: '8px',
+              border: 'none',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              background: timelineView === 'previous' ? '#d97706' : 'transparent',
+              color: timelineView === 'previous' ? '#ffffff' : '#475569'
+            }}
+          >
+            Previous ({previousEvents.length})
+          </button>
+        </div>
+
+        {/* Search + Status Filter */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            flexWrap: 'wrap',
+            flex: '1 1 320px',
+            justifyContent: 'flex-end'
+          }}
+        >
+          <input
+            type="search"
+            placeholder="Search event, client, venue, quote #..."
+            className="form-control"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ maxWidth: '300px', padding: '0.46rem 0.75rem', fontSize: '0.85rem' }}
+          />
+          <select
+            className="form-control"
+            style={{ width: 'auto', padding: '0.46rem 0.75rem', fontSize: '0.85rem' }}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="all">All Statuses</option>
+            <option value="inquiry">Inquiry</option>
+            <option value="quoted">Quoted</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+      </div>
+
+      {/* SECTION 1: UPCOMING CATERING EVENTS & BOOKINGS */}
+      {(timelineView === 'split' || timelineView === 'upcoming') && (
+        <section
+          className="data-table-container"
+          style={{
+            borderTop: '4px solid #4f46e5',
+            marginBottom: timelineView === 'split' ? '1.75rem' : 0
+          }}
+        >
+          <div
+            style={{
+              padding: '0.95rem 1.15rem',
+              background: 'linear-gradient(90deg, #eef2ff 0%, #f8fafc 100%)',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.75rem',
+              flexWrap: 'wrap'
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  fontSize: '1.02rem',
+                  fontWeight: 800,
+                  color: '#1e1b4b',
+                  margin: 0
+                }}
+              >
+                📅 Upcoming Events &amp; Bookings (വരാനിരിക്കുന്ന ഇവന്റുകൾ)
+              </h2>
+              <p style={{ fontSize: '0.78rem', color: '#475569', margin: '0.15rem 0 0 0' }}>
+                Active inquiries, quotations, and confirmed upcoming functions sorted by nearest date.
+              </p>
+            </div>
+            <span
+              className="tabular-nums"
+              style={{
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                color: '#4338ca'
+              }}
+            >
+              {upcomingEvents.length} Upcoming
+            </span>
+          </div>
+
+          {renderEventsTable(upcomingEvents, 'upcoming')}
+        </section>
+      )}
+
+      {/* SECTION 2: PREVIOUS & COMPLETED EVENTS */}
+      {(timelineView === 'split' || timelineView === 'previous') && (
+        <section
+          className="data-table-container"
+          style={{
+            borderTop: '4px solid #d97706'
+          }}
+        >
+          <div
+            style={{
+              padding: '0.95rem 1.15rem',
+              background: 'linear-gradient(90deg, #fffbeb 0%, #f8fafc 100%)',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.75rem',
+              flexWrap: 'wrap'
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  fontSize: '1.02rem',
+                  fontWeight: 800,
+                  color: '#78350f',
+                  margin: 0
+                }}
+              >
+                🕘 Previous &amp; Completed Events (കഴിഞ്ഞുപോയ ഇവന്റുകൾ)
+              </h2>
+              <p style={{ fontSize: '0.78rem', color: '#475569', margin: '0.15rem 0 0 0' }}>
+                Past functions, completed settlements, and archived event records sorted most recent first.
+              </p>
+            </div>
+            <span
+              className="tabular-nums"
+              style={{
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                color: '#b45309'
+              }}
+            >
+              {previousEvents.length} Previous
+            </span>
+          </div>
+
+          {renderEventsTable(previousEvents, 'previous')}
+        </section>
+      )}
+
+      {/* Create New Booking Modal */}
       {isModalOpen && (
         <div className="modal-overlay" onClick={() => setIsModalOpen(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>New Catering Event Inquiry</h2>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>New Catering Booking / Inquiry</h2>
               <button
+                type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => setIsModalOpen(false)}
               >
@@ -335,24 +742,33 @@ export default function EventsPage() {
                   {formError}
                 </div>
               )}
+
               {/* Client Selection: Existing List vs Inline New Client */}
               <div style={{ marginBottom: '1.15rem' }}>
-                <div style={{ display: 'flex', gap: '0.4rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem', marginBottom: '0.75rem' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '0.4rem',
+                    borderBottom: '1px solid var(--border)',
+                    paddingBottom: '0.5rem',
+                    marginBottom: '0.75rem'
+                  }}
+                >
                   <button
                     type="button"
                     className={`btn btn-sm ${!isNewClientMode ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem', whiteSpace: 'nowrap' }}
                     onClick={() => {
                       setIsNewClientMode(false);
                       setFormError(null);
                     }}
                   >
-                    👥 Select Existing Client ({state.clients.length})
+                    👥 Existing Client ({state.clients.length})
                   </button>
                   <button
                     type="button"
                     className={`btn btn-sm ${isNewClientMode ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem', whiteSpace: 'nowrap' }}
                     onClick={() => {
                       setIsNewClientMode(true);
                       setFormError(null);
@@ -380,13 +796,29 @@ export default function EventsPage() {
                     </select>
                   </div>
                 ) : (
-                  <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.85rem' }}>
-                    <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a', marginBottom: '0.6rem' }}>
-                      ✨ New Client Details (Instant Registration)
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '8px',
+                      padding: '0.85rem'
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: '0.85rem',
+                        color: '#0f172a',
+                        marginBottom: '0.6rem'
+                      }}
+                    >
+                      New Client Details
                     </div>
                     <div className="grid-2">
                       <div className="form-group">
-                        <label className="form-label" style={{ fontSize: '0.78rem' }}>Client Full Name *</label>
+                        <label className="form-label" style={{ fontSize: '0.78rem' }}>
+                          Client Full Name *
+                        </label>
                         <input
                           type="text"
                           className="form-control"
@@ -397,7 +829,9 @@ export default function EventsPage() {
                         />
                       </div>
                       <div className="form-group">
-                        <label className="form-label" style={{ fontSize: '0.78rem' }}>Phone Number (WhatsApp)</label>
+                        <label className="form-label" style={{ fontSize: '0.78rem' }}>
+                          Phone Number (WhatsApp)
+                        </label>
                         <input
                           type="text"
                           className="form-control"
@@ -409,7 +843,9 @@ export default function EventsPage() {
                     </div>
                     <div className="grid-2">
                       <div className="form-group">
-                        <label className="form-label" style={{ fontSize: '0.78rem' }}>Company / Organization (Optional)</label>
+                        <label className="form-label" style={{ fontSize: '0.78rem' }}>
+                          Company / Organization (Optional)
+                        </label>
                         <input
                           type="text"
                           className="form-control"
@@ -419,7 +855,9 @@ export default function EventsPage() {
                         />
                       </div>
                       <div className="form-group">
-                        <label className="form-label" style={{ fontSize: '0.78rem' }}>Email Address (Optional)</label>
+                        <label className="form-label" style={{ fontSize: '0.78rem' }}>
+                          Email Address (Optional)
+                        </label>
                         <input
                           type="email"
                           className="form-control"
@@ -438,7 +876,7 @@ export default function EventsPage() {
                 <input
                   type="text"
                   className="form-control"
-                  placeholder="e.g. Annual Doctor Dinner, Wedding Reception"
+                  placeholder="e.g. Wedding Reception, Corporate Gala Dinner"
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   required
@@ -463,7 +901,9 @@ export default function EventsPage() {
                     min="1"
                     className="form-control"
                     value={formData.guest_count}
-                    onChange={(e) => setFormData({ ...formData, guest_count: parseInt(e.target.value) || 1 })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, guest_count: parseInt(e.target.value, 10) || 1 })
+                    }
                     required
                   />
                 </div>
@@ -526,11 +966,13 @@ export default function EventsPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Pipeline Status</label>
+                <label className="form-label">Booking Status</label>
                 <select
                   className="form-control"
                   value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value as EventStatus })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, status: e.target.value as EventStatus })
+                  }
                 >
                   <option value="inquiry">Inquiry</option>
                   <option value="quoted">Quoted</option>
@@ -543,7 +985,7 @@ export default function EventsPage() {
               <div className="form-group">
                 <label className="form-label">Notes &amp; Dietary Requirements</label>
                 <textarea
-                  rows={3}
+                  rows={2}
                   className="form-control"
                   placeholder="Special instructions, kitchen access, live counters..."
                   value={formData.notes}
@@ -551,7 +993,14 @@ export default function EventsPage() {
                 />
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '0.75rem',
+                  marginTop: '1.25rem'
+                }}
+              >
                 <button
                   type="button"
                   className="btn btn-secondary"
@@ -559,8 +1008,8 @@ export default function EventsPage() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  Create Event
+                <button type="submit" className="btn btn-primary" style={{ fontWeight: 700 }}>
+                  Save Booking
                 </button>
               </div>
             </form>

@@ -736,127 +736,237 @@ export default function EventDetailPage() {
         </div>
       )}
 
-      {/* Page Header */}
-      <div className="page-header" style={{ alignItems: 'flex-start' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-            <h1 className="page-title" style={{ margin: 0 }}>{event.title}</h1>
-            <span className={`badge badge-${event.status}`}>{event.status}</span>
-            <span
-              className="badge"
+      {/* Simplified Colourful Booking Overview Card (Separates Upcoming vs Previous Context) */}
+      {(() => {
+        const now = new Date();
+        const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const isUpcomingBooking =
+          event.status !== 'completed' &&
+          event.status !== 'cancelled' &&
+          event.event_date >= todayIso;
+        const accentHex = isUpcomingBooking ? '#4f46e5' : '#d97706';
+
+        return (
+          <div
+            className="card no-print"
+            style={{
+              borderTop: `4px solid ${accentHex}`,
+              padding: '1.15rem 1.35rem',
+              marginBottom: '1.15rem',
+              background: isUpcomingBooking
+                ? 'linear-gradient(180deg, #eef2ff 0%, #ffffff 55%)'
+                : 'linear-gradient(180deg, #fffbeb 0%, #ffffff 55%)'
+            }}
+          >
+            {/* Row 1: Booking Timeline Tag, Title & Clean Action Cluster */}
+            <div
               style={{
-                background: '#eff6ff',
-                color: '#1d4ed8',
-                border: '1px solid #bfdbfe',
-                fontWeight: 700,
-                fontSize: '0.75rem'
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '1rem',
+                flexWrap: 'wrap',
+                paddingBottom: '0.95rem',
+                borderBottom: '1px solid #e2e8f0'
               }}
             >
-              Quote #{quoteNumber}
-            </span>
-            {masterInvoice && (
-              <span
-                className="badge"
+              <div>
+                <div
+                  className="tabular-nums"
+                  style={{
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                    color: isUpcomingBooking ? '#4338ca' : '#b45309',
+                    marginBottom: '0.3rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    flexWrap: 'wrap'
+                  }}
+                >
+                  <span>
+                    {isUpcomingBooking
+                      ? '📅 UPCOMING BOOKING (വരാനിരിക്കുന്ന ഇവന്റ്)'
+                      : '🕘 PREVIOUS / COMPLETED EVENT (കഴിഞ്ഞുപോയ ഇവന്റ്)'}
+                  </span>
+                  <span aria-hidden="true">&middot;</span>
+                  <span style={{ color: '#475569' }}>Quote #{quoteNumber}</span>
+                  {masterInvoice && (
+                    <>
+                      <span aria-hidden="true">&middot;</span>
+                      <span style={{ color: '#047857' }}>
+                        {masterInvoice.status === 'paid'
+                          ? `Final Settlement #${masterInvoice.invoice_number}`
+                          : `Invoice #${masterInvoice.invoice_number}`}
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <h1 className="page-title" style={{ margin: 0, fontSize: '1.45rem' }}>
+                    {event.title}
+                  </h1>
+                  <span className={`badge badge-${event.status}`}>{event.status}</span>
+                </div>
+              </div>
+
+              {/* Clean Single-Line Action Bar */}
+              <div
                 style={{
-                  background: masterInvoice.status === 'paid' ? '#dcfce7' : '#fef3c7',
-                  color: masterInvoice.status === 'paid' ? '#15803d' : '#92400e',
-                  border: `1px solid ${masterInvoice.status === 'paid' ? '#86efac' : '#fde68a'}`,
-                  fontWeight: 700,
-                  fontSize: '0.75rem'
+                  display: 'flex',
+                  gap: '0.45rem',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  justifyContent: 'flex-end'
                 }}
               >
-                {masterInvoice.status === 'paid'
-                  ? `✓ Final Settlement #${masterInvoice.invoice_number}`
-                  : `Invoice #${masterInvoice.invoice_number}`}
-              </span>
-            )}
-          </div>
-          <p className="page-subtitle">
-            Client: <strong>{client?.name}</strong> {client?.company ? `(${client.company})` : ''} &bull; {event.event_date} &bull; {event.venue || 'No venue'} &bull; <strong>{event.guest_count} Guests</strong>
-          </p>
-        </div>
+                {(event.status === 'inquiry' || event.status === 'quoted' || !masterInvoice) &&
+                  canEditOps && (
+                    <button
+                      type="button"
+                      onClick={handleConfirmQuotation}
+                      className="btn btn-sm"
+                      style={{
+                        background: '#16a34a',
+                        color: '#ffffff',
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      ✓ Approve &amp; Create Invoice
+                    </button>
+                  )}
 
-        {/* Header Actions: Status progression, WhatsApp Quotation & A4 PDF Quotation */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
-            {(event.status === 'inquiry' || event.status === 'quoted' || !masterInvoice) && canEditOps && (
-              <button
-                type="button"
-                onClick={handleConfirmQuotation}
-                className="btn btn-sm"
-                style={{ background: '#16a34a', color: '#ffffff', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                title="Client approved quotation — convert same quotation into Invoice"
-              >
-                ✓ Approve Quote &amp; Convert to Invoice
-              </button>
-            )}
+                {event.status === 'confirmed' && canEditOps && (
+                  <button
+                    type="button"
+                    onClick={handleCompleteEvent}
+                    className="btn btn-sm"
+                    style={{
+                      background: '#2563eb',
+                      color: '#ffffff',
+                      fontWeight: 700,
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    🏁 Mark Completed
+                  </button>
+                )}
 
-            {event.status === 'confirmed' && canEditOps && (
-              <button
-                type="button"
-                onClick={handleCompleteEvent}
-                className="btn btn-sm"
-                style={{ background: '#2563eb', color: '#ffffff', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                title="Mark event completed and automatically deduct raw materials from inventory"
-              >
-                🏁 Mark Event Completed
-              </button>
-            )}
+                <button
+                  type="button"
+                  onClick={() => setIsQuoteWhatsAppOpen(true)}
+                  className="btn btn-sm"
+                  style={{
+                    background: '#ecfdf5',
+                    border: '1px solid #6ee7b7',
+                    color: '#047857',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  💬 Send Quote (PDF + Text)
+                </button>
 
-            {event.status === 'completed' && (
-              <span className="badge" style={{ background: '#dbeafe', color: '#1e40af', fontWeight: 700, padding: '0.35rem 0.65rem' }}>
-                ✓ Completed &amp; Stock Deducted
-              </span>
-            )}
+                <button
+                  type="button"
+                  onClick={() => setIsPrintQuoteOpen(true)}
+                  className="btn btn-primary btn-sm"
+                  style={{ fontWeight: 700, whiteSpace: 'nowrap' }}
+                >
+                  📄 Quote PDF
+                </button>
 
-            <button
-              type="button"
-              onClick={() => setIsQuoteWhatsAppOpen(true)}
-              className="btn btn-sm"
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPrintQuoteOpen(true);
+                    setAutoPrintTarget('quote');
+                  }}
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontWeight: 700, whiteSpace: 'nowrap' }}
+                  title="Print ONLY Quotation Document"
+                >
+                  🖨️ Print
+                </button>
+              </div>
+            </div>
+
+            {/* Row 2: Clean 4-Column Booking Key Details Strip */}
+            <div
               style={{
-                background: '#ecfdf5',
-                border: '1px solid #6ee7b7',
-                color: '#047857',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.35rem',
-                fontWeight: 700,
-                whiteSpace: 'nowrap'
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+                gap: '1rem',
+                paddingTop: '0.9rem'
               }}
-              title="Send Quotation PDF & Proposal Text together to Client's WhatsApp"
             >
-              💬 Send Quote (PDF + Text)
-            </button>
+              <div>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                  Client
+                </div>
+                <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a', marginTop: '0.15rem' }}>
+                  {client?.name || 'Unknown Client'}
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#475569' }}>
+                  {client?.phone || client?.company || 'No phone on file'}
+                </div>
+              </div>
 
-            <button
-              onClick={() => setIsPrintQuoteOpen(true)}
-              className="btn btn-primary btn-sm"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600 }}
-            >
-              📄 A4 Quotation PDF
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsPrintQuoteOpen(true);
-                setAutoPrintTarget('quote');
-              }}
-              className="btn btn-secondary btn-sm"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: 700 }}
-              title="Print ONLY Quotation Document (excludes webpage)"
-            >
-              🖨️ Print Quote
-            </button>
-          </div>
+              <div>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                  Date &amp; Venue
+                </div>
+                <div className="tabular-nums" style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a', marginTop: '0.15rem' }}>
+                  {event.event_date} ({event.start_time || '--:--'} – {event.end_time || '--:--'})
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#475569' }}>
+                  {event.venue || 'Venue TBD'}
+                </div>
+              </div>
 
-          <div style={{ textAlign: 'right', marginTop: '0.25rem' }}>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Quote Total ({quoteNumber})</div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--primary)' }}>
-              ₹{displayTotal.toLocaleString('en-IN')}
+              <div>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                  Guests &amp; Quote Total
+                </div>
+                <div className="tabular-nums" style={{ fontWeight: 800, fontSize: '1.12rem', color: '#be123c', marginTop: '0.12rem' }}>
+                  ₹{displayTotal.toLocaleString('en-IN')}
+                </div>
+                <div className="tabular-nums" style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 600 }}>
+                  {event.guest_count} Guests (Pax)
+                </div>
+              </div>
+
+              {canManageEventExpenses && (
+                <div>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                    {isOwnerOnly ? 'Total Spent & Owner P&L' : 'Total Event Expenditure'}
+                  </div>
+                  <div className="tabular-nums" style={{ fontWeight: 800, fontSize: '1.05rem', color: '#0f172a', marginTop: '0.12rem' }}>
+                    ₹{finSummary.totalExpenditure.toLocaleString('en-IN')}
+                  </div>
+                  <div className="tabular-nums" style={{ fontSize: '0.77rem', marginTop: '0.1rem' }}>
+                    {isOwnerOnly ? (
+                      <span
+                        style={{
+                          fontWeight: 700,
+                          color: finSummary.netProfit >= 0 ? '#059669' : '#dc2626'
+                        }}
+                      >
+                        {finSummary.netProfit >= 0 ? 'Profit +' : 'Loss -'}₹
+                        {Math.abs(finSummary.netProfit).toLocaleString('en-IN')} ({finSummary.marginPercent}%)
+                      </span>
+                    ) : (
+                      <span style={{ color: '#64748b' }}>Includes shifts, allowances &amp; extras</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Stock Shortage Warning / Reassurance Banner */}
       {stockEst.totalShortageCount > 0 && (
@@ -864,9 +974,9 @@ export default function EventDetailPage() {
           style={{
             background: '#fef2f2',
             border: '1px solid #fecaca',
-            borderRadius: '8px',
-            padding: '0.85rem 1.1rem',
-            marginBottom: '1.25rem',
+            borderRadius: '10px',
+            padding: '0.8rem 1rem',
+            marginBottom: '1.15rem',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -875,29 +985,23 @@ export default function EventDetailPage() {
           }}
         >
           <div>
-            <div style={{ fontWeight: 700, color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <span>⚠️ Raw Material Shortage Detected</span>
-              <span className="badge" style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700 }}>
-                {stockEst.totalShortageCount} Raw Material Items Insufficient
-              </span>
-            </div>
-            <div style={{ fontSize: '0.84rem', color: '#7f1d1d', marginTop: '0.25rem' }}>
-              Ingredients required to prepare this menu are low in warehouse inventory. Estimated purchase cost: <strong>₹{stockEst.totalEstimatedCost.toLocaleString('en-IN')}</strong>.
+            <div style={{ fontWeight: 700, color: '#b91c1c', fontSize: '0.88rem' }}>
+              ⚠️ Raw Material Shortage: {stockEst.totalShortageCount} items low (Est. ₹{stockEst.totalEstimatedCost.toLocaleString('en-IN')})
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
             <button
               type="button"
               className="btn btn-sm"
-              style={{ background: '#dc2626', color: '#ffffff', fontWeight: 700, padding: '0.4rem 0.8rem' }}
+              style={{ background: '#dc2626', color: '#ffffff', fontWeight: 700, whiteSpace: 'nowrap' }}
               onClick={handleOpenShortageOrderModal}
             >
-              📦 Place Stock Purchase Order
+              📦 Order Stock
             </button>
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              style={{ background: '#ffffff', borderColor: '#fca5a5', color: '#b91c1c', fontWeight: 700 }}
+              style={{ background: '#ffffff', borderColor: '#fca5a5', color: '#b91c1c', fontWeight: 700, whiteSpace: 'nowrap' }}
               onClick={() => {
                 const res = exportEventStockShortageCsv(event.id);
                 if (res) {
@@ -907,216 +1011,156 @@ export default function EventDetailPage() {
                   });
                 }
               }}
-              title="Export Event Stock & Vendor Shortage List as CSV"
             >
-              📥 Export Shortage CSV
+              📥 Shortage CSV
             </button>
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              style={{ fontWeight: 600 }}
+              style={{ fontWeight: 600, whiteSpace: 'nowrap' }}
               onClick={() => setActiveTab('stock')}
             >
-              🔍 View Stock Details
+              View Stock &rarr;
             </button>
           </div>
         </div>
       )}
 
-      {stockEst.totalShortageCount === 0 && stockEst.items.length > 0 && event.status === 'confirmed' && (
-        <div
-          style={{
-            background: '#f0fdf4',
-            border: '1px solid #bbf7d0',
-            borderRadius: '8px',
-            padding: '0.65rem 1rem',
-            marginBottom: '1.25rem',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '0.5rem',
-            fontSize: '0.84rem'
-          }}
-        >
-          <div style={{ color: '#166534', fontWeight: 600 }}>
-            ✓ Warehouse stock is sufficient (All {stockEst.items.length} recipe raw materials are available in warehouse inventory).
-          </div>
-          <div style={{ fontSize: '0.78rem', color: '#15803d' }}>
-            {event.stock_deducted
-              ? '✓ Ingredients for this event have already been deducted from inventory.'
-              : 'Ingredients will be automatically deducted from inventory upon event completion.'}
-          </div>
-        </div>
-      )}
-
-      {/* Completed Event Total Expenditure Banner (Incl. All Allowances) + Strictly Owner-Only P&L */}
-      {canManageEventExpenses && (event.status === 'completed' || finSummary.totalExpenditure > 0) && (
-        <div
-          className="no-print"
-          style={{
-            background: event.status === 'completed' ? '#f8fafc' : '#ffffff',
-            border: `1.5px solid ${event.status === 'completed' ? '#94a3b8' : 'var(--border)'}`,
-            borderLeft: `5px solid ${
-              isOwnerOnly
-                ? finSummary.netProfit >= 0
-                  ? '#16a34a'
-                  : '#dc2626'
-                : '#2563eb'
-            }`,
-            borderRadius: '10px',
-            padding: '0.95rem 1.15rem',
-            marginBottom: '1.25rem'
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '0.85rem',
-              flexWrap: 'wrap'
-            }}
-          >
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 800, fontSize: '0.98rem', color: '#0f172a' }}>
-                  {event.status === 'completed'
-                    ? '🏁 Event Completed — Total Expenditure (Including All Allowances)'
-                    : '💸 Event Expenditure Logged So Far (Including All Allowances)'}
-                </span>
-                <span
-                  className="badge"
-                  style={{ background: '#fee2e2', color: '#be123c', fontWeight: 800, fontSize: '0.8rem' }}
-                >
-                  Total Spent: ₹{finSummary.totalExpenditure.toLocaleString('en-IN')}
-                </span>
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  gap: '0.9rem',
-                  flexWrap: 'wrap',
-                  fontSize: '0.8rem',
-                  color: '#475569',
-                  marginTop: '0.35rem'
-                }}
-              >
-                <span>
-                  📦 Stock Pricing: <strong>₹{finSummary.stockPricingCost.toLocaleString('en-IN')}</strong>
-                </span>
-                <span>
-                  🚚 Extras Taken: <strong>₹{finSummary.extrasTakenCost.toLocaleString('en-IN')}</strong>
-                </span>
-                <span>
-                  👥 Staff Shifts + Allowances + Expenses:{' '}
-                  <strong>₹{finSummary.totalStaffCost.toLocaleString('en-IN')}</strong>
-                </span>
-                <span>
-                  🧾 Other Expenses: <strong>₹{finSummary.otherExpenseCost.toLocaleString('en-IN')}</strong>
-                </span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              {isOwnerOnly && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.65rem',
-                    padding: '0.45rem 0.75rem',
-                    borderRadius: '8px',
-                    background: finSummary.netProfit >= 0 ? '#f0fdf4' : '#fef2f2',
-                    border: `1px solid ${finSummary.netProfit >= 0 ? '#86efac' : '#fca5a5'}`
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: '0.66rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
-                      🔒 Owner P&amp;L ({finSummary.marginPercent}%)
-                    </div>
-                    <div
-                      style={{
-                        fontSize: '1.05rem',
-                        fontWeight: 800,
-                        color: finSummary.netProfit >= 0 ? '#15803d' : '#dc2626'
-                      }}
-                    >
-                      {finSummary.netProfit >= 0 ? 'Profit +' : 'Loss -'}₹
-                      {Math.abs(finSummary.netProfit).toLocaleString('en-IN')}
-                    </div>
-                  </div>
-                  <Link href="/pnl" className="btn btn-secondary btn-sm" style={{ fontSize: '0.75rem', fontWeight: 700 }}>
-                    P&amp;L Module &rarr;
-                  </Link>
-                </div>
-              )}
-
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                style={{ fontWeight: 700 }}
-                onClick={() => setActiveTab('expenses')}
-              >
-                💸 {activeTab === 'expenses' ? 'Viewing Expenses' : 'Add / View Extra Expenses'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border)', marginBottom: '1.25rem', overflowX: 'auto' }}>
+      {/* Sleek Segmented Workspace Tabs */}
+      <div
+        className="no-print"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.3rem',
+          padding: '0.3rem',
+          background: '#f1f5f9',
+          borderRadius: '12px',
+          marginBottom: '1.25rem',
+          overflowX: 'auto'
+        }}
+      >
         <button
-          className={`btn ${activeTab === 'quote' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
+          type="button"
           onClick={() => setActiveTab('quote')}
+          style={{
+            padding: '0.52rem 0.95rem',
+            borderRadius: '9px',
+            border: 'none',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            fontWeight: activeTab === 'quote' ? 700 : 600,
+            fontSize: '0.84rem',
+            background: activeTab === 'quote' ? '#ffffff' : 'transparent',
+            color: activeTab === 'quote' ? '#0f172a' : '#475569',
+            boxShadow: activeTab === 'quote' ? '0 1px 3px rgba(15,23,42,0.1)' : 'none'
+          }}
         >
           🍽️ Menu &amp; Quote ({eventItems.length})
         </button>
+
         {canEditOps && (
           <button
-            className={`btn ${activeTab === 'stock' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
+            type="button"
             onClick={() => setActiveTab('stock')}
+            style={{
+              padding: '0.52rem 0.95rem',
+              borderRadius: '9px',
+              border: 'none',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              fontWeight: activeTab === 'stock' ? 700 : 600,
+              fontSize: '0.84rem',
+              background: activeTab === 'stock' ? '#ffffff' : 'transparent',
+              color: activeTab === 'stock' ? '#0f172a' : '#475569',
+              boxShadow: activeTab === 'stock' ? '0 1px 3px rgba(15,23,42,0.1)' : 'none'
+            }}
           >
-            📦 Stock Estimation A4 ({stockEst.items.length})
+            📦 Stock ({stockEst.items.length})
           </button>
         )}
+
         {canEditOps && (
           <button
-            className={`btn ${activeTab === 'shifts' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
+            type="button"
             onClick={() => setActiveTab('shifts')}
+            style={{
+              padding: '0.52rem 0.95rem',
+              borderRadius: '9px',
+              border: 'none',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              fontWeight: activeTab === 'shifts' ? 700 : 600,
+              fontSize: '0.84rem',
+              background: activeTab === 'shifts' ? '#ffffff' : 'transparent',
+              color: activeTab === 'shifts' ? '#0f172a' : '#475569',
+              boxShadow: activeTab === 'shifts' ? '0 1px 3px rgba(15,23,42,0.1)' : 'none'
+            }}
           >
             👥 Staff Shifts ({shifts.length})
           </button>
         )}
+
         {canManageEventExpenses && (
           <button
-            className={`btn ${activeTab === 'expenses' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
+            type="button"
             onClick={() => setActiveTab('expenses')}
+            style={{
+              padding: '0.52rem 0.95rem',
+              borderRadius: '9px',
+              border: 'none',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              fontWeight: activeTab === 'expenses' ? 700 : 600,
+              fontSize: '0.84rem',
+              background: activeTab === 'expenses' ? '#ffffff' : 'transparent',
+              color: activeTab === 'expenses' ? '#0f172a' : '#475569',
+              boxShadow: activeTab === 'expenses' ? '0 1px 3px rgba(15,23,42,0.1)' : 'none'
+            }}
           >
-            💸 Event Expenses (₹{finSummary.totalExpenditure.toLocaleString('en-IN')})
+            💸 Expenses (₹{finSummary.totalExpenditure.toLocaleString('en-IN')})
           </button>
         )}
+
         {isFinance && (
           <button
-            className={`btn ${activeTab === 'invoices' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
+            type="button"
             onClick={() => setActiveTab('invoices')}
+            style={{
+              padding: '0.52rem 0.95rem',
+              borderRadius: '9px',
+              border: 'none',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              fontWeight: activeTab === 'invoices' ? 700 : 600,
+              fontSize: '0.84rem',
+              background: activeTab === 'invoices' ? '#ffffff' : 'transparent',
+              color: activeTab === 'invoices' ? '#0f172a' : '#475569',
+              boxShadow: activeTab === 'invoices' ? '0 1px 3px rgba(15,23,42,0.1)' : 'none'
+            }}
           >
-            🧾 Invoices &amp; Part-Payments ({invoices.length})
+            🧾 Invoice &amp; Payments ({invoices.length})
           </button>
         )}
+
         {canEditOps && (
           <button
-            className={`btn ${activeTab === 'details' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ borderRadius: '6px 6px 0 0', borderBottom: 'none' }}
+            type="button"
             onClick={() => setActiveTab('details')}
+            style={{
+              padding: '0.52rem 0.95rem',
+              borderRadius: '9px',
+              border: 'none',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              fontWeight: activeTab === 'details' ? 700 : 600,
+              fontSize: '0.84rem',
+              background: activeTab === 'details' ? '#ffffff' : 'transparent',
+              color: activeTab === 'details' ? '#0f172a' : '#475569',
+              boxShadow: activeTab === 'details' ? '0 1px 3px rgba(15,23,42,0.1)' : 'none'
+            }}
           >
-            ⚙️ Edit Details
+            ⚙️ Edit Booking
           </button>
         )}
       </div>
