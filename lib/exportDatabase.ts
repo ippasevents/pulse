@@ -1,7 +1,13 @@
 'use client';
 
 import * as XLSX from 'xlsx';
-import { store } from './store';
+import {
+  formatStaffSalaryRate,
+  formatStaffSalaryTypeLabel,
+  getStaffSalaryType,
+  isSalaryAdvanceRecord,
+  store
+} from './store';
 
 export type CsvExportSection =
   | 'all'
@@ -56,7 +62,7 @@ function buildDatasetSheets() {
   const state = store.getState();
 
   // STRICT OWNER-ONLY ENFORCEMENT
-  if (state.currentRole !== 'owner') {
+  if (state.currentRole !== 'owner' && state.currentRole !== 'super_admin') {
     throw new Error('Unauthorized: Only the Owner can export the database.');
   }
 
@@ -289,50 +295,72 @@ function buildDatasetSheets() {
     const hrs = store.calculateShiftHours(sh.starts_at, sh.ends_at);
     const status = sh.attendance_status || 'pending';
     const isPresent = status === 'present' && evt?.status !== 'cancelled';
-    const earned = isPresent ? Math.round(hrs * Number(st?.hourly_rate || 0)) : '';
+    const sType = getStaffSalaryType(st);
+    const shiftEarned = !isPresent
+      ? ''
+      : sType === 'per_event'
+      ? Math.round(Number(st?.event_rate ?? st?.hourly_rate ?? 0))
+      : sType === 'monthly'
+      ? 0
+      : Math.round(hrs * Number(st?.hourly_rate || 0));
     return {
       'Event Date': evt?.event_date || '',
       Event: evt?.title || '',
       'Staff Name': st?.name || '',
       Phone: st?.phone || '',
       'Assigned Role': sh.role_label || st?.role_title || '',
+      'Salary Type': formatStaffSalaryTypeLabel(sType),
       'Start Time': sh.starts_at ? sh.starts_at.slice(11, 16) : '',
       'End Time': sh.ends_at ? sh.ends_at.slice(11, 16) : '',
       Hours: hrs,
       'Attendance Status': status.toUpperCase(),
-      'Earned Shift Pay (INR)': isPresent ? earned : '— (Not Attended)'
+      'Earned Shift Pay (INR)': isPresent
+        ? sType === 'monthly'
+          ? 'Monthly Fixed'
+          : shiftEarned
+        : '— (Not Attended)'
     };
   });
 
-  // 8. Staff Salary Summary & Balances
+  // 8. Staff Salary Summary & Balances (Separating Standard Salary Paid vs Salary Advance Paid)
   const staffSalarySummaryRows = state.staff.map((st) => {
     const sum = store.getStaffSalarySummary(st.id);
     return {
       'Staff Name': st.name,
       'Phone (Login)': st.phone,
       Role: st.role_title || '',
-      'Hourly Rate (INR)': st.hourly_rate,
+      'Salary Structure': formatStaffSalaryTypeLabel(sum.salaryType),
+      'Configured Rate': formatStaffSalaryRate(st),
       'Attended Shifts': sum.attendedShiftsCount,
       'Absent Shifts': sum.absentShiftsCount,
       'Pending Attendance Shifts': sum.pendingShiftsCount,
       'Attended Hours': sum.totalShiftHours,
-      'Shift Pay Earned (INR)': sum.shiftEarnings,
+      'Shift / Event Pay Earned (INR)': sum.shiftEarnings,
+      'Monthly Fixed Salary Earned (INR)': sum.monthlyBaseEarnings,
       'Allowances / Bonus (INR)': sum.extraEarnings,
       'Total Earned (INR)': sum.totalEarned,
-      'Total Salary Paid (INR)': sum.totalPaid,
+      'Standard Salary Paid (INR)': sum.totalRegularPaid,
+      'Salary Advance Paid (INR)': sum.totalAdvancePaid,
+      'Total Disbursed (INR)': sum.totalPaid,
       'Balance Payable (INR)': sum.balancePayable,
       Status: st.active ? 'Active' : 'Inactive'
     };
   });
 
-  // 9. Staff Salary Payments & Allowances Ledger
+  // 9. Staff Salary Payments, Advances & Allowances Ledger
   const staffSalaryLedgerRows = (state.staffSalaryRecords || []).map((sr) => {
     const st = state.staff.find((s) => s.id === sr.staff_member_id);
     const evt = state.events.find((e) => e.id === sr.event_id);
+    const isAdv = isSalaryAdvanceRecord(sr);
     return {
       Date: sr.recorded_at ? sr.recorded_at.slice(0, 10) : '',
       'Staff Name': st?.name || '',
-      Type: sr.record_type === 'payment' ? 'Salary Payment' : 'Duty Allowance / Bonus',
+      Type:
+        sr.record_type === 'earning'
+          ? 'Duty Allowance / Bonus'
+          : isAdv
+          ? 'Salary Advance'
+          : 'Standard Salary Payout',
       'Method / Category': sr.method,
       'Linked Event': evt?.title || '',
       'Amount (INR)': sr.amount,
@@ -409,7 +437,8 @@ function buildDatasetSheets() {
 }
 
 export async function downloadDatabaseAsExcel(): Promise<void> {
-  if (store.getState().currentRole !== 'owner') {
+  const role = store.getState().currentRole;
+  if (role !== 'owner' && role !== 'super_admin') {
     throw new Error('Only the Owner account is authorized to download the database.');
   }
 
@@ -449,10 +478,12 @@ export async function downloadDatabaseAsExcel(): Promise<void> {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   });
   triggerFileDownload(blob, `IPPAS_Database_Export_${dateStamp}.xlsx`);
+  store.recordBackupDownloaded('Excel Workbook (.xlsx)');
 }
 
 export async function downloadDatabaseAsCsv(section: CsvExportSection = 'all'): Promise<void> {
-  if (store.getState().currentRole !== 'owner') {
+  const role = store.getState().currentRole;
+  if (role !== 'owner' && role !== 'super_admin') {
     throw new Error('Only the Owner account is authorized to download the database.');
   }
 
@@ -484,7 +515,7 @@ export async function downloadDatabaseAsCsv(section: CsvExportSection = 'all'): 
   }
   if (section === 'all' || section === 'staff_salary') {
     blocks.push(rowsToCsvBlock('STAFF SALARY BALANCES', sheets.staffSalarySummaryRows));
-    blocks.push(rowsToCsvBlock('STAFF SALARY PAYMENTS & ALLOWANCES', sheets.staffSalaryLedgerRows));
+    blocks.push(rowsToCsvBlock('STAFF SALARY PAYMENTS, ADVANCES & ALLOWANCES', sheets.staffSalaryLedgerRows));
   }
   if (section === 'all' || section === 'stock_purchases') {
     blocks.push(rowsToCsvBlock('STOCK PURCHASES & VENDOR DUES', sheets.purchasesRows));
@@ -502,4 +533,7 @@ export async function downloadDatabaseAsCsv(section: CsvExportSection = 'all'): 
   const suffix = section === 'all' ? 'Full_Database' : section;
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   triggerFileDownload(blob, `IPPAS_${suffix}_${dateStamp}.csv`);
+  if (section === 'all') {
+    store.recordBackupDownloaded('Full Database CSV (.csv)');
+  }
 }

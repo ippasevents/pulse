@@ -2,7 +2,8 @@ export type UserRole = 'super_admin' | 'owner' | 'manager' | 'accountant' | 'sta
 export type EventStatus = 'inquiry' | 'quoted' | 'confirmed' | 'completed' | 'cancelled';
 export type InvoiceStatus = 'draft' | 'sent' | 'partially_paid' | 'paid' | 'void';
 export type PricingType = 'per_guest' | 'per_kg';
-export type StaffSalaryRecordType = 'payment' | 'earning';
+export type StaffSalaryType = 'hourly' | 'per_event' | 'monthly';
+export type StaffSalaryRecordType = 'payment' | 'advance' | 'earning';
 
 export interface Profile {
   id: string;
@@ -132,7 +133,11 @@ export interface StaffMember {
   phone: string;
   password?: string;
   role_title?: string;
+  salary_type?: StaffSalaryType;
   hourly_rate: number;
+  event_rate?: number;
+  monthly_salary?: number;
+  salary_start_date?: string;
   active: boolean;
 }
 
@@ -204,6 +209,7 @@ export interface BusinessSettings {
   ifsc_code?: string;
   upi_id?: string;
   payment_terms?: string;
+  last_backup_downloaded_at?: string;
 }
 
 export type EventExpenseCategory =

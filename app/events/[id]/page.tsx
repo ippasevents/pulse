@@ -786,8 +786,8 @@ export default function EventDetailPage() {
                 >
                   <span>
                     {isUpcomingBooking
-                      ? '📅 UPCOMING BOOKING (വരാനിരിക്കുന്ന ഇവന്റ്)'
-                      : '🕘 PREVIOUS / COMPLETED EVENT (കഴിഞ്ഞുപോയ ഇവന്റ്)'}
+                      ? 'UPCOMING BOOKING'
+                      : 'PREVIOUS / COMPLETED EVENT'}
                   </span>
                   <span aria-hidden="true">&middot;</span>
                   <span style={{ color: '#475569' }}>Quote #{quoteNumber}</span>
@@ -2159,39 +2159,39 @@ export default function EventDetailPage() {
                 marginBottom: '1.25rem'
               }}
             >
-              <div className="stats-card" style={{ borderLeft: '4px solid #2563eb' }}>
-                <span className="stats-label">1. Stock Pricing (സ്റ്റോക്കിന്റെ പ്രൈസിങ്)</span>
-                <span className="stats-value" style={{ color: '#0f172a' }}>
+              <div className="stats-card" style={{ borderTop: '3px solid #2563eb' }}>
+                <span className="stats-label">1. Stock Pricing</span>
+                <span className="stats-value" style={{ color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
                   ₹{finSummary.stockPricingCost.toLocaleString('en-IN')}
                 </span>
-                <span className="stats-sub">
+                <span className="stats-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
                   Recipe Est: ₹{finSummary.recipeStockEstimate.toLocaleString('en-IN')}
                 </span>
               </div>
 
-              <div className="stats-card" style={{ borderLeft: '4px solid #d97706' }}>
-                <span className="stats-label">2. Extras Cost (എക്സ്ട്രാസ് ചെലവുകൾ)</span>
-                <span className="stats-value" style={{ color: '#0f172a' }}>
+              <div className="stats-card" style={{ borderTop: '3px solid #d97706' }}>
+                <span className="stats-label">2. Extras Cost</span>
+                <span className="stats-value" style={{ color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
                   ₹{finSummary.extrasTakenCost.toLocaleString('en-IN')}
                 </span>
                 <span className="stats-sub">Extras taken, rentals &amp; transport</span>
               </div>
 
-              <div className="stats-card" style={{ borderLeft: '4px solid #7c3aed' }}>
-                <span className="stats-label">3. Staff + Allowances (സ്റ്റാഫിന്റെ ചെലവുകൾ)</span>
-                <span className="stats-value" style={{ color: '#0f172a' }}>
+              <div className="stats-card" style={{ borderTop: '3px solid #7c3aed' }}>
+                <span className="stats-label">3. Staff + Allowances</span>
+                <span className="stats-value" style={{ color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
                   ₹{finSummary.totalStaffCost.toLocaleString('en-IN')}
                 </span>
-                <span className="stats-sub">
+                <span className="stats-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
                   Shifts: ₹{finSummary.staffShiftWages.toLocaleString('en-IN')} &bull; Allow: ₹
                   {finSummary.staffAllowances.toLocaleString('en-IN')} &bull; Extra: ₹
                   {finSummary.staffExpenseCost.toLocaleString('en-IN')}
                 </span>
               </div>
 
-              <div className="stats-card" style={{ borderLeft: '4px solid #475569' }}>
-                <span className="stats-label">4. Other Expenses (മറ്റ് ചെലവുകൾ)</span>
-                <span className="stats-value" style={{ color: '#0f172a' }}>
+              <div className="stats-card" style={{ borderTop: '3px solid #475569' }}>
+                <span className="stats-label">4. Other Expenses</span>
+                <span className="stats-value" style={{ color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
                   ₹{finSummary.otherExpenseCost.toLocaleString('en-IN')}
                 </span>
                 <span className="stats-sub">Fuel, ice, cleaning &amp; misc</span>
@@ -2199,12 +2199,12 @@ export default function EventDetailPage() {
 
               <div
                 className="stats-card"
-                style={{ borderLeft: '4px solid #e11d48', background: '#fff1f2' }}
+                style={{ borderTop: '3px solid #e11d48', background: '#fff1f2' }}
               >
                 <span className="stats-label" style={{ color: '#9f1239', fontWeight: 700 }}>
                   Total Event Expenditure (incl. Allowances)
                 </span>
-                <span className="stats-value" style={{ color: '#be123c' }}>
+                <span className="stats-value" style={{ color: '#be123c', fontVariantNumeric: 'tabular-nums' }}>
                   ₹{finSummary.totalExpenditure.toLocaleString('en-IN')}
                 </span>
                 <span className="stats-sub" style={{ color: '#881337' }}>
@@ -2219,7 +2219,7 @@ export default function EventDetailPage() {
                 className="card no-print"
                 style={{
                   marginBottom: '1.25rem',
-                  borderLeft: `4px solid ${finSummary.netProfit >= 0 ? '#16a34a' : '#dc2626'}`,
+                  borderTop: `3px solid ${finSummary.netProfit >= 0 ? '#16a34a' : '#dc2626'}`,
                   background: finSummary.netProfit >= 0 ? '#f0fdf4' : '#fef2f2'
                 }}
               >
@@ -2253,14 +2253,15 @@ export default function EventDetailPage() {
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>
-                        {finSummary.netProfit >= 0 ? 'Net Profit (ലാഭം)' : 'Net Loss (നഷ്ടം)'}
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569' }}>
+                        {finSummary.netProfit >= 0 ? 'Net Profit' : 'Net Loss'}
                       </div>
                       <div
                         style={{
                           fontSize: '1.45rem',
                           fontWeight: 800,
-                          color: finSummary.netProfit >= 0 ? '#15803d' : '#dc2626'
+                          color: finSummary.netProfit >= 0 ? '#15803d' : '#dc2626',
+                          fontVariantNumeric: 'tabular-nums'
                         }}
                       >
                         {finSummary.netProfit >= 0 ? '+' : '-'}₹
@@ -2282,7 +2283,7 @@ export default function EventDetailPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
                   <div>
                     <h2 className="card-title" style={{ margin: 0 }}>
-                      {editingExpenseId ? '✏️ Edit Event Extra Expense' : '➕ Add Event Extra Expense'}
+                      {editingExpenseId ? 'Edit Event Extra Expense' : 'Add Event Extra Expense'}
                     </h2>
                     <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0.15rem 0 0 0' }}>
                       Available to Owner, Accountant &amp; Manager — log Stock Pricing, Extras Taken, Staff Expenses, or Other Expenses.
@@ -2299,16 +2300,16 @@ export default function EventDetailPage() {
                       onChange={(e) => setExpCategory(e.target.value as EventExpenseCategory)}
                     >
                       <option value="stock_pricing">
-                        📦 Stock Pricing — സ്റ്റോക്കിന്റെ പ്രൈസിങ്
+                        Stock Pricing — Raw Materials &amp; Kitchen Issue
                       </option>
                       <option value="extras_cost">
-                        🚚 Extras Taken Cost — എക്സ്ട്രാസ് കൊണ്ടുപോയതിന്റെ ചെലവുകൾ
+                        Extras Taken Cost — Rentals, Transport &amp; Logistics
                       </option>
                       <option value="staff_expense">
-                        👥 Staff Extra Expenses — സ്റ്റാഫിന്റെ ചെലവുകൾ
+                        Staff Extra Expenses — Food, Travel &amp; Overtime
                       </option>
                       <option value="other_expense">
-                        🧾 Other Expenses — മറ്റ് ചെലവുകൾ
+                        Other Expenses — Fuel, Ice, Cleaning &amp; Misc
                       </option>
                     </select>
                   </div>

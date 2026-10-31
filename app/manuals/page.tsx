@@ -12,7 +12,7 @@ import {
   downloadRoleUserManualPdf
 } from '@/lib/userManualPdfGenerator';
 
-const ML_FONT_FAMILY = `'Noto Sans Malayalam', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif`;
+const EN_FONT_FAMILY = `'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif`;
 
 const ROLE_CARD_SURFACES: Record<
   ManualRoleKey,
@@ -40,7 +40,7 @@ const ROLE_CARD_SURFACES: Record<
   }
 };
 
-export default function MalayalamUserManualsPage() {
+export default function UserManualsPage() {
   const [state, setState] = useState(store.getState());
   const [downloadingKey, setDownloadingKey] = useState<ManualRoleKey | null>(null);
   const [batchProgress, setBatchProgress] = useState<string>('');
@@ -85,12 +85,12 @@ export default function MalayalamUserManualsPage() {
     if (ok) {
       showToast(
         'success',
-        `${manual.titleMl} (${manual.pdfFilename}) വിജയകരമായി ഡൗൺലോഡ് ചെയ്തു.`
+        `Downloaded ${manual.titleMl} (${manual.pdfFilename}) successfully.`
       );
     } else {
       showToast(
         'error',
-        'PDF തയ്യാറാക്കുന്നതിൽ താൽക്കാലിക തടസ്സം നേരിട്ടു. ദയവായി വീണ്ടും ശ്രമിക്കുക.'
+        'Unable to generate the PDF manual right now. Please try again.'
       );
     }
   };
@@ -102,17 +102,17 @@ export default function MalayalamUserManualsPage() {
       businessPhone,
       (idx, key) => {
         const m = MALAYALAM_USER_MANUALS[key];
-        setBatchProgress(`${idx} / 4 PDF തയ്യാറാക്കുന്നു: ${m.titleMl}...`);
+        setBatchProgress(`Generating PDF ${idx} of 4: ${m.titleMl}...`);
       }
     );
     setBatchProgress('');
     if (ok) {
       showToast(
         'success',
-        'ഓണർ, മാനേജർ, അക്കൗണ്ടന്റ്, സ്റ്റാഫ് എന്നീ 4 മലയാളം യൂസർ മാനുവൽ PDF ഫയലുകളും വെവ്വേറെ ഡൗൺലോഡ് ചെയ്തു.'
+        'Downloaded all 4 official User Manual PDFs (Owner, Manager, Accountant & Staff).'
       );
     } else {
-      showToast('error', 'PDF ഡൗൺലോഡ് പൂർത്തിയാക്കാൻ സാധിച്ചില്ല. വീണ്ടും ശ്രമിക്കുക.');
+      showToast('error', 'Could not complete the batch PDF download. Please try again.');
     }
   };
 
@@ -121,7 +121,7 @@ export default function MalayalamUserManualsPage() {
   return (
     <div
       style={{
-        fontFamily: ML_FONT_FAMILY,
+        fontFamily: EN_FONT_FAMILY,
         maxWidth: '1160px',
         margin: '0 auto',
         paddingBottom: '2.5rem'
@@ -140,7 +140,7 @@ export default function MalayalamUserManualsPage() {
           borderBottom: '1px solid #e2e8f0'
         }}
       >
-        <div style={{ maxWidth: '720px' }}>
+        <div style={{ maxWidth: '740px' }}>
           <div
             style={{
               fontSize: '0.78rem',
@@ -161,7 +161,7 @@ export default function MalayalamUserManualsPage() {
               textWrap: 'balance'
             }}
           >
-            മലയാളം യൂസർ മാനുവലുകൾ (PDF Download)
+            Official Role-Based User Manuals (PDF Download)
           </h1>
           <p
             style={{
@@ -173,8 +173,8 @@ export default function MalayalamUserManualsPage() {
             }}
           >
             {showAllFourGrid
-              ? 'പുതിയ മാറ്റങ്ങൾ ഉൾപ്പെടുത്തി പുതുക്കിയ ഓണർ, മാനേജർ, അക്കൗണ്ടന്റ്, സ്റ്റാഫ് മലയാളം യൂസർ മാനുവലുകൾ ഇവിടെ നിന്ന് A4 PDF ഫയലുകളായി നേരിട്ട് ഡൗൺലോഡ് ചെയ്യാം.'
-              : 'പുതിയ മാറ്റങ്ങൾ ഉൾപ്പെടുത്തി പുതുക്കിയ ഔദ്യോഗിക മലയാളം യൂസർ മാനുവൽ A4 PDF ഫയലായി ഇവിടെ നിന്ന് ഡൗൺലോഡ് ചെയ്യാം.'}
+              ? 'Download the revised, comprehensive English A4 PDF user manuals for Owner, Manager, Accountant, and Staff—updated with Top Clients analytics, flexible staff salary structures, separated Salary Advances, and full database backup & restore.'
+              : 'Download your revised, step-by-step official English A4 PDF user manual with complete instructions for every workflow in your workspace.'}
           </p>
         </div>
 
@@ -192,7 +192,7 @@ export default function MalayalamUserManualsPage() {
               borderRadius: '10px'
             }}
           >
-            {batchProgress || '⬇ 4 PDF-കളും ഒരുമിച്ച് ഡൗൺലോഡ് ചെയ്യുക'}
+            {batchProgress || 'Download All 4 PDFs'}
           </button>
         )}
       </div>
@@ -283,9 +283,9 @@ export default function MalayalamUserManualsPage() {
                     0{idx + 1}. {m.englishRoleLabel}
                   </span>
                   <span aria-hidden="true">&middot;</span>
-                  <span>{m.pages.length} A4 പേജുകൾ</span>
+                  <span>{m.pages.length} A4 Pages</span>
                   <span aria-hidden="true">&middot;</span>
-                  <span>{chapters.length} അധ്യായങ്ങൾ</span>
+                  <span>{chapters.length} Chapters</span>
                 </div>
 
                 <h2
@@ -329,7 +329,7 @@ export default function MalayalamUserManualsPage() {
                       marginBottom: '0.15rem'
                     }}
                   >
-                    ഉൾപ്പെടുത്തിയിട്ടുള്ള അധ്യായങ്ങൾ:
+                    Included Chapters:
                   </div>
                   {chapters.map((ch) => (
                     <div
@@ -364,7 +364,7 @@ export default function MalayalamUserManualsPage() {
                   }}
                   title={m.pdfFilename}
                 >
-                  PDF ഫയൽ: {m.pdfFilename}
+                  PDF File: {m.pdfFilename}
                 </div>
 
                 <button
@@ -386,7 +386,7 @@ export default function MalayalamUserManualsPage() {
                     transition: 'transform 0.15s ease, opacity 0.15s ease'
                   }}
                 >
-                  {isBusy ? '⏳ PDF തയ്യാറാക്കുന്നു...' : '⬇ PDF ഡൗൺലോഡ് ചെയ്യുക'}
+                  {isBusy ? 'Generating PDF...' : 'Download Official PDF'}
                 </button>
               </div>
             </div>

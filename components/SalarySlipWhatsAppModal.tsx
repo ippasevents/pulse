@@ -229,7 +229,7 @@ export default function SalarySlipWhatsAppModal({
                 📎 Salary Slip PDF + Summary Text
               </div>
               <div style={{ fontSize: '0.78rem', color: '#047857', marginTop: '0.15rem', fontVariantNumeric: 'tabular-nums' }}>
-                Earned ₹{row.totalEarnings.toLocaleString('en-IN')} • Paid ₹{row.paymentsReceived.toLocaleString('en-IN')} • Balance ₹{row.periodPayable.toLocaleString('en-IN')}
+                Earned ₹{row.totalEarnings.toLocaleString('en-IN')} &middot; Salary Paid ₹{row.regularPaymentsReceived.toLocaleString('en-IN')} &middot; Advance ₹{row.advancesReceived.toLocaleString('en-IN')} &middot; Balance ₹{row.periodPayable.toLocaleString('en-IN')}
               </div>
             </div>
             <span

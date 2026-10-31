@@ -1,7 +1,22 @@
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { AppState, store } from '@/lib/store';
-import { EventRecord, Shift, ShiftAttendanceStatus, StaffMember, StaffSalaryRecord } from '@/lib/types';
+import {
+  AppState,
+  calculateMonthlySalaryMonthsCount,
+  formatStaffSalaryRate,
+  formatStaffSalaryTypeLabel,
+  getStaffSalaryType,
+  isSalaryAdvanceRecord,
+  store
+} from '@/lib/store';
+import {
+  EventRecord,
+  Shift,
+  ShiftAttendanceStatus,
+  StaffMember,
+  StaffSalaryRecord,
+  StaffSalaryType
+} from '@/lib/types';
 import { printHtmlDocument } from '@/lib/printDocument';
 
 function escapeHtml(val?: string | number | null): string {
@@ -50,6 +65,8 @@ export interface StaffPeriodShiftEntry {
   date: string;
   hours: number;
   hourlyRate: number;
+  salaryType: StaffSalaryType;
+  rateLabel: string;
   attendanceStatus: ShiftAttendanceStatus;
   isAttended: boolean;
   earnedAmount: number;
@@ -57,6 +74,10 @@ export interface StaffPeriodShiftEntry {
 
 export interface StaffPeriodReportRow {
   staff: StaffMember;
+  salaryType: StaffSalaryType;
+  rateDisplay: string;
+  monthlyMonthsCount: number;
+  monthlyBaseEarnings: number;
   attendedShifts: StaffPeriodShiftEntry[];
   allShiftsInRange: StaffPeriodShiftEntry[];
   attendedShiftsCount: number;
@@ -67,11 +88,15 @@ export interface StaffPeriodReportRow {
   allowanceRecords: StaffSalaryRecord[];
   extraEarnings: number;
   totalEarnings: number;
+  regularPaymentRecords: StaffSalaryRecord[];
+  advancePaymentRecords: StaffSalaryRecord[];
   paymentRecords: StaffSalaryRecord[];
+  regularPaymentsReceived: number;
+  advancesReceived: number;
   paymentsReceived: number;
-  periodNetBalance: number; // totalEarnings - paymentsReceived (can be negative if advance paid in period)
-  periodPayable: number; // Math.max(0, totalEarnings - paymentsReceived)
-  periodAdvanceExcess: number; // Math.max(0, paymentsReceived - totalEarnings)
+  periodNetBalance: number;
+  periodPayable: number;
+  periodAdvanceExcess: number;
   overallBalancePayable: number;
   hasActivityInRange: boolean;
 }
@@ -82,10 +107,14 @@ export interface StaffPeriodReportTotals {
   attendedShiftsCount: number;
   totalHoursWorked: number;
   shiftEarnings: number;
+  monthlyBaseEarnings: number;
   extraEarnings: number;
   totalEarnings: number;
+  regularPaymentsReceived: number;
+  advancesReceived: number;
   paymentsReceived: number;
   paymentCount: number;
+  advanceCount: number;
   periodPayable: number;
 }
 
@@ -99,8 +128,8 @@ function isDateWithinRange(dateYmd: string, startDate: string, endDate: string):
 
 /**
  * Computes per-staff and aggregate payroll summaries for a selected [startDate, endDate] range.
- * Strictly honors the attendance-gated rule: only shifts marked 'present' on non-cancelled events
- * contribute to hours worked and shift earnings.
+ * Honors each staff member's salary structure (Per Hour, Per Event, Monthly Fixed) and separates
+ * Salary Advances from Standard Salary Payouts.
  */
 export function computeStaffPeriodReport(
   state: AppState,
@@ -111,7 +140,6 @@ export function computeStaffPeriodReport(
   rows: StaffPeriodReportRow[];
   totals: StaffPeriodReportTotals;
 } {
-  // Normalize range order if user entered startDate > endDate
   const effectiveStart =
     startDate && endDate && startDate > endDate ? endDate : startDate;
   const effectiveEnd =
@@ -122,7 +150,10 @@ export function computeStaffPeriodReport(
     : state.staff;
 
   const rows: StaffPeriodReportRow[] = targetStaffList.map((staff) => {
+    const salaryType = getStaffSalaryType(staff);
+    const rateDisplay = formatStaffSalaryRate(staff);
     const hourlyRate = Number(staff.hourly_rate || 0);
+    const eventRate = Number(staff.event_rate ?? staff.hourly_rate ?? 0);
     const overallSummary = store.getStaffSalarySummary(staff.id);
 
     const allShiftsInRange: StaffPeriodShiftEntry[] = state.shifts
@@ -138,7 +169,18 @@ export function computeStaffPeriodReport(
             ? sh.attendance_status
             : 'pending';
         const isAttended = attendanceStatus === 'present' && event?.status !== 'cancelled';
-        const earnedAmount = isAttended ? Math.round(hours * hourlyRate) : 0;
+
+        let earnedAmount = 0;
+        let rateLabel = `₹${hourlyRate.toLocaleString('en-IN')}/hr`;
+        if (salaryType === 'per_event') {
+          earnedAmount = isAttended ? Math.round(eventRate) : 0;
+          rateLabel = `₹${eventRate.toLocaleString('en-IN')}/event`;
+        } else if (salaryType === 'monthly') {
+          earnedAmount = 0;
+          rateLabel = 'Monthly Fixed';
+        } else {
+          earnedAmount = isAttended ? Math.round(hours * hourlyRate) : 0;
+        }
 
         return {
           shift: sh,
@@ -146,12 +188,18 @@ export function computeStaffPeriodReport(
           date,
           hours,
           hourlyRate,
+          salaryType,
+          rateLabel,
           attendanceStatus,
           isAttended,
           earnedAmount
         };
       })
-      .filter((entry) => (!entry.event || entry.event.status !== 'cancelled') && isDateWithinRange(entry.date, effectiveStart, effectiveEnd))
+      .filter(
+        (entry) =>
+          (!entry.event || entry.event.status !== 'cancelled') &&
+          isDateWithinRange(entry.date, effectiveStart, effectiveEnd)
+      )
       .sort((a, b) => a.date.localeCompare(b.date));
 
     const attendedShifts = allShiftsInRange.filter((s) => s.isAttended);
@@ -164,6 +212,21 @@ export function computeStaffPeriodReport(
     );
     const shiftEarnings = attendedShifts.reduce((sum, s) => sum + s.earnedAmount, 0);
 
+    const monthlyMonthsCount =
+      salaryType === 'monthly'
+        ? calculateMonthlySalaryMonthsCount(
+            staff,
+            state.shifts,
+            state.staffSalaryRecords || [],
+            effectiveStart,
+            effectiveEnd
+          )
+        : 0;
+    const monthlyBaseEarnings =
+      salaryType === 'monthly'
+        ? Math.round(monthlyMonthsCount * Number(staff.monthly_salary ?? staff.hourly_rate ?? 0))
+        : 0;
+
     const recordsInRange = (state.staffSalaryRecords || []).filter(
       (rec) =>
         rec.staff_member_id === staff.id &&
@@ -174,13 +237,29 @@ export function computeStaffPeriodReport(
       .filter((r) => r.record_type === 'earning')
       .sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
 
-    const paymentRecords = recordsInRange
-      .filter((r) => r.record_type === 'payment')
+    const advancePaymentRecords = recordsInRange
+      .filter((r) => r.record_type !== 'earning' && isSalaryAdvanceRecord(r))
       .sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
 
+    const regularPaymentRecords = recordsInRange
+      .filter((r) => r.record_type === 'payment' && !isSalaryAdvanceRecord(r))
+      .sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
+
+    const paymentRecords = [...regularPaymentRecords, ...advancePaymentRecords].sort((a, b) =>
+      a.recorded_at.localeCompare(b.recorded_at)
+    );
+
     const extraEarnings = allowanceRecords.reduce((sum, r) => sum + Number(r.amount || 0), 0);
-    const totalEarnings = shiftEarnings + extraEarnings;
-    const paymentsReceived = paymentRecords.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+    const totalEarnings = shiftEarnings + monthlyBaseEarnings + extraEarnings;
+    const regularPaymentsReceived = regularPaymentRecords.reduce(
+      (sum, r) => sum + Number(r.amount || 0),
+      0
+    );
+    const advancesReceived = advancePaymentRecords.reduce(
+      (sum, r) => sum + Number(r.amount || 0),
+      0
+    );
+    const paymentsReceived = regularPaymentsReceived + advancesReceived;
 
     const periodNetBalance = totalEarnings - paymentsReceived;
     const periodPayable = Math.max(0, periodNetBalance);
@@ -188,12 +267,17 @@ export function computeStaffPeriodReport(
 
     const hasActivityInRange =
       attendedShiftsCount > 0 ||
+      monthlyBaseEarnings > 0 ||
       extraEarnings > 0 ||
       paymentsReceived > 0 ||
       allShiftsInRange.length > 0;
 
     return {
       staff,
+      salaryType,
+      rateDisplay,
+      monthlyMonthsCount,
+      monthlyBaseEarnings,
       attendedShifts,
       allShiftsInRange,
       attendedShiftsCount,
@@ -204,7 +288,11 @@ export function computeStaffPeriodReport(
       allowanceRecords,
       extraEarnings,
       totalEarnings,
+      regularPaymentRecords,
+      advancePaymentRecords,
       paymentRecords,
+      regularPaymentsReceived,
+      advancesReceived,
       paymentsReceived,
       periodNetBalance,
       periodPayable,
@@ -220,10 +308,14 @@ export function computeStaffPeriodReport(
     attendedShiftsCount: rows.reduce((s, r) => s + r.attendedShiftsCount, 0),
     totalHoursWorked: Number(rows.reduce((s, r) => s + r.totalHoursWorked, 0).toFixed(2)),
     shiftEarnings: rows.reduce((s, r) => s + r.shiftEarnings, 0),
+    monthlyBaseEarnings: rows.reduce((s, r) => s + r.monthlyBaseEarnings, 0),
     extraEarnings: rows.reduce((s, r) => s + r.extraEarnings, 0),
     totalEarnings: rows.reduce((s, r) => s + r.totalEarnings, 0),
+    regularPaymentsReceived: rows.reduce((s, r) => s + r.regularPaymentsReceived, 0),
+    advancesReceived: rows.reduce((s, r) => s + r.advancesReceived, 0),
     paymentsReceived: rows.reduce((s, r) => s + r.paymentsReceived, 0),
-    paymentCount: rows.reduce((s, r) => s + r.paymentRecords.length, 0),
+    paymentCount: rows.reduce((s, r) => s + r.regularPaymentRecords.length, 0),
+    advanceCount: rows.reduce((s, r) => s + r.advancePaymentRecords.length, 0),
     periodPayable: rows.reduce((s, r) => s + r.periodPayable, 0)
   };
 
@@ -243,59 +335,86 @@ export function buildStaffSalarySlipHtml(
   const issueDate = formatDisplayDate(new Date().toISOString().slice(0, 10));
   const slipCode = `SLIP-${(endDate || new Date().toISOString().slice(0, 7)).replace(/-/g, '').slice(0, 6)}-${row.staff.id.slice(-4).toUpperCase()}`;
   const businessName = state.settings.name || 'IPPAS FOOD SERVICE & EVENTS';
+  const salaryStructureLabel = formatStaffSalaryTypeLabel(row.salaryType);
+
+  const earningRowsList: string[] = [];
+
+  if (row.salaryType === 'monthly' && row.monthlyBaseEarnings > 0) {
+    earningRowsList.push(`
+      <tr style="border-bottom: 1px solid #e2e8f0; background: #f5f3ff;">
+        <td style="padding: 7px 8px; font-weight: 600; white-space: nowrap;">${escapeHtml(periodLabel)}</td>
+        <td style="padding: 7px 8px;">
+          <div style="font-weight: 700; color: #5b21b6;">Fixed Monthly Salary</div>
+          <div style="font-size: 0.72rem; color: #64748b;">
+            ${row.monthlyMonthsCount} active month${row.monthlyMonthsCount === 1 ? '' : 's'} in statement period
+          </div>
+        </td>
+        <td style="padding: 7px 8px; text-align: center; color: #5b21b6; font-weight: 600;">
+          ${row.monthlyMonthsCount} mo
+        </td>
+        <td style="padding: 7px 8px; text-align: right; color: #334155;">
+          ${escapeHtml(row.rateDisplay)}
+        </td>
+        <td style="padding: 7px 8px; text-align: right; font-weight: 700; color: #5b21b6;">
+          ₹${row.monthlyBaseEarnings.toLocaleString('en-IN')}
+        </td>
+      </tr>
+    `);
+  }
+
+  for (const entry of row.attendedShifts) {
+    const timeSpan = `${(entry.shift.starts_at || '').slice(11, 16)} – ${(entry.shift.ends_at || '').slice(11, 16)}`;
+    earningRowsList.push(`
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 7px 8px; font-weight: 600; white-space: nowrap;">${escapeHtml(formatDisplayDate(entry.date))}</td>
+        <td style="padding: 7px 8px;">
+          <div style="font-weight: 600; color: #0f172a;">${escapeHtml(entry.event?.title || 'Event Catering Shift')}</div>
+          <div style="font-size: 0.72rem; color: #64748b;">
+            Role: ${escapeHtml(entry.shift.role_label || row.staff.role_title || 'Crew')} &bull; Shift: ${escapeHtml(timeSpan)}
+          </div>
+        </td>
+        <td style="padding: 7px 8px; text-align: center; color: #334155; font-weight: 600;">
+          ${entry.hours} hrs
+        </td>
+        <td style="padding: 7px 8px; text-align: right; color: #334155;">
+          ${escapeHtml(entry.rateLabel)}
+        </td>
+        <td style="padding: 7px 8px; text-align: right; font-weight: 700; color: #0f172a;">
+          ${row.salaryType === 'monthly' ? 'Included' : `₹${entry.earnedAmount.toLocaleString('en-IN')}`}
+        </td>
+      </tr>
+    `);
+  }
+
+  for (const rec of row.allowanceRecords) {
+    const linkedEvt = rec.event_id
+      ? state.events.find((e) => e.id === rec.event_id)
+      : undefined;
+    earningRowsList.push(`
+      <tr style="border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
+        <td style="padding: 7px 8px; font-weight: 600; white-space: nowrap;">${escapeHtml(formatDisplayDate(rec.recorded_at))}</td>
+        <td style="padding: 7px 8px;">
+          <div style="font-weight: 600; color: #1d4ed8;">${escapeHtml(rec.method || 'Duty Allowance / Bonus')}</div>
+          <div style="font-size: 0.72rem; color: #64748b;">
+            ${escapeHtml(rec.note || (linkedEvt ? `Event: ${linkedEvt.title}` : 'Additional wage / allowance'))}
+          </div>
+        </td>
+        <td style="padding: 7px 8px; text-align: center; color: #64748b;">Bonus</td>
+        <td style="padding: 7px 8px; text-align: right; color: #64748b;">Allowance</td>
+        <td style="padding: 7px 8px; text-align: right; font-weight: 700; color: #1d4ed8;">
+          ₹${Number(rec.amount || 0).toLocaleString('en-IN')}
+        </td>
+      </tr>
+    `);
+  }
 
   const earningRowsHtml =
-    row.attendedShifts.length > 0 || row.allowanceRecords.length > 0
-      ? [
-          ...row.attendedShifts.map((entry) => {
-            const timeSpan = `${(entry.shift.starts_at || '').slice(11, 16)} – ${(entry.shift.ends_at || '').slice(11, 16)}`;
-            return `
-              <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 7px 8px; font-weight: 600; white-space: nowrap;">${escapeHtml(formatDisplayDate(entry.date))}</td>
-                <td style="padding: 7px 8px;">
-                  <div style="font-weight: 600; color: #0f172a;">${escapeHtml(entry.event?.title || 'Event Catering Shift')}</div>
-                  <div style="font-size: 0.72rem; color: #64748b;">
-                    Role: ${escapeHtml(entry.shift.role_label || row.staff.role_title || 'Crew')} &bull; Shift: ${escapeHtml(timeSpan)}
-                  </div>
-                </td>
-                <td style="padding: 7px 8px; text-align: center; color: #334155; font-weight: 600;">
-                  ${entry.hours} hrs
-                </td>
-                <td style="padding: 7px 8px; text-align: right; color: #334155;">
-                  ₹${entry.hourlyRate.toLocaleString('en-IN')}/hr
-                </td>
-                <td style="padding: 7px 8px; text-align: right; font-weight: 700; color: #0f172a;">
-                  ₹${entry.earnedAmount.toLocaleString('en-IN')}
-                </td>
-              </tr>
-            `;
-          }),
-          ...row.allowanceRecords.map((rec) => {
-            const linkedEvt = rec.event_id
-              ? state.events.find((e) => e.id === rec.event_id)
-              : undefined;
-            return `
-              <tr style="border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
-                <td style="padding: 7px 8px; font-weight: 600; white-space: nowrap;">${escapeHtml(formatDisplayDate(rec.recorded_at))}</td>
-                <td style="padding: 7px 8px;">
-                  <div style="font-weight: 600; color: #1d4ed8;">${escapeHtml(rec.method || 'Duty Allowance / Bonus')}</div>
-                  <div style="font-size: 0.72rem; color: #64748b;">
-                    ${escapeHtml(rec.note || (linkedEvt ? `Event: ${linkedEvt.title}` : 'Additional wage / allowance'))}
-                  </div>
-                </td>
-                <td style="padding: 7px 8px; text-align: center; color: #64748b;">Fixed</td>
-                <td style="padding: 7px 8px; text-align: right; color: #64748b;">Allowance</td>
-                <td style="padding: 7px 8px; text-align: right; font-weight: 700; color: #1d4ed8;">
-                  ₹${Number(rec.amount || 0).toLocaleString('en-IN')}
-                </td>
-              </tr>
-            `;
-          })
-        ].join('')
+    earningRowsList.length > 0
+      ? earningRowsList.join('')
       : `
         <tr style="border-bottom: 1px solid #e2e8f0;">
           <td colspan="5" style="padding: 12px 8px; text-align: center; color: #64748b; font-size: 0.8rem;">
-            No attended shifts or extra wage entries recorded during this period.
+            No attended shifts, monthly base salary, or extra wage entries recorded during this period.
           </td>
         </tr>
       `;
@@ -307,14 +426,18 @@ export function buildStaffSalarySlipHtml(
             const linkedEvt = pay.event_id
               ? state.events.find((e) => e.id === pay.event_id)
               : undefined;
+            const isAdv = isSalaryAdvanceRecord(pay);
             return `
-              <tr style="border-bottom: 1px solid #e2e8f0;">
+              <tr style="border-bottom: 1px solid #e2e8f0; background: ${isAdv ? '#fffbeb' : '#ffffff'};">
                 <td style="padding: 7px 8px; font-weight: 600; white-space: nowrap;">${escapeHtml(formatDisplayDate(pay.recorded_at))}</td>
+                <td style="padding: 7px 8px; font-weight: 700; color: ${isAdv ? '#b45309' : '#047857'};">
+                  ${isAdv ? 'Salary Advance' : 'Standard Salary Payout'}
+                </td>
                 <td style="padding: 7px 8px; font-weight: 600; color: #0f172a;">${escapeHtml(pay.method || 'Cash / UPI')}</td>
                 <td style="padding: 7px 8px; color: #475569;">
-                  ${escapeHtml(pay.note || (linkedEvt ? `For ${linkedEvt.title}` : 'Salary disbursement'))}
+                  ${escapeHtml(pay.note || (linkedEvt ? `For ${linkedEvt.title}` : isAdv ? 'Advance against salary' : 'Salary disbursement'))}
                 </td>
-                <td style="padding: 7px 8px; text-align: right; font-weight: 700; color: #059669;">
+                <td style="padding: 7px 8px; text-align: right; font-weight: 700; color: ${isAdv ? '#b45309' : '#059669'};">
                   ₹${Number(pay.amount || 0).toLocaleString('en-IN')}
                 </td>
               </tr>
@@ -323,8 +446,8 @@ export function buildStaffSalarySlipHtml(
           .join('')
       : `
         <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td colspan="4" style="padding: 12px 8px; text-align: center; color: #64748b; font-size: 0.8rem;">
-            No salary payments recorded during this period.
+          <td colspan="5" style="padding: 12px 8px; text-align: center; color: #64748b; font-size: 0.8rem;">
+            No salary payouts or advances recorded during this period.
           </td>
         </tr>
       `;
@@ -332,7 +455,7 @@ export function buildStaffSalarySlipHtml(
   const isPeriodSettled = row.periodPayable === 0;
 
   return `
-    <div style="width: 794px; min-height: 1100px; padding: 34px 32px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; background: #ffffff; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between;">
+    <div style="width: 794px; min-height: 1100px; padding: 34px 32px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; background: #ffffff; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; font-variant-numeric: tabular-nums;">
       <div>
         <!-- Company & Slip Header -->
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2.5px solid #0f172a; padding-bottom: 16px; margin-bottom: 20px;">
@@ -367,7 +490,7 @@ export function buildStaffSalarySlipHtml(
         <!-- Employee Info & Pay Period Metadata -->
         <div style="display: grid; grid-template-columns: 1.15fr 1fr; gap: 16px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px 16px; margin-bottom: 18px;">
           <div style="font-size: 0.83rem; line-height: 1.6;">
-            <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 2px;">
+            <div style="font-size: 0.7rem; font-weight: 700; letter-spacing: 0.4px; color: #64748b; margin-bottom: 2px;">
               Staff / Crew Member Details
             </div>
             <div style="font-size: 1.02rem; font-weight: 800; color: #0f172a;">
@@ -375,71 +498,72 @@ export function buildStaffSalarySlipHtml(
             </div>
             <div><strong>Designation / Role:</strong> ${escapeHtml(row.staff.role_title || 'Service Crew')}</div>
             <div><strong>Mobile Number:</strong> ${escapeHtml(row.staff.phone || '—')}</div>
-            <div><strong>Standard Hourly Rate:</strong> ₹${Number(row.staff.hourly_rate || 0).toLocaleString('en-IN')} / hr</div>
+            <div><strong>Salary Structure:</strong> ${escapeHtml(salaryStructureLabel)} (${escapeHtml(row.rateDisplay)})</div>
           </div>
 
           <div style="text-align: right; font-size: 0.83rem; line-height: 1.6;">
-            <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 2px;">
+            <div style="font-size: 0.7rem; font-weight: 700; letter-spacing: 0.4px; color: #64748b; margin-bottom: 2px;">
               Statement Period
             </div>
             <div style="font-size: 0.94rem; font-weight: 800; color: #0f172a;">
               ${escapeHtml(periodLabel)}
             </div>
-            <div><strong>Attended Shifts:</strong> ${row.attendedShiftsCount} shift${row.attendedShiftsCount === 1 ? '' : 's'}</div>
-            <div><strong>Total Hours Worked:</strong> ${row.totalHoursWorked} hrs</div>
-            <div style="margin-top: 4px;">
-              <span style="display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; background: ${isPeriodSettled ? '#dcfce7' : '#fee2e2'}; color: ${isPeriodSettled ? '#15803d' : '#b91c1c'};">
-                ${isPeriodSettled ? 'Period Settled' : 'Balance Payable'}
-              </span>
-            </div>
+            <div><strong>Attended Shifts:</strong> ${row.attendedShiftsCount} shift${row.attendedShiftsCount === 1 ? '' : 's'} (${row.totalHoursWorked} hrs)</div>
+            <div><strong>Status:</strong> <span style="font-weight: 800; color: ${isPeriodSettled ? '#15803d' : '#b91c1c'};">${isPeriodSettled ? 'Period Settled' : 'Balance Payable'}</span></div>
           </div>
         </div>
 
-        <!-- 4 Summary Highlight Boxes -->
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
-          <div style="border: 1px solid #cbd5e1; border-left: 4px solid #475569; border-radius: 6px; padding: 10px 12px; background: #ffffff;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Hours Worked</div>
-            <div style="font-size: 1.2rem; font-weight: 800; color: #0f172a; margin-top: 2px;">${row.totalHoursWorked} hrs</div>
-            <div style="font-size: 0.7rem; color: #64748b;">${row.attendedShiftsCount} present shift${row.attendedShiftsCount === 1 ? '' : 's'}</div>
+        <!-- 5 Summary Highlight Boxes (Separating Standard Salary Paid & Salary Advances) -->
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 20px;">
+          <div style="border: 1px solid #cbd5e1; border-top: 3px solid #475569; border-radius: 6px; padding: 9px 10px; background: #ffffff;">
+            <div style="font-size: 0.68rem; font-weight: 700; color: #64748b;">Attendance</div>
+            <div style="font-size: 1.05rem; font-weight: 800; color: #0f172a; margin-top: 2px;">${row.totalHoursWorked} hrs</div>
+            <div style="font-size: 0.68rem; color: #64748b;">${row.attendedShiftsCount} present shift${row.attendedShiftsCount === 1 ? '' : 's'}</div>
           </div>
 
-          <div style="border: 1px solid #bfdbfe; border-left: 4px solid #2563eb; border-radius: 6px; padding: 10px 12px; background: #eff6ff;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: #1e40af; text-transform: uppercase;">Total Earnings</div>
-            <div style="font-size: 1.2rem; font-weight: 800; color: #1e3a8a; margin-top: 2px;">₹${row.totalEarnings.toLocaleString('en-IN')}</div>
-            <div style="font-size: 0.7rem; color: #1e40af;">Shifts + Allowances</div>
+          <div style="border: 1px solid #bfdbfe; border-top: 3px solid #2563eb; border-radius: 6px; padding: 9px 10px; background: #eff6ff;">
+            <div style="font-size: 0.68rem; font-weight: 700; color: #1e40af;">Total Earnings</div>
+            <div style="font-size: 1.05rem; font-weight: 800; color: #1e3a8a; margin-top: 2px;">₹${row.totalEarnings.toLocaleString('en-IN')}</div>
+            <div style="font-size: 0.68rem; color: #1e40af;">${escapeHtml(salaryStructureLabel)} + Bonus</div>
           </div>
 
-          <div style="border: 1px solid #a7f3d0; border-left: 4px solid #059669; border-radius: 6px; padding: 10px 12px; background: #ecfdf5;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: #065f46; text-transform: uppercase;">Payments Received</div>
-            <div style="font-size: 1.2rem; font-weight: 800; color: #059669; margin-top: 2px;">₹${row.paymentsReceived.toLocaleString('en-IN')}</div>
-            <div style="font-size: 0.7rem; color: #065f46;">${row.paymentRecords.length} payment${row.paymentRecords.length === 1 ? '' : 's'}</div>
+          <div style="border: 1px solid #a7f3d0; border-top: 3px solid #059669; border-radius: 6px; padding: 9px 10px; background: #ecfdf5;">
+            <div style="font-size: 0.68rem; font-weight: 700; color: #065f46;">Salary Paid</div>
+            <div style="font-size: 1.05rem; font-weight: 800; color: #059669; margin-top: 2px;">₹${row.regularPaymentsReceived.toLocaleString('en-IN')}</div>
+            <div style="font-size: 0.68rem; color: #065f46;">${row.regularPaymentRecords.length} standard payout${row.regularPaymentRecords.length === 1 ? '' : 's'}</div>
           </div>
 
-          <div style="border: 1px solid ${row.periodPayable > 0 ? '#fecaca' : '#cbd5e1'}; border-left: 4px solid ${row.periodPayable > 0 ? '#dc2626' : '#059669'}; border-radius: 6px; padding: 10px 12px; background: ${row.periodPayable > 0 ? '#fef2f2' : '#f8fafc'};">
-            <div style="font-size: 0.7rem; font-weight: 700; color: ${row.periodPayable > 0 ? '#991b1b' : '#334155'}; text-transform: uppercase;">
-              ${row.periodAdvanceExcess > 0 ? 'Advance Excess' : 'Period Balance'}
+          <div style="border: 1px solid #fde68a; border-top: 3px solid #d97706; border-radius: 6px; padding: 9px 10px; background: #fffbeb;">
+            <div style="font-size: 0.68rem; font-weight: 700; color: #b45309;">Salary Advance</div>
+            <div style="font-size: 1.05rem; font-weight: 800; color: #d97706; margin-top: 2px;">₹${row.advancesReceived.toLocaleString('en-IN')}</div>
+            <div style="font-size: 0.68rem; color: #b45309;">${row.advancePaymentRecords.length} advance${row.advancePaymentRecords.length === 1 ? '' : 's'}</div>
+          </div>
+
+          <div style="border: 1px solid ${row.periodPayable > 0 ? '#fecaca' : '#cbd5e1'}; border-top: 3px solid ${row.periodPayable > 0 ? '#dc2626' : '#059669'}; border-radius: 6px; padding: 9px 10px; background: ${row.periodPayable > 0 ? '#fef2f2' : '#f8fafc'};">
+            <div style="font-size: 0.68rem; font-weight: 700; color: ${row.periodPayable > 0 ? '#991b1b' : '#334155'};">
+              ${row.periodAdvanceExcess > 0 ? 'Advance Excess' : 'Net Payable'}
             </div>
-            <div style="font-size: 1.2rem; font-weight: 800; color: ${row.periodPayable > 0 ? '#dc2626' : '#059669'}; margin-top: 2px;">
+            <div style="font-size: 1.05rem; font-weight: 800; color: ${row.periodPayable > 0 ? '#dc2626' : '#059669'}; margin-top: 2px;">
               ₹${(row.periodAdvanceExcess > 0 ? row.periodAdvanceExcess : row.periodPayable).toLocaleString('en-IN')}
             </div>
-            <div style="font-size: 0.7rem; color: #64748b;">
-              ${row.periodPayable > 0 ? 'Remaining for period' : row.periodAdvanceExcess > 0 ? 'Paid over period earnings' : 'Cleared in period'}
+            <div style="font-size: 0.68rem; color: #64748b;">
+              ${row.periodPayable > 0 ? 'Balance due' : row.periodAdvanceExcess > 0 ? 'Overpaid / Advance' : 'Settled'}
             </div>
           </div>
         </div>
 
         <!-- Earnings Breakdown Table -->
         <div style="margin-bottom: 18px;">
-          <div style="font-size: 0.82rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: #0f172a; margin-bottom: 6px;">
-            1. Attended Shifts &amp; Earnings Breakdown
+          <div style="font-size: 0.82rem; font-weight: 800; letter-spacing: 0.3px; color: #0f172a; margin-bottom: 6px;">
+            1. Salary, Attended Shifts &amp; Allowances Breakdown
           </div>
           <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; border: 1px solid #cbd5e1;">
             <thead>
               <tr style="background: #0f172a; color: #ffffff;">
-                <th style="padding: 7px 8px; text-align: left; width: 105px;">Date</th>
-                <th style="padding: 7px 8px; text-align: left;">Event / Duty Description</th>
-                <th style="padding: 7px 8px; text-align: center; width: 85px;">Hours</th>
-                <th style="padding: 7px 8px; text-align: right; width: 95px;">Rate</th>
+                <th style="padding: 7px 8px; text-align: left; width: 105px;">Date / Period</th>
+                <th style="padding: 7px 8px; text-align: left;">Event / Salary Description</th>
+                <th style="padding: 7px 8px; text-align: center; width: 85px;">Units</th>
+                <th style="padding: 7px 8px; text-align: right; width: 105px;">Rate</th>
                 <th style="padding: 7px 8px; text-align: right; width: 105px;">Earned (₹)</th>
               </tr>
             </thead>
@@ -449,18 +573,19 @@ export function buildStaffSalarySlipHtml(
           </table>
         </div>
 
-        <!-- Payments Received Breakdown Table -->
+        <!-- Payments & Advances Breakdown Table -->
         <div style="margin-bottom: 20px;">
-          <div style="font-size: 0.82rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: #0f172a; margin-bottom: 6px;">
-            2. Salary Payments Received in Period
+          <div style="font-size: 0.82rem; font-weight: 800; letter-spacing: 0.3px; color: #0f172a; margin-bottom: 6px;">
+            2. Standard Salary Payouts &amp; Salary Advances Received
           </div>
           <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; border: 1px solid #cbd5e1;">
             <thead>
               <tr style="background: #f1f5f9; color: #0f172a; border-bottom: 2px solid #cbd5e1;">
-                <th style="padding: 7px 8px; text-align: left; width: 105px;">Date</th>
-                <th style="padding: 7px 8px; text-align: left; width: 150px;">Payment Method</th>
+                <th style="padding: 7px 8px; text-align: left; width: 100px;">Date</th>
+                <th style="padding: 7px 8px; text-align: left; width: 155px;">Payout Type</th>
+                <th style="padding: 7px 8px; text-align: left; width: 120px;">Method</th>
                 <th style="padding: 7px 8px; text-align: left;">Reference / Note</th>
-                <th style="padding: 7px 8px; text-align: right; width: 115px;">Received (₹)</th>
+                <th style="padding: 7px 8px; text-align: right; width: 110px;">Amount (₹)</th>
               </tr>
             </thead>
             <tbody>
@@ -471,11 +596,22 @@ export function buildStaffSalarySlipHtml(
 
         <!-- Net Salary Calculation Box -->
         <div style="display: flex; justify-content: flex-end; margin-bottom: 24px;">
-          <div style="width: 350px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 14px; background: #f8fafc; font-size: 0.83rem;">
-            <div style="display: flex; justify-content: space-between; padding: 3px 0;">
-              <span style="color: #475569;">Shift Wages (${row.totalHoursWorked} hrs):</span>
-              <span style="font-weight: 600;">₹${row.shiftEarnings.toLocaleString('en-IN')}</span>
-            </div>
+          <div style="width: 370px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 14px; background: #f8fafc; font-size: 0.83rem;">
+            ${
+              row.salaryType === 'monthly'
+                ? `
+                  <div style="display: flex; justify-content: space-between; padding: 3px 0;">
+                    <span style="color: #475569;">Monthly Fixed Salary (${row.monthlyMonthsCount} mo):</span>
+                    <span style="font-weight: 600;">₹${row.monthlyBaseEarnings.toLocaleString('en-IN')}</span>
+                  </div>
+                `
+                : `
+                  <div style="display: flex; justify-content: space-between; padding: 3px 0;">
+                    <span style="color: #475569;">${row.salaryType === 'per_event' ? `Event Wages (${row.attendedShiftsCount} events)` : `Shift Wages (${row.totalHoursWorked} hrs)`}:</span>
+                    <span style="font-weight: 600;">₹${row.shiftEarnings.toLocaleString('en-IN')}</span>
+                  </div>
+                `
+            }
             <div style="display: flex; justify-content: space-between; padding: 3px 0;">
               <span style="color: #475569;">Duty Allowances / Bonuses:</span>
               <span style="font-weight: 600;">₹${row.extraEarnings.toLocaleString('en-IN')}</span>
@@ -484,9 +620,13 @@ export function buildStaffSalarySlipHtml(
               <span>Gross Period Earnings:</span>
               <span>₹${row.totalEarnings.toLocaleString('en-IN')}</span>
             </div>
-            <div style="display: flex; justify-content: space-between; padding: 4px 0; color: #059669; font-weight: 700;">
-              <span>Less: Payments Received:</span>
-              <span>- ₹${row.paymentsReceived.toLocaleString('en-IN')}</span>
+            <div style="display: flex; justify-content: space-between; padding: 3px 0; color: #059669; font-weight: 700;">
+              <span>Less: Standard Salary Payouts:</span>
+              <span>- ₹${row.regularPaymentsReceived.toLocaleString('en-IN')}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 3px 0; color: #b45309; font-weight: 700;">
+              <span>Less: Salary Advances Deducted:</span>
+              <span>- ₹${row.advancesReceived.toLocaleString('en-IN')}</span>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #0f172a; color: #ffffff; border-radius: 5px; margin-top: 6px;">
               <span style="font-weight: 700;">Net Period Balance Payable:</span>
@@ -575,13 +715,11 @@ async function appendHtmlPageToPdf(
       const imgData = canvas.toDataURL('image/png');
       pdf.addImage(imgData, 'PNG', margin, margin, contentWidth, contentHeight);
     } else if (contentHeight <= printableHeight * 1.35) {
-      // Slightly taller than 1 page: fit proportionally onto one crisp A4 sheet
       const imgData = canvas.toDataURL('image/png');
       const scaledWidth = (printableHeight * canvas.width) / canvas.height;
       const xOffset = margin + (printableWidth - scaledWidth) / 2;
       pdf.addImage(imgData, 'PNG', xOffset, margin, scaledWidth, printableHeight);
     } else {
-      // Very long statement: paginate cleanly across multiple A4 sheets
       const pxPerPage = Math.floor((printableHeight * canvas.width) / contentWidth);
       let renderedHeightPx = 0;
       let subPageIdx = 0;
@@ -673,17 +811,29 @@ export function formatStaffSalarySlipWhatsAppMessage(
 ): string {
   const businessName = state.settings?.name || 'IPPAS FOOD SERVICE & EVENTS';
   const periodLabel = formatPeriodLabel(startDate, endDate);
+  const salaryStructureLabel = formatStaffSalaryTypeLabel(row.salaryType);
+
   const lines: string[] = [
     `🧾 *${businessName}*`,
     `Outdoor Catering • Event Management • Calicut`,
     ``,
     `*STAFF SALARY SLIP*`,
     `👤 *Name:* ${row.staff.name} (${row.staff.role_title || 'Service Crew'})`,
+    `💼 *Salary Plan:* ${salaryStructureLabel} (${row.rateDisplay})`,
     `📅 *Period:* ${periodLabel}`,
     `⏱ *Attended Shifts:* ${row.attendedShiftsCount} (${row.totalHoursWorked} hrs)`,
-    ``,
-    `💼 *Shift Wages:* ₹${row.shiftEarnings.toLocaleString('en-IN')}`
+    ``
   ];
+
+  if (row.salaryType === 'monthly') {
+    lines.push(
+      `🏢 *Monthly Fixed Salary (${row.monthlyMonthsCount} mo):* ₹${row.monthlyBaseEarnings.toLocaleString('en-IN')}`
+    );
+  } else {
+    lines.push(
+      `💼 *${row.salaryType === 'per_event' ? 'Event Wages' : 'Shift Wages'}:* ₹${row.shiftEarnings.toLocaleString('en-IN')}`
+    );
+  }
 
   if (row.extraEarnings > 0) {
     lines.push(`🎁 *Allowances / Bonus:* ₹${row.extraEarnings.toLocaleString('en-IN')}`);
@@ -691,7 +841,8 @@ export function formatStaffSalarySlipWhatsAppMessage(
 
   lines.push(
     `💰 *Total Earned:* ₹${row.totalEarnings.toLocaleString('en-IN')}`,
-    `✅ *Payments Received:* ₹${row.paymentsReceived.toLocaleString('en-IN')}`,
+    `✅ *Standard Salary Paid:* ₹${row.regularPaymentsReceived.toLocaleString('en-IN')}`,
+    `⚡ *Salary Advances:* ₹${row.advancesReceived.toLocaleString('en-IN')}`,
     row.periodPayable > 0
       ? `⏳ *Period Balance Payable:* ₹${row.periodPayable.toLocaleString('en-IN')}`
       : `🎉 *Status:* Period Settled`
@@ -797,31 +948,31 @@ function buildStaffPayrollSummaryHtml(
           .map(
             (r, idx) => `
               <tr style="border-bottom: 1px solid #e2e8f0; background: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'};">
-                <td style="padding: 8px 7px;">
+                <td style="padding: 8px 6px;">
                   <div style="font-weight: 700; color: #0f172a;">${escapeHtml(r.staff.name)}</div>
-                  <div style="font-size: 0.7rem; color: #64748b;">
-                    ${escapeHtml(r.staff.role_title || 'Crew')} &bull; ₹${Number(r.staff.hourly_rate || 0).toLocaleString('en-IN')}/hr
+                  <div style="font-size: 0.69rem; color: #64748b;">
+                    ${escapeHtml(r.staff.role_title || 'Crew')} &bull; ${escapeHtml(formatStaffSalaryTypeLabel(r.salaryType))} (${escapeHtml(r.rateDisplay)})
                   </div>
                 </td>
-                <td style="padding: 8px 7px; text-align: center; font-weight: 600; color: #334155;">
-                  ${r.attendedShiftsCount}
+                <td style="padding: 8px 6px; text-align: center; font-weight: 600; color: #334155;">
+                  ${r.attendedShiftsCount} (${r.totalHoursWorked}h)
                 </td>
-                <td style="padding: 8px 7px; text-align: center; font-weight: 700; color: #0f172a;">
-                  ${r.totalHoursWorked} hrs
+                <td style="padding: 8px 6px; text-align: right; color: #334155;">
+                  ₹${(r.shiftEarnings + r.monthlyBaseEarnings).toLocaleString('en-IN')}
                 </td>
-                <td style="padding: 8px 7px; text-align: right; color: #334155;">
-                  ₹${r.shiftEarnings.toLocaleString('en-IN')}
-                </td>
-                <td style="padding: 8px 7px; text-align: right; color: #1d4ed8;">
+                <td style="padding: 8px 6px; text-align: right; color: #1d4ed8;">
                   ₹${r.extraEarnings.toLocaleString('en-IN')}
                 </td>
-                <td style="padding: 8px 7px; text-align: right; font-weight: 700; color: #0f172a;">
+                <td style="padding: 8px 6px; text-align: right; font-weight: 700; color: #0f172a;">
                   ₹${r.totalEarnings.toLocaleString('en-IN')}
                 </td>
-                <td style="padding: 8px 7px; text-align: right; font-weight: 700; color: #059669;">
-                  ₹${r.paymentsReceived.toLocaleString('en-IN')}
+                <td style="padding: 8px 6px; text-align: right; font-weight: 700; color: #059669;">
+                  ₹${r.regularPaymentsReceived.toLocaleString('en-IN')}
                 </td>
-                <td style="padding: 8px 7px; text-align: right; font-weight: 800; color: ${r.periodPayable > 0 ? '#dc2626' : '#059669'};">
+                <td style="padding: 8px 6px; text-align: right; font-weight: 700; color: #b45309;">
+                  ₹${r.advancesReceived.toLocaleString('en-IN')}
+                </td>
+                <td style="padding: 8px 6px; text-align: right; font-weight: 800; color: ${r.periodPayable > 0 ? '#dc2626' : '#059669'};">
                   ₹${r.periodPayable.toLocaleString('en-IN')}
                 </td>
               </tr>
@@ -836,8 +987,8 @@ function buildStaffPayrollSummaryHtml(
         </tr>
       `;
 
-  const html = `
-    <div style="width: 794px; min-height: 1100px; padding: 34px 30px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; background: #ffffff; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between;">
+  return `
+    <div style="width: 794px; min-height: 1100px; padding: 34px 30px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #0f172a; background: #ffffff; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; font-variant-numeric: tabular-nums;">
       <div>
         <!-- Header -->
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2.5px solid #0f172a; padding-bottom: 16px; margin-bottom: 20px;">
@@ -867,44 +1018,50 @@ function buildStaffPayrollSummaryHtml(
         </div>
 
         <!-- Aggregate KPI Cards -->
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;">
-          <div style="border: 1px solid #cbd5e1; border-left: 4px solid #475569; border-radius: 6px; padding: 10px 12px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Total Hours Worked</div>
-            <div style="font-size: 1.2rem; font-weight: 800; color: #0f172a; margin-top: 2px;">${totals.totalHoursWorked} hrs</div>
-            <div style="font-size: 0.7rem; color: #64748b;">${totals.attendedShiftsCount} attended shifts</div>
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 20px;">
+          <div style="border: 1px solid #cbd5e1; border-top: 3px solid #475569; border-radius: 6px; padding: 9px 10px;">
+            <div style="font-size: 0.68rem; font-weight: 700; color: #64748b;">Total Hours</div>
+            <div style="font-size: 1.05rem; font-weight: 800; color: #0f172a; margin-top: 2px;">${totals.totalHoursWorked} hrs</div>
+            <div style="font-size: 0.68rem; color: #64748b;">${totals.attendedShiftsCount} attended shifts</div>
           </div>
 
-          <div style="border: 1px solid #bfdbfe; border-left: 4px solid #2563eb; border-radius: 6px; padding: 10px 12px; background: #eff6ff;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: #1e40af; text-transform: uppercase;">Total Earnings</div>
-            <div style="font-size: 1.2rem; font-weight: 800; color: #1e3a8a; margin-top: 2px;">₹${totals.totalEarnings.toLocaleString('en-IN')}</div>
-            <div style="font-size: 0.7rem; color: #1e40af;">${totals.staffCount} staff summarized</div>
+          <div style="border: 1px solid #bfdbfe; border-top: 3px solid #2563eb; border-radius: 6px; padding: 9px 10px; background: #eff6ff;">
+            <div style="font-size: 0.68rem; font-weight: 700; color: #1e40af;">Total Earnings</div>
+            <div style="font-size: 1.05rem; font-weight: 800; color: #1e3a8a; margin-top: 2px;">₹${totals.totalEarnings.toLocaleString('en-IN')}</div>
+            <div style="font-size: 0.68rem; color: #1e40af;">${totals.staffCount} staff summarized</div>
           </div>
 
-          <div style="border: 1px solid #a7f3d0; border-left: 4px solid #059669; border-radius: 6px; padding: 10px 12px; background: #ecfdf5;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: #065f46; text-transform: uppercase;">Payments Received</div>
-            <div style="font-size: 1.2rem; font-weight: 800; color: #059669; margin-top: 2px;">₹${totals.paymentsReceived.toLocaleString('en-IN')}</div>
-            <div style="font-size: 0.7rem; color: #065f46;">${totals.paymentCount} disbursements</div>
+          <div style="border: 1px solid #a7f3d0; border-top: 3px solid #059669; border-radius: 6px; padding: 9px 10px; background: #ecfdf5;">
+            <div style="font-size: 0.68rem; font-weight: 700; color: #065f46;">Salary Paid</div>
+            <div style="font-size: 1.05rem; font-weight: 800; color: #059669; margin-top: 2px;">₹${totals.regularPaymentsReceived.toLocaleString('en-IN')}</div>
+            <div style="font-size: 0.68rem; color: #065f46;">${totals.paymentCount} standard payouts</div>
           </div>
 
-          <div style="border: 1px solid ${totals.periodPayable > 0 ? '#fecaca' : '#cbd5e1'}; border-left: 4px solid ${totals.periodPayable > 0 ? '#dc2626' : '#059669'}; border-radius: 6px; padding: 10px 12px; background: ${totals.periodPayable > 0 ? '#fef2f2' : '#f8fafc'};">
-            <div style="font-size: 0.7rem; font-weight: 700; color: ${totals.periodPayable > 0 ? '#991b1b' : '#334155'}; text-transform: uppercase;">Net Period Payable</div>
-            <div style="font-size: 1.2rem; font-weight: 800; color: ${totals.periodPayable > 0 ? '#dc2626' : '#059669'}; margin-top: 2px;">₹${totals.periodPayable.toLocaleString('en-IN')}</div>
-            <div style="font-size: 0.7rem; color: #64748b;">Unpaid period balance</div>
+          <div style="border: 1px solid #fde68a; border-top: 3px solid #d97706; border-radius: 6px; padding: 9px 10px; background: #fffbeb;">
+            <div style="font-size: 0.68rem; font-weight: 700; color: #b45309;">Salary Advances</div>
+            <div style="font-size: 1.05rem; font-weight: 800; color: #d97706; margin-top: 2px;">₹${totals.advancesReceived.toLocaleString('en-IN')}</div>
+            <div style="font-size: 0.68rem; color: #b45309;">${totals.advanceCount} advance payouts</div>
+          </div>
+
+          <div style="border: 1px solid ${totals.periodPayable > 0 ? '#fecaca' : '#cbd5e1'}; border-top: 3px solid ${totals.periodPayable > 0 ? '#dc2626' : '#059669'}; border-radius: 6px; padding: 9px 10px; background: ${totals.periodPayable > 0 ? '#fef2f2' : '#f8fafc'};">
+            <div style="font-size: 0.68rem; font-weight: 700; color: ${totals.periodPayable > 0 ? '#991b1b' : '#334155'};">Net Payable</div>
+            <div style="font-size: 1.05rem; font-weight: 800; color: ${totals.periodPayable > 0 ? '#dc2626' : '#059669'}; margin-top: 2px;">₹${totals.periodPayable.toLocaleString('en-IN')}</div>
+            <div style="font-size: 0.68rem; color: #64748b;">Unpaid period balance</div>
           </div>
         </div>
 
         <!-- Summary Table -->
-        <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; border: 1px solid #cbd5e1;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.76rem; border: 1px solid #cbd5e1;">
           <thead>
             <tr style="background: #0f172a; color: #ffffff;">
-              <th style="padding: 8px 7px; text-align: left;">Staff Member</th>
-              <th style="padding: 8px 7px; text-align: center;">Shifts</th>
-              <th style="padding: 8px 7px; text-align: center;">Hours</th>
-              <th style="padding: 8px 7px; text-align: right;">Shift Pay</th>
-              <th style="padding: 8px 7px; text-align: right;">Allowances</th>
-              <th style="padding: 8px 7px; text-align: right;">Total Earned</th>
-              <th style="padding: 8px 7px; text-align: right;">Paid</th>
-              <th style="padding: 8px 7px; text-align: right;">Payable</th>
+              <th style="padding: 8px 6px; text-align: left;">Staff Member &amp; Plan</th>
+              <th style="padding: 8px 6px; text-align: center;">Shifts</th>
+              <th style="padding: 8px 6px; text-align: right;">Base / Shift</th>
+              <th style="padding: 8px 6px; text-align: right;">Bonus</th>
+              <th style="padding: 8px 6px; text-align: right;">Total Earned</th>
+              <th style="padding: 8px 6px; text-align: right;">Salary Paid</th>
+              <th style="padding: 8px 6px; text-align: right;">Advance</th>
+              <th style="padding: 8px 6px; text-align: right;">Payable</th>
             </tr>
           </thead>
           <tbody>
@@ -912,23 +1069,23 @@ function buildStaffPayrollSummaryHtml(
           </tbody>
           <tfoot>
             <tr style="background: #f1f5f9; border-top: 2px solid #0f172a; font-weight: 800;">
-              <td style="padding: 9px 7px;">TOTAL (${rows.length} Staff)</td>
-              <td style="padding: 9px 7px; text-align: center;">${totals.attendedShiftsCount}</td>
-              <td style="padding: 9px 7px; text-align: center;">${totals.totalHoursWorked} hrs</td>
-              <td style="padding: 9px 7px; text-align: right;">₹${totals.shiftEarnings.toLocaleString('en-IN')}</td>
-              <td style="padding: 9px 7px; text-align: right;">₹${totals.extraEarnings.toLocaleString('en-IN')}</td>
-              <td style="padding: 9px 7px; text-align: right;">₹${totals.totalEarnings.toLocaleString('en-IN')}</td>
-              <td style="padding: 9px 7px; text-align: right; color: #059669;">₹${totals.paymentsReceived.toLocaleString('en-IN')}</td>
-              <td style="padding: 9px 7px; text-align: right; color: ${totals.periodPayable > 0 ? '#dc2626' : '#059669'};">₹${totals.periodPayable.toLocaleString('en-IN')}</td>
+              <td style="padding: 9px 6px;">TOTAL (${rows.length} Staff)</td>
+              <td style="padding: 9px 6px; text-align: center;">${totals.attendedShiftsCount} (${totals.totalHoursWorked}h)</td>
+              <td style="padding: 9px 6px; text-align: right;">₹${(totals.shiftEarnings + totals.monthlyBaseEarnings).toLocaleString('en-IN')}</td>
+              <td style="padding: 9px 6px; text-align: right;">₹${totals.extraEarnings.toLocaleString('en-IN')}</td>
+              <td style="padding: 9px 6px; text-align: right;">₹${totals.totalEarnings.toLocaleString('en-IN')}</td>
+              <td style="padding: 9px 6px; text-align: right; color: #059669;">₹${totals.regularPaymentsReceived.toLocaleString('en-IN')}</td>
+              <td style="padding: 9px 6px; text-align: right; color: #b45309;">₹${totals.advancesReceived.toLocaleString('en-IN')}</td>
+              <td style="padding: 9px 6px; text-align: right; color: ${totals.periodPayable > 0 ? '#dc2626' : '#059669'};">₹${totals.periodPayable.toLocaleString('en-IN')}</td>
             </tr>
           </tfoot>
         </table>
       </div>
 
       <!-- Footer -->
-      <div style="border-top: 1px solid #cbd5e1; padding-top: 20px; margin-top: 20px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 0.76rem; color: #64748b;">
+      <div style="border-top: 1px solid #cbd5e1; padding-top: 20px; margin-top: 20px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 0.75rem; color: #64748b;">
         <div>
-          Note: Shift hours and shift earnings include only shifts marked Present on active events.
+          Note: Standard Salary Payouts and Salary Advances are tracked separately and both deducted from Gross Period Earnings.
         </div>
         <div style="text-align: center;">
           <div style="font-weight: 700; color: #0f172a; margin-bottom: 20px;">For ${escapeHtml(businessName)}</div>
@@ -937,7 +1094,6 @@ function buildStaffPayrollSummaryHtml(
       </div>
     </div>
   `;
-  return html;
 }
 
 /**

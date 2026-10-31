@@ -26,13 +26,15 @@ export default function MobileBottomNav() {
       setCurrentUser(store.getCurrentUser());
       const lowCount = state.ingredients.filter((i) => i.stock_qty <= i.low_stock_level).length;
       setLowStockCount(lowCount);
-      setUnreadAuditCount(
+      const isOwnerOrSuper = state.currentRole === 'owner' || state.currentRole === 'super_admin';
+      const backupDueCount = isOwnerOrSuper && store.getBackupReminderStatus().isDue ? 1 : 0;
+      const baseUnread =
         state.currentRole === 'owner'
           ? store.getUnreadOwnerAlerts().length
           : state.currentRole === 'super_admin'
           ? (state.auditLogs || []).filter((l) => !l.is_read_by_owner && l.actor_role !== 'super_admin').length
-          : 0
-      );
+          : 0;
+      setUnreadAuditCount(baseUnread + backupDueCount);
     };
 
     update();
@@ -46,7 +48,7 @@ export default function MobileBottomNav() {
     if (isStaff) {
       return [
         { label: 'My Duty', href: '/dashboard', icon: '📍' },
-        { label: 'മാനുവൽ', href: '/manuals', icon: '📘' },
+        { label: 'Manual', href: '/manuals', icon: '📘' },
         { label: 'Install', href: '#install', icon: '📲', isInstall: true },
         { label: 'Password', href: '#password', icon: '🔑', isPassword: true },
         { label: 'Sign Out', href: '#logout', icon: '🚪', isLogout: true }
@@ -102,8 +104,8 @@ export default function MobileBottomNav() {
       roles: ['super_admin', 'owner']
     },
     { label: 'Team Logins', href: '/users', icon: '🛡️', bg: '#fdf4ff', border: '#f5d0fe', color: '#a21caf', roles: ['super_admin', 'owner'] },
-    { label: 'Settings', href: '/settings', icon: '⚙️', bg: '#f0fdfa', border: '#99f6e4', color: '#0f766e', roles: ['super_admin', 'owner'] },
-    { label: 'മലയാളം മാനുവൽ', href: '/manuals', icon: '📘', bg: '#f0fdf4', border: '#bbf7d0', color: '#15803d', roles: ['super_admin', 'owner', 'manager', 'accountant'] }
+    { label: 'Backup & Settings', href: '/settings', icon: '⚙️', bg: '#f0fdfa', border: '#99f6e4', color: '#0f766e', roles: ['super_admin', 'owner'] },
+    { label: 'User Manuals', href: '/manuals', icon: '📘', bg: '#f0fdf4', border: '#bbf7d0', color: '#15803d', roles: ['super_admin', 'owner', 'manager', 'accountant'] }
   ];
 
   const visibleMoreTiles = allMoreTiles.filter((t) => t.roles.includes(role));

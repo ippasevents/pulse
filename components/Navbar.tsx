@@ -41,13 +41,15 @@ export default function Navbar() {
       setIsDbConnected(store.isSqlConnected());
       const lowCount = state.ingredients.filter((i) => i.stock_qty <= i.low_stock_level).length;
       setLowStockCount(lowCount);
-      setUnreadAuditCount(
+      const isOwnerOrSuper = state.currentRole === 'owner' || state.currentRole === 'super_admin';
+      const backupDueCount = isOwnerOrSuper && store.getBackupReminderStatus().isDue ? 1 : 0;
+      const baseUnread =
         state.currentRole === 'owner'
           ? store.getUnreadOwnerAlerts().length
           : state.currentRole === 'super_admin'
           ? (state.auditLogs || []).filter((l) => !l.is_read_by_owner && l.actor_role !== 'super_admin').length
-          : 0
-      );
+          : 0;
+      setUnreadAuditCount(baseUnread + backupDueCount);
     };
 
     update();
@@ -81,7 +83,7 @@ export default function Navbar() {
       return {
         primary: [
           { label: 'Duty & Salary', href: '/dashboard' },
-          { label: 'മലയാളം മാനുവൽ', href: '/manuals' }
+          { label: 'User Manual', href: '/manuals' }
         ],
         more: []
       };
@@ -97,8 +99,8 @@ export default function Navbar() {
           { label: 'Vendors', href: '/stock' }
         ],
         more: [
-          { label: 'Clients Directory', href: '/clients', desc: 'Customer contacts & bookings', accent: '#2563eb' },
-          { label: 'മലയാളം യൂസർ മാനുവൽ (PDF)', href: '/manuals', desc: 'Malayalam PDF user guide', accent: '#059669' }
+          { label: 'Clients Directory', href: '/clients', desc: 'Top clients, contacts & bookings', accent: '#2563eb' },
+          { label: 'User Manuals (PDF)', href: '/manuals', desc: 'Role-based English PDF user guides', accent: '#059669' }
         ]
       };
     }
@@ -113,8 +115,8 @@ export default function Navbar() {
           { label: 'Staff', href: '/staff' }
         ],
         more: [
-          { label: 'Clients Directory', href: '/clients', desc: 'Customer contacts & bookings', accent: '#2563eb' },
-          { label: 'മലയാളം യൂസർ മാനുവൽ (PDF)', href: '/manuals', desc: 'Malayalam PDF user manuals', accent: '#059669' }
+          { label: 'Clients Directory', href: '/clients', desc: 'Top clients, contacts & bookings', accent: '#2563eb' },
+          { label: 'User Manuals (PDF)', href: '/manuals', desc: 'Role-based English PDF user manuals', accent: '#059669' }
         ]
       };
     }
@@ -130,12 +132,12 @@ export default function Navbar() {
       ],
       more: [
         { label: 'Stock & Inventory', href: '/stock', desc: 'Warehouse pantry, bulk update & CSV', accent: '#d97706' },
-        { label: 'Clients Directory', href: '/clients', desc: 'Customer profiles & event history', accent: '#2563eb' },
+        { label: 'Clients Directory', href: '/clients', desc: 'Top clients leaderboard & history', accent: '#2563eb' },
         { label: 'Profit & Loss (P&L)', href: '/pnl', desc: 'Event expenditure & net profit', accent: '#e11d48' },
         { label: 'Activity History', href: '/activity', desc: 'Previous → New edited data log', accent: '#6366f1' },
         { label: 'Team & Passwords', href: '/users', desc: 'Manage Manager, Accountant & Staff logins', accent: '#7c3aed' },
-        { label: 'Business Settings', href: '/settings', desc: 'Bank details, terms & cloud sync', accent: '#0d9488' },
-        { label: 'മലയാളം യൂസർ മാനുവൽ (PDF)', href: '/manuals', desc: '4 role-wise Malayalam PDF manuals', accent: '#059669' }
+        { label: 'Backup & Settings', href: '/settings', desc: 'Full database backup, restore & bank info', accent: '#0d9488' },
+        { label: 'User Manuals (PDF)', href: '/manuals', desc: '4 role-based English PDF manuals', accent: '#059669' }
       ]
     };
   };
@@ -354,7 +356,7 @@ export default function Navbar() {
                   >
                     <span>📘</span>
                     <span style={{ fontWeight: 600, fontSize: '0.83rem' }}>
-                      മലയാളം യൂസർ മാനുവൽ (PDF)
+                      User Manuals (PDF)
                     </span>
                   </Link>
 

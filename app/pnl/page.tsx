@@ -242,7 +242,7 @@ export default function ProfitAndLossPage() {
           </div>
         </div>
 
-        <h3 style="font-size:14px;font-weight:800;margin:0 0 8px 0;">Expenditure Summary by Category (ചെലവുകളുടെ സംഗ്രഹം)</h3>
+        <h3 style="font-size:14px;font-weight:800;margin:0 0 8px 0;">Expenditure Summary by Category</h3>
         <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:16px;">
           <thead>
             <tr style="background:#f1f5f9;border-bottom:2px solid #0f172a;">
@@ -253,22 +253,22 @@ export default function ProfitAndLossPage() {
           </thead>
           <tbody>
             <tr style="border-bottom:1px solid #e2e8f0;">
-              <td style="padding:7px 10px;font-weight:700;">1. Stock Pricing (സ്റ്റോക്കിന്റെ പ്രൈസിങ്)</td>
+              <td style="padding:7px 10px;font-weight:700;">1. Stock Pricing</td>
               <td style="padding:7px 10px;color:#475569;">Raw material &amp; kitchen stock cost</td>
               <td style="padding:7px 10px;text-align:right;font-weight:700;">₹${fin.stockPricingCost.toLocaleString('en-IN')}</td>
             </tr>
             <tr style="border-bottom:1px solid #e2e8f0;">
-              <td style="padding:7px 10px;font-weight:700;">2. Extras Taken Cost (എക്സ്ട്രാസ് കൊണ്ടുപോയതിന്റെ ചെലവുകൾ)</td>
+              <td style="padding:7px 10px;font-weight:700;">2. Extras Taken Cost</td>
               <td style="padding:7px 10px;color:#475569;">Rentals, transport, logistics &amp; extra items</td>
               <td style="padding:7px 10px;text-align:right;font-weight:700;">₹${fin.extrasTakenCost.toLocaleString('en-IN')}</td>
             </tr>
             <tr style="border-bottom:1px solid #e2e8f0;">
-              <td style="padding:7px 10px;font-weight:700;">3. Staff Wages, Allowances &amp; Expenses (സ്റ്റാഫിന്റെ ചെലവുകൾ)</td>
+              <td style="padding:7px 10px;font-weight:700;">3. Staff Wages, Allowances &amp; Expenses</td>
               <td style="padding:7px 10px;color:#475569;">Shifts (${fin.attendedShiftCount}): ₹${fin.staffShiftWages.toLocaleString('en-IN')} + Allowances: ₹${fin.staffAllowances.toLocaleString('en-IN')} + Staff Extra: ₹${fin.staffExpenseCost.toLocaleString('en-IN')}</td>
               <td style="padding:7px 10px;text-align:right;font-weight:700;">₹${fin.totalStaffCost.toLocaleString('en-IN')}</td>
             </tr>
             <tr style="border-bottom:1px solid #e2e8f0;">
-              <td style="padding:7px 10px;font-weight:700;">4. Other Expenses (മറ്റ് ചെലവുകൾ)</td>
+              <td style="padding:7px 10px;font-weight:700;">4. Other Expenses</td>
               <td style="padding:7px 10px;color:#475569;">Miscellaneous operational costs</td>
               <td style="padding:7px 10px;text-align:right;font-weight:700;">₹${fin.otherExpenseCost.toLocaleString('en-IN')}</td>
             </tr>
@@ -523,7 +523,7 @@ export default function ProfitAndLossPage() {
             }}
           >
             <span className="stats-label">
-              {totals.netProfit >= 0 ? 'Net Profit (ലാഭം)' : 'Net Loss (നഷ്ടം)'}
+              {totals.netProfit >= 0 ? 'Net Profit' : 'Net Loss'}
             </span>
             <span
               className="stats-value"
@@ -572,7 +572,7 @@ export default function ProfitAndLossPage() {
           >
             <div style={{ padding: '0.75rem 0.9rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border)' }}>
               <div style={{ fontSize: '0.76rem', fontWeight: 700, color: '#475569' }}>
-                📦 Stock Pricing (സ്റ്റോക്കിന്റെ പ്രൈസിങ്)
+                📦 Stock Pricing
               </div>
               <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a', marginTop: '0.2rem' }}>
                 ₹{totals.stockPricingCost.toLocaleString('en-IN')}
@@ -581,7 +581,7 @@ export default function ProfitAndLossPage() {
 
             <div style={{ padding: '0.75rem 0.9rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border)' }}>
               <div style={{ fontSize: '0.76rem', fontWeight: 700, color: '#475569' }}>
-                🚚 Extras Taken (എക്സ്ട്രാസ് ചെലവുകൾ)
+                🚚 Extras Taken
               </div>
               <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a', marginTop: '0.2rem' }}>
                 ₹{totals.extrasTakenCost.toLocaleString('en-IN')}
@@ -590,7 +590,7 @@ export default function ProfitAndLossPage() {
 
             <div style={{ padding: '0.75rem 0.9rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border)' }}>
               <div style={{ fontSize: '0.76rem', fontWeight: 700, color: '#475569' }}>
-                👥 Staff + Allowances (സ്റ്റാഫിന്റെ ചെലവുകൾ)
+                👥 Staff + Allowances
               </div>
               <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a', marginTop: '0.2rem' }}>
                 ₹{totals.totalStaffCost.toLocaleString('en-IN')}
@@ -604,7 +604,7 @@ export default function ProfitAndLossPage() {
 
             <div style={{ padding: '0.75rem 0.9rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border)' }}>
               <div style={{ fontSize: '0.76rem', fontWeight: 700, color: '#475569' }}>
-                🧾 Other Expenses (മറ്റ് ചെലവുകൾ)
+                🧾 Other Expenses
               </div>
               <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a', marginTop: '0.2rem' }}>
                 ₹{totals.otherExpenseCost.toLocaleString('en-IN')}

@@ -377,7 +377,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                   }}
                 >
                   <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#5b21b6' }}>
-                    🔑 Staff Password Reset (സ്റ്റാഫ് പാസ്‌വേഡ് റീസെറ്റ്)
+                    🔑 Staff Password Reset
                   </div>
                   <div style={{ fontSize: '0.76rem', color: '#6d28d9', marginTop: '0.2rem', lineHeight: 1.4 }}>
                     Enter your registered mobile number and full name to set a new login password.
@@ -585,7 +585,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                         textDecoration: 'underline'
                       }}
                     >
-                      Forgot Staff Password? (പാസ്‌വേഡ് മറന്നുപോയോ?)
+                      Forgot Staff Password?
                     </button>
                   </div>
 

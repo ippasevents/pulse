@@ -2,8 +2,13 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { store } from '@/lib/store';
-import { UserRole } from '@/lib/types';
+import {
+  formatStaffSalaryRate,
+  formatStaffSalaryTypeLabel,
+  isSalaryAdvanceRecord,
+  store
+} from '@/lib/store';
+import { StaffSalaryType, UserRole } from '@/lib/types';
 import {
   ResponsiveContainer,
   BarChart,
@@ -16,6 +21,7 @@ import {
 import InvoiceCollectionsCard from '@/components/InvoiceCollectionsCard';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
 import ChangePasswordModal from '@/components/ChangePasswordModal';
+import OwnerDatabaseExportCard from '@/components/OwnerDatabaseExportCard';
 
 export default function DashboardPage() {
   const [state, setState] = useState(store.getState());
@@ -25,6 +31,7 @@ export default function DashboardPage() {
   const [ownerChartRange, setOwnerChartRange] = useState<'all' | '6m'>('all');
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [staffSectionTab, setStaffSectionTab] = useState<'all' | 'upcoming' | 'attended' | 'payments'>('all');
+  const [backupBannerFeedback, setBackupBannerFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     setIsMounted(true);
@@ -111,6 +118,11 @@ export default function DashboardPage() {
       ? store.getStaffSalarySummary(currentUser.id)
       : {
           staffId: '',
+          salaryType: 'hourly' as StaffSalaryType,
+          primaryRate: 0,
+          rateDisplay: '₹0/hr',
+          monthlyMonthsCount: 0,
+          monthlyBaseEarnings: 0,
           shiftItems: [],
           attendedShiftsCount: 0,
           absentShiftsCount: 0,
@@ -119,9 +131,13 @@ export default function DashboardPage() {
           shiftEarnings: 0,
           extraEarnings: 0,
           totalEarned: 0,
+          totalRegularPaid: 0,
+          totalAdvancePaid: 0,
           totalPaid: 0,
           balancePayable: 0,
           advanceExcess: 0,
+          regularPaymentRecords: [],
+          advanceRecords: [],
           paymentRecords: [],
           earningRecords: []
         };
@@ -186,13 +202,15 @@ export default function DashboardPage() {
             <div>
               <div style={{ fontSize: '0.78rem', fontWeight: 600, opacity: 0.9, marginBottom: '0.2rem' }}>
                 Staff Duty &amp; Salary Portal · {currentUser?.phone || 'Crew'}
-                {staffRecord?.hourly_rate ? ` · ₹${staffRecord.hourly_rate}/hr` : ''}
+                {staffRecord
+                  ? ` · ${formatStaffSalaryTypeLabel(staffRecord.salary_type)} (${formatStaffSalaryRate(staffRecord)})`
+                  : ''}
               </div>
               <h1 style={{ fontSize: '1.45rem', fontWeight: 800, margin: 0, letterSpacing: '-0.02em', color: '#ffffff' }}>
-                👋 {currentUser?.full_name || 'Staff Member'}
+                {currentUser?.full_name || 'Staff Member'}
               </h1>
               <div style={{ fontSize: '0.84rem', opacity: 0.92, marginTop: '0.2rem' }}>
-                വരാനിരിക്കുന്ന പരിപാടികളും ഇതുവരെ പങ്കെടുത്ത പരിപാടികളും ശമ്പള വിവരങ്ങളും ഒറ്റനോട്ടത്തിൽ
+                Your upcoming catering assignments, completed duties, salary payouts, and advances at a glance
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -212,7 +230,7 @@ export default function DashboardPage() {
                   whiteSpace: 'nowrap'
                 }}
               >
-                📘 മലയാളം മാനുവൽ (PDF)
+                Staff User Manual (PDF)
               </Link>
               <button
                 type="button"
@@ -232,7 +250,7 @@ export default function DashboardPage() {
                   whiteSpace: 'nowrap'
                 }}
               >
-                🔑 Change Password
+                Change Password
               </button>
             </div>
           </div>
@@ -240,11 +258,11 @@ export default function DashboardPage() {
 
         <PWAInstallBanner />
 
-        {/* 3 Simplified Colourful Salary KPI Cards */}
+        {/* 4 Simplified Salary KPI Cards (Clearly Separating Standard Salary vs Salary Advances) */}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
             gap: '0.9rem',
             marginBottom: '1.25rem'
           }}
@@ -263,7 +281,9 @@ export default function DashboardPage() {
               ₹{salarySummary.totalEarned.toLocaleString('en-IN')}
             </span>
             <span className="stats-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {salarySummary.attendedShiftsCount} attended ({salarySummary.totalShiftHours} hrs)
+              {salarySummary.salaryType === 'monthly'
+                ? `${salarySummary.monthlyMonthsCount} month${salarySummary.monthlyMonthsCount === 1 ? '' : 's'} · ${salarySummary.attendedShiftsCount} shifts`
+                : `${salarySummary.attendedShiftsCount} attended (${salarySummary.totalShiftHours} hrs)`}
               {salarySummary.extraEarnings > 0
                 ? ` · +₹${salarySummary.extraEarnings.toLocaleString('en-IN')} allowance`
                 : ''}
@@ -278,13 +298,31 @@ export default function DashboardPage() {
             }}
           >
             <span className="stats-label" style={{ color: '#047857' }}>
-              Salary Received
+              Standard Salary Paid
             </span>
             <span className="stats-value" style={{ color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
-              ₹{salarySummary.totalPaid.toLocaleString('en-IN')}
+              ₹{salarySummary.totalRegularPaid.toLocaleString('en-IN')}
             </span>
             <span className="stats-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {salarySummary.paymentRecords.length} payment{salarySummary.paymentRecords.length === 1 ? '' : 's'} received
+              {salarySummary.regularPaymentRecords.length} regular payout{salarySummary.regularPaymentRecords.length === 1 ? '' : 's'}
+            </span>
+          </div>
+
+          <div
+            className="stats-card"
+            style={{
+              borderTop: '3px solid #d97706',
+              background: 'linear-gradient(180deg, #fffbeb 0%, #ffffff 70%)'
+            }}
+          >
+            <span className="stats-label" style={{ color: '#b45309' }}>
+              Salary Advances Taken
+            </span>
+            <span className="stats-value" style={{ color: '#d97706', fontVariantNumeric: 'tabular-nums' }}>
+              ₹{salarySummary.totalAdvancePaid.toLocaleString('en-IN')}
+            </span>
+            <span className="stats-sub" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {salarySummary.advanceRecords.length} advance{salarySummary.advanceRecords.length === 1 ? '' : 's'} recorded separately
             </span>
           </div>
 
@@ -367,7 +405,7 @@ export default function DashboardPage() {
           })}
         </div>
 
-        {/* SECTION 1: UPCOMING EVENTS (വരാനിരിക്കുന്ന പരിപാടികൾ) */}
+        {/* SECTION 1: UPCOMING EVENTS */}
         {showUpcomingSection && (
           <div
             className="card"
@@ -389,7 +427,7 @@ export default function DashboardPage() {
             >
               <div>
                 <h2 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                  📅 വരാനിരിക്കുന്ന പരിപാടികൾ · Upcoming Events ({upcomingDuties.length})
+                  Upcoming Events ({upcomingDuties.length})
                 </h2>
                 <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.15rem 0 0 0' }}>
                   Your scheduled catering duties, reporting timings, and venue locations
@@ -553,13 +591,13 @@ export default function DashboardPage() {
                   fontSize: '0.86rem'
                 }}
               >
-                നിലവിൽ പുതിയ വരാനിരിക്കുന്ന പരിപാടികൾ ഒന്നും അസൈൻ ചെയ്തിട്ടില്ല · No upcoming events assigned right now.
+                No upcoming events assigned right now.
               </div>
             )}
           </div>
         )}
 
-        {/* SECTION 2: EVENTS ATTENDED SO FAR (ഇതുവരെ പങ്കെടുത്ത പരിപാടികൾ) */}
+        {/* SECTION 2: EVENTS ATTENDED SO FAR */}
         {showAttendedSection && (
           <div
             className="card"
@@ -581,7 +619,7 @@ export default function DashboardPage() {
             >
               <div>
                 <h2 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                  ✅ ഇതുവരെ പങ്കെടുത്ത പരിപാടികൾ · Events Attended So Far ({attendedDuties.length})
+                  Events Attended So Far ({attendedDuties.length})
                 </h2>
                 <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.15rem 0 0 0' }}>
                   Completed catering functions, hours worked, bonuses, and wages earned
@@ -604,7 +642,7 @@ export default function DashboardPage() {
                   fontSize: '0.86rem'
                 }}
               >
-                ഇതുവരെ പൂർത്തിയായ ഡ്യൂട്ടികൾ രേഖപ്പെടുത്തിയിട്ടില്ല · No attended past events recorded yet.
+                No attended past events recorded yet.
               </div>
             ) : (
               <div className="data-table-container">
@@ -695,7 +733,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* SECTION 3: SALARY PAYMENTS RECEIVED (ലഭിച്ച ശമ്പള വിവരങ്ങൾ) */}
+        {/* SECTION 3: SALARY PAYMENTS & ADVANCES RECEIVED */}
         {showPaymentsSection && (
           <div
             className="card"
@@ -704,9 +742,25 @@ export default function DashboardPage() {
               padding: '1.25rem'
             }}
           >
-            <h2 style={{ fontSize: '1.08rem', fontWeight: 800, margin: '0 0 0.85rem 0', color: '#0f172a' }}>
-              💸 ലഭിച്ച ശമ്പള വിവരങ്ങൾ · Salary Payments Received ({salarySummary.paymentRecords.length})
-            </h2>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                marginBottom: '0.85rem'
+              }}
+            >
+              <h2 style={{ fontSize: '1.08rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                Salary Payouts &amp; Advances Received ({salarySummary.paymentRecords.length})
+              </h2>
+              <div style={{ fontSize: '0.78rem', color: '#475569', fontVariantNumeric: 'tabular-nums' }}>
+                Standard Salary: <strong style={{ color: '#059669' }}>₹{salarySummary.totalRegularPaid.toLocaleString('en-IN')}</strong>
+                {' · '}
+                Salary Advances: <strong style={{ color: '#d97706' }}>₹{salarySummary.totalAdvancePaid.toLocaleString('en-IN')}</strong>
+              </div>
+            </div>
             {salarySummary.paymentRecords.length === 0 ? (
               <div
                 style={{
@@ -719,7 +773,7 @@ export default function DashboardPage() {
                   fontSize: '0.86rem'
                 }}
               >
-                No salary payouts recorded yet.
+                No salary payouts or advances recorded yet.
               </div>
             ) : (
               <div className="data-table-container">
@@ -727,36 +781,45 @@ export default function DashboardPage() {
                   <thead>
                     <tr>
                       <th>Date</th>
+                      <th>Type</th>
                       <th>Payment Method &amp; Note</th>
                       <th style={{ textAlign: 'right' }}>Amount Received (₹)</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {salarySummary.paymentRecords.map((p) => (
-                      <tr key={p.id}>
-                        <td style={{ fontSize: '0.82rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                          {new Date(p.recorded_at).toLocaleDateString('en-GB', {
-                            day: '2-digit',
-                            month: 'short',
-                            year: 'numeric'
-                          })}
-                        </td>
-                        <td style={{ fontSize: '0.84rem' }}>
-                          <div style={{ fontWeight: 600, color: '#0f172a' }}>{p.method}</div>
-                          {p.note && <div style={{ color: '#64748b', fontSize: '0.75rem' }}>{p.note}</div>}
-                        </td>
-                        <td
-                          style={{
-                            textAlign: 'right',
-                            fontWeight: 700,
-                            color: '#059669',
-                            fontVariantNumeric: 'tabular-nums'
-                          }}
-                        >
-                          ₹{p.amount.toLocaleString('en-IN')}
-                        </td>
-                      </tr>
-                    ))}
+                    {salarySummary.paymentRecords.map((p) => {
+                      const isAdv = isSalaryAdvanceRecord(p);
+                      return (
+                        <tr key={p.id}>
+                          <td style={{ fontSize: '0.82rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                            {new Date(p.recorded_at).toLocaleDateString('en-GB', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric'
+                            })}
+                          </td>
+                          <td style={{ fontSize: '0.78rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            <span style={{ color: isAdv ? '#b45309' : '#047857' }}>
+                              {isAdv ? 'Salary Advance' : 'Standard Salary'}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: '0.84rem' }}>
+                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{p.method}</div>
+                            {p.note && <div style={{ color: '#64748b', fontSize: '0.75rem' }}>{p.note}</div>}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: 'right',
+                              fontWeight: 700,
+                              color: isAdv ? '#d97706' : '#059669',
+                              fontVariantNumeric: 'tabular-nums'
+                            }}
+                          >
+                            ₹{p.amount.toLocaleString('en-IN')}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1501,9 +1564,7 @@ export default function DashboardPage() {
               flexWrap: 'wrap'
             }}
           >
-            <span style={{ color: '#0f172a', fontWeight: 600 }}>
-              {role === 'super_admin' ? 'Super Admin' : 'Owner'}
-            </span>
+          <span style={{ color: '#0f172a', fontWeight: 600 }}>Owner</span>
             <span aria-hidden="true">·</span>
             <span>Calicut</span>
             {currentUser?.full_name && (
@@ -1551,6 +1612,94 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {/* Persistent 15-Day Full Database Backup Reminder (Stays active until Owner downloads backup) */}
+      {isMounted && (() => {
+        const backupStatus = store.getBackupReminderStatus();
+        if (!backupStatus.isDue && !backupBannerFeedback) return null;
+        return (
+          <div
+            style={{
+              marginBottom: '1.2rem',
+              padding: '0.95rem 1.15rem',
+              borderRadius: '12px',
+              border: backupStatus.isDue ? '1px solid #f59e0b' : '1px solid #bbf7d0',
+              borderTop: backupStatus.isDue ? '3px solid #d97706' : '3px solid #16a34a',
+              background: backupStatus.isDue
+                ? 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)'
+                : '#f0fdf4',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '0.85rem'
+            }}
+          >
+            <div style={{ flex: '1 1 320px' }}>
+              <div
+                style={{
+                  fontSize: '0.9rem',
+                  fontWeight: 800,
+                  color: backupStatus.isDue ? '#92400e' : '#166534'
+                }}
+              >
+                {backupStatus.isDue
+                  ? '15-Day Full Database Backup Due'
+                  : backupBannerFeedback}
+              </div>
+              {backupStatus.isDue && (
+                <div
+                  style={{
+                    fontSize: '0.8rem',
+                    color: '#78350f',
+                    marginTop: '0.2rem',
+                    lineHeight: 1.5,
+                    fontVariantNumeric: 'tabular-nums'
+                  }}
+                >
+                  {backupStatus.lastBackupAt
+                    ? `It has been ${backupStatus.daysSinceBackup ?? 0} days since your last full database backup. Download a restorable .json snapshot now to keep your records protected and clear this reminder.`
+                    : 'No full database backup has been downloaded yet. Download a restorable .json backup file now — this reminder remains active every 15 days until downloaded.'}
+                </div>
+              )}
+            </div>
+            {backupStatus.isDue && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const res = await store.downloadFullDatabaseBackupJson();
+                      setBackupBannerFeedback(
+                        `Full restorable database backup (${res.filename}) downloaded. Next scheduled reminder in 15 days.`
+                      );
+                      setTimeout(() => setBackupBannerFeedback(null), 5000);
+                    } catch {
+                      setBackupBannerFeedback('Could not download backup right now. Please try again.');
+                    }
+                  }}
+                  className="btn btn-primary btn-sm"
+                  style={{
+                    background: '#d97706',
+                    borderColor: '#b45309',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  Download Full Backup (.json)
+                </button>
+                <Link
+                  href="/settings"
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontWeight: 700, whiteSpace: 'nowrap', background: '#ffffff' }}
+                >
+                  Backup &amp; Restore &rarr;
+                </Link>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* PWA Install Prompt (shows only when installable) */}
       <PWAInstallBanner />
@@ -2269,6 +2418,11 @@ export default function DashboardPage() {
             </table>
           </div>
         )}
+      </div>
+
+      {/* Owner Full Database Backup & Restore Quick Access */}
+      <div style={{ marginTop: '1.5rem' }}>
+        <OwnerDatabaseExportCard role={role} compact />
       </div>
 
       <ChangePasswordModal

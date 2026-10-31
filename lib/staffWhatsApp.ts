@@ -1,6 +1,6 @@
 import { BusinessSettings, EventRecord, Shift, StaffMember } from './types';
 
-export type WhatsAppTemplateLang = 'bilingual' | 'english';
+export type WhatsAppTemplateLang = 'english';
 
 /**
  * Normalizes Indian & international phone numbers for https://wa.me/<digits>
@@ -73,7 +73,6 @@ export function formatStaffShiftWhatsAppMessage(params: {
     settings,
     hours,
     customNote,
-    lang = 'bilingual',
     portalUrl
   } = params;
 
@@ -91,45 +90,23 @@ export function formatStaffShiftWhatsAppMessage(params: {
   const appLink =
     portalUrl || (typeof window !== 'undefined' ? window.location.origin : '');
 
-  if (lang === 'english') {
-    const lines = [
-      `📋 *${companyName}*`,
-      `*EVENT DUTY ASSIGNMENT*`,
-      `────────────────────`,
-      `👤 *Staff:* ${staffName}`,
-      `🎖️ *Assigned Role:* ${roleName}`,
-      ``,
-      `🎉 *Event:* ${eventTitle}`,
-      `📅 *Date:* ${eventDate}`,
-      `⏰ *Shift Time:* ${start12} – ${end12}${hrsText}`,
-      `📍 *Venue:* ${venue}`,
-      guestsText ? `👥 *Expected Guests:* ${guestsText}` : '',
-      noteText ? `\n📝 *Instructions:* ${noteText}` : '',
-      ``,
-      `Please report on time in proper uniform. Reply *OK* to confirm your duty.`,
-      appLink ? `🔗 *Staff Portal:* ${appLink}` : ''
-    ];
-    return lines.filter(Boolean).join('\n');
-  }
-
-  // Default Bilingual (Malayalam + English) for clear understanding by all catering crew
   const lines = [
     `📋 *${companyName}*`,
-    `*EVENT DUTY NOTIFICATION | ഇവന്റ് ഡ്യൂട്ടി അറിയിപ്പ്*`,
+    `*EVENT DUTY ASSIGNMENT*`,
     `────────────────────`,
-    `നമസ്കാരം *${staffName}*,`,
-    `നിങ്ങൾക്ക് താഴെ പറയുന്ന ഇവന്റിൽ ഡ്യൂട്ടി അസൈൻ ചെയ്തിട്ടുണ്ട്:`,
+    `Hello *${staffName}*,`,
+    `You have been assigned to the following catering duty:`,
     ``,
-    `🎉 *ഇവന്റ് (Event):* ${eventTitle}`,
-    `🎖️ *റോൾ (Role):* ${roleName}`,
-    `📅 *തീയതി (Date):* ${eventDate}`,
-    `⏰ *സമയം (Duty Time):* ${start12} – ${end12}${hrsText}`,
-    `📍 *സ്ഥലം (Venue):* ${venue}`,
-    guestsText ? `👥 *അതിഥികൾ (Guests):* ${guestsText}` : '',
-    noteText ? `\n📝 *പ്രത്യേക നിർദ്ദേശം:* ${noteText}` : '',
+    `🎉 *Event:* ${eventTitle}`,
+    `🎖️ *Assigned Role:* ${roleName}`,
+    `📅 *Date:* ${eventDate}`,
+    `⏰ *Shift Time:* ${start12} – ${end12}${hrsText}`,
+    `📍 *Venue:* ${venue}`,
+    guestsText ? `👥 *Expected Guests:* ${guestsText}` : '',
+    noteText ? `\n📝 *Instructions:* ${noteText}` : '',
     ``,
-    `കൃത്യസമയത്ത് യൂണിഫോമിൽ എത്തിച്ചേരുക. ഡ്യൂട്ടി കൺഫേം ചെയ്യാൻ *OK* എന്ന് മറുപടി അയക്കുക.`,
-    appLink ? `🔗 *App Link:* ${appLink}` : ''
+    `Please report on time in proper uniform. Reply *OK* to confirm your duty.`,
+    appLink ? `🔗 *Staff Portal:* ${appLink}` : ''
   ];
   return lines.filter(Boolean).join('\n');
 }

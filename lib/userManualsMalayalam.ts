@@ -32,510 +32,479 @@ export interface RoleUserManual {
 export const MALAYALAM_USER_MANUALS: Record<ManualRoleKey, RoleUserManual> = {
   owner: {
     key: 'owner',
-    pdfFilename: 'IPPAS-Owner-User-Manual-Malayalam.pdf',
-    docCode: 'DOC-ML-OWNER-01',
-    malayalamRoleName: 'ഓണർ',
+    pdfFilename: 'IPPAS-Owner-User-Manual-EN.pdf',
+    docCode: 'DOC-EN-OWNER-01',
+    malayalamRoleName: 'Owner',
     englishRoleLabel: 'Owner',
-    titleMl: 'ഓണർ യൂസർ മാനുവൽ',
+    titleMl: 'Owner User Manual',
     subtitleMl:
-      'ബിസിനസ് നിയന്ത്രണം, വരാനിരിക്കുന്നതും കഴിഞ്ഞുപോയതുമായ ഇവന്റുകൾ, ക്വൊട്ടേഷൻ, ബില്ലിംഗ്, ലാഭനഷ്ട കണക്കുകൾ എന്നിവയ്ക്കുള്ള പുതുക്കിയ മാർഗ്ഗനിർദ്ദേശം',
+      'Complete Executive Guide to Catering Bookings, Top Clients, Quotations, Billing, Flexible Staff Payroll, Confidential Profit & Loss, and Full Database Backup & Restore',
     accentColor: '#be123c',
     overviewMl:
-      'IPPAS Pulse കാറ്ററിംഗ് & ഇവന്റ് മാനേജ്‌മെന്റ് ആപ്ലിക്കേഷന്റെ മുഴുവൻ നിയന്ത്രണവും ഓണർ അക്കൗണ്ടിനാണ്. വരാനിരിക്കുന്ന ബുക്കിംഗുകളും കഴിഞ്ഞുപോയ ഇവന്റുകളും, ക്വൊട്ടേഷൻ, ഇൻവോയ്‌സ്, അടുക്കള സ്റ്റോക്ക്, സ്റ്റാഫ് ശമ്പളം, ഓരോ ഇവന്റിന്റെയും പ്രോഫിറ്റ് & ലോസ് (ലാഭനഷ്ട കണക്ക്), യൂസർ പാസ്‌വേഡുകൾ എന്നിവയെല്ലാം തത്സമയം (Live Cloud Sync) ഇതിലൂടെ നിയന്ത്രിക്കാം. ഈ സിസ്റ്റത്തിൽ ഓണർ, മാനേജർ, അക്കൗണ്ടന്റ്, സ്റ്റാഫ് എന്നിങ്ങനെ 4 യൂസർ റോളുകളാണുള്ളത്.',
+      'The Owner account provides full executive command over IPPAS Pulse for Outdoor Catering & Event Management in Calicut. Manage upcoming and completed bookings, top-client analytics, menu recipes, quotations, invoices, warehouse stock, flexible staff salary structures, confidential event-by-event Profit & Loss statements, team credentials, activity history, and full database backup and disaster recovery with live cloud synchronization. IPPAS Pulse operates with four dedicated role workspaces: Owner, Manager, Accountant, and Staff.',
     accessibleModulesMl: [
-      'Dashboard (കളർഫുൾ എക്സിക്യൂട്ടീവ് ബിസിനസ് അവലോകനം)',
-      'Events (വരാനിരിക്കുന്നവയും കഴിഞ്ഞുപോയവയും വേർതിരിച്ച ഇവന്റ് ബുക്കിംഗുകൾ)',
-      'Invoices (ഇൻവോയ്‌സ്, ഡിസ്കൗണ്ട്, പാർട്ട് പേയ്‌മെന്റ് & ഫൈനൽ സെറ്റിൽമെന്റ്)',
-      'Profit & Loss (ഓണർക്ക് മാത്രം കാണാവുന്ന ലാഭനഷ്ട കണക്ക്)',
-      'Stock (സ്റ്റോക്ക്, എക്സ്പയറി തീയതി, Bulk Update & CSV Export)',
-      'Staff (സ്റ്റാഫ് ഷിഫ്റ്റ്, ഹാജർ, Payroll Report & Salary Slip PDF)',
-      'More ▾ -> Clients, Menu & Recipes, Users, Settings & Manuals (മലയാളം PDF)'
+      'Dashboard (Executive KPIs, Treasury Breakdown, Monthly Revenue & 15-Day Backup Alert)',
+      'Events (Upcoming vs Previous Bookings, Quotations, Shortage CSV & WhatsApp PDF+Text)',
+      'Invoices (Tax/Billing Invoices, Discounts, Part Payments & Auto Final Settlement)',
+      'Profit & Loss (Confidential Owner-Only Event & Monthly Net Margin Analytics)',
+      'Stock (Warehouse Inventory, Expiry Alerts, Bulk Stock Update, CSV Export & Vendor Bills)',
+      'Staff (Per-Hour / Per-Event / Monthly Salaries, Quick Salary Advance & Salary Slip PDFs)',
+      'More Menu -> Clients (with Top Clients Leaderboard), Menu & Recipes, Users, Settings & Manuals'
     ],
     pages: [
       {
-        pageTitleMl: 'ആപ്പ് ഇൻസ്റ്റാളേഷൻ, പുതിയ നാവിഗേഷൻ & ഡാഷ്‌ബോർഡ്',
+        pageTitleMl: 'App Installation, Executive Dashboard & Client Leaderboard',
         chapters: [
           {
             number: '01',
-            titleMl: 'ലോഗിൻ, 1-Tap ആപ്പ് ഇൻസ്റ്റാളേഷൻ & സിംപിൾ നാവിഗേഷൻ',
-            menuLabel: 'Login / Install App / Profile Menu',
+            titleMl: 'Sign-In, 1-Tap Smartphone App Install & Streamlined Navigation',
+            menuLabel: 'Login / Install App / Top & Bottom Navigation',
             summaryMl:
-              'യാതൊരു അധിക പെർമിഷനുകളും ആവശ്യമില്ലാതെ ഫോണിലെ മറ്റ് ആപ്പുകൾക്കൊപ്പവും ഹോം സ്ക്രീനിലും IPPAS Pulse ഇൻസ്റ്റാൾ ചെയ്യാം.',
+              'Install IPPAS Pulse directly alongside your smartphone apps and navigate every executive module in a single tap without extra device permissions.',
             stepsMl: [
-              'ലോഗിൻ സ്ക്രീനിൽ നിങ്ങളുടെ ഓണർ Username, Password എന്നിവ നൽകി "Sign In" ക്ലിക്ക് ചെയ്യുക.',
-              '"📲 Install App" ബട്ടൺ ഒറ്റത്തവണ അമർത്തുമ്പോൾ ഫോണിലെ മറ്റ് ആപ്പുകൾക്കൊപ്പം App Drawer-ലും Home Screen ഷോർട്ട്കട്ടായും IPPAS Pulse ഐക്കൺ ആഡ് ആകും (ഇതിന് യാതൊരു അധിക പെർമിഷനും നൽകേണ്ടതില്ല; iPhone Safari-യിൽ Share -> Add to Home Screen തിരഞ്ഞെടുക്കുക).',
-              'ഡെസ്ക്ടോപ്പിൽ പ്രധാന പേജുകൾ മുകളിലെ സിംഗിൾ-റോ നാവിഗേഷൻ ബാറിലും, മറ്റ് മൊഡ്യൂളുകൾ "More ▾" മെനുവിലും കാണാം; മൊബൈലിൽ താഴെയുള്ള 5-ടാബ് ബാറും "Menu" ഷീറ്റും ഉപയോഗിക്കാം.',
-              'സ്വന്തം പാസ്‌വേഡ് മാറ്റാനും ലോഗൗട്ട് ചെയ്യാനും മുകളിൽ വലതുവശത്തുള്ള നിങ്ങളുടെ പ്രൊഫൈൽ ബട്ടൺ (അല്ലെങ്കിൽ മൊബൈൽ Menu) ക്ലിക്ക് ചെയ്യുക.'
+              'Open IPPAS Pulse, enter your Owner username and password on the Sign-In screen, and click "Sign In".',
+              'Tap "Install App" once on Android or Desktop Chrome/Edge to add the IPPAS Pulse icon directly to both your App Drawer and Home Screen with zero extra permissions required (on iPhone/iPad Safari, tap Share -> "Add to Home Screen").',
+              'Use the single-row top navigation bar on desktop (with secondary modules neatly grouped under "More") or the 5-tab bottom bar and "Menu" sheet on mobile devices.',
+              'Click your profile button in the top-right corner anytime to change your password or sign out securely.'
             ],
             importantNoteMl:
-              'ഓണർ, മാനേജർ, അക്കൗണ്ടന്റ്, സ്റ്റാഫ് എന്നീ 4 വിഭാഗം ഉപയോക്താക്കൾക്കും അവരവരുടെ ചുമതലകൾക്കനുസരിച്ചുള്ള വിവരങ്ങൾ മാത്രമേ കാണാൻ സാധിക്കൂ.'
+              'Each of the four user roles (Owner, Manager, Accountant, and Staff) sees only the screens and financial figures authorized for their responsibilities.'
           },
           {
             number: '02',
-            titleMl: 'കളർഫുൾ ഓണർ ഡാഷ്‌ബോർഡ് അവലോകനം',
-            menuLabel: 'Dashboard',
+            titleMl: 'Executive Dashboard, Treasury Holdings & Top Clients Leaderboard',
+            menuLabel: 'Dashboard / More -> Clients',
             summaryMl:
-              'മൊത്തം വിറ്റുവരവ്, പിരിഞ്ഞുകിട്ടിയ തുക, കിട്ടാനുള്ള കുടിശ്ശിക, വരാനിരിക്കുന്ന ഇവന്റുകൾ എന്നിവ ഒറ്റനോട്ടത്തിൽ കാണാം.',
+              'Monitor total revenue, confidential net profit, bank vs cash collections, and your highest-value clients in real time.',
             stepsMl: [
-              'മൊത്തം സെയിൽസ് (Total Sales), പിരിഞ്ഞുകിട്ടിയ തുക (Collected), ക്ലയന്റുകളിൽ നിന്ന് കിട്ടാനുള്ള തുക (Pending Receivables) എന്നിവ മുകളിലെ കളർഫുൾ കാർഡുകളിൽ കാണാം.',
-              'ബാങ്ക് അക്കൗണ്ടുകളിലും കൈവശം ക്യാഷ് (Cash in Hand) ആയും എത്ര രൂപ വീതം ലഭിച്ചിട്ടുണ്ട് എന്ന് Account-wise Collections വിഭാഗത്തിൽ പരിശോധിക്കാം.',
-              'മാസം തിരിച്ചുള്ള വരുമാന ഗ്രാഫ് (All Months / Last 6 Months) പരിശോധിച്ച് ബിസിനസ് വളർച്ച വിലയിരുത്താം.',
-              'കുറവുള്ള സ്റ്റോക്ക് വിവരങ്ങൾ മുകളിലെ "⚠️ Low Stock" ബട്ടൺ വഴിയും വരാനിരിക്കുന്ന ഇവന്റുകൾ നേരിട്ടും തുറക്കാം.'
+              'Review your four executive KPI cards on the Dashboard: Total Revenue, Net Profit/Loss on Completed Events (Owner-only), Pending Receivables, and Upcoming Bookings.',
+              'Inspect "Account-wise Invoice Collections" to see exact funds received into each Bank/UPI account versus Cash in Hand at the office counter.',
+              'Open "More -> Clients" to view the "Top Clients Leaderboard" at the top of the directory, automatically ranking your "Highest Paying Clients" (by verified invoice collections) and "Most Events Conducted" (by non-cancelled bookings).',
+              'Use the quick filter tabs ("All Clients", "Highest Paying", "Most Events") to sort the entire Client Directory and review each client’s events conducted, total paid, and pending balance.'
             ]
           }
         ]
       },
       {
-        pageTitleMl: 'ഇവന്റ് ബുക്കിംഗുകൾ, ക്വൊട്ടേഷൻ & വാട്സാപ്പ് PDF+Text',
+        pageTitleMl: 'Menu Recipes, Catering Bookings, Quotations & Invoices',
         chapters: [
           {
             number: '03',
-            titleMl: 'വരാനിരിക്കുന്നവയും (Upcoming) കഴിഞ്ഞുപോയവയും (Previous) ആയ ഇവന്റുകൾ',
-            menuLabel: 'Events -> Upcoming / Previous',
+            titleMl: 'Menu Engineering & Adding Non-Stock Recipe Ingredients',
+            menuLabel: 'More -> Menu & Recipes',
             summaryMl:
-              'കാറ്ററിംഗ് ഇവന്റ്സ് പേജിൽ വരാനിരിക്കുന്ന പരിപാടികളും കഴിഞ്ഞുപോയ പരിപാടികളും ആശയക്കുഴപ്പമില്ലാതെ വെവ്വേറെ കാണാം.',
+              'Build per-plate or per-kilogram menu items and link complete raw-material recipes—even for ingredients not currently in warehouse stock.',
             stepsMl: [
-              '"Events" പേജ് തുറക്കുമ്പോൾ വരാനിരിക്കുന്ന ബുക്കിംഗുകൾ (Upcoming Events) മുകളിലെ സെക്ഷനിലും, പൂർത്തിയായതും കഴിഞ്ഞുപോയതുമായ പരിപാടികൾ (Previous Events) താഴത്തെ സെക്ഷനിലും പ്രത്യേകം വേർതിരിച്ച് കാണിക്കുന്നു.',
-              'ആവശ്യമെങ്കിൽ മുകളിലെ ടാബുകൾ ഉപയോഗിച്ച് "Split View", "Upcoming Only", അല്ലെങ്കിൽ "Previous Only" എന്നിങ്ങനെ ഫിൽട്ടർ ചെയ്യാം; "+ New Booking" ബട്ടൺ വഴി പുതിയ എൻക്വയറിയും ക്ലയന്റിനെയും ചേർക്കാം.',
-              'ഇവന്റ് തുറന്ന ശേഷം മെനു വിഭവങ്ങൾ (പ്ലേറ്റ് / കിലോ നിരക്കിൽ), ലോജിസ്റ്റിക്സ്, ട്രാൻസ്പോർട്ട്, മറ്റ് എക്സ്ട്രാ ചാർജുകൾ എന്നിവ ചേർത്താൽ "Catering Proposal" ക്വൊട്ടേഷൻ തയ്യാറാകും.',
-              'ക്വൊട്ടേഷനിൽ Bank Details, Payment Details എന്നിവ കാണിക്കണമോ വേണ്ടയോ എന്ന് ചെക്ക്ബോക്സ് വഴി Enable / Disable ചെയ്യാം.',
-              'വാട്സാപ്പ് ബട്ടൺ അമർത്തി "📲 Send PDF & Text Together on WhatsApp" ക്ലിക്ക് ചെയ്യുമ്പോൾ ക്വൊട്ടേഷൻ PDF ഡോക്യുമെന്റും മെസ്സേജ് ടെക്സ്റ്റും ഒരുമിച്ച് വാട്സാപ്പിൽ അറ്റാച്ച് ആകും (ഡെസ്ക്ടോപ്പ് വെബ് വ്യൂവിൽ മാത്രം "Copy Text" ഓപ്ഷനും ലഭ്യമാണ്).'
-            ],
-            importantNoteMl:
-              'ക്വൊട്ടേഷൻ നമ്പറുകളും (QT-...) ഇൻവോയ്‌സ് നമ്പറുകളും (INV-...) വെവ്വേറെ ശ്രേണിയിലാണ് സിസ്റ്റം സൂക്ഷിക്കുന്നത്.'
+              'Open "Menu & Recipes" and click "+ Add Dish" to create dishes priced either Per Guest (Plate) or Per Kilogram (Kg).',
+              'Click "Edit Recipe" on any dish to specify raw-material quantities required per guest or per kg for automatic event stock estimation.',
+              'If a required spice, garnish, dairy item, or raw material is not yet listed in your warehouse inventory, click "+ Create New Ingredient (Not in Stock)" directly inside the Recipe modal, enter its name, unit, and unit cost, and it is registered and linked immediately.'
+            ]
           },
           {
             number: '04',
-            titleMl: 'ഇൻവോയ്‌സ്, ഡിസ്കൗണ്ട് & ഫൈനൽ സെറ്റിൽമെന്റ്',
-            menuLabel: 'Invoices',
+            titleMl: 'Upcoming vs Previous Bookings, Quotations & WhatsApp PDF + Text',
+            menuLabel: 'Events -> Event Detail',
             summaryMl:
-              'ക്ലയന്റ് ക്വൊട്ടേഷൻ അംഗീകരിച്ചു കഴിഞ്ഞാൽ അതേ വിവരങ്ങൾ വെച്ച് ഇൻവോയ്‌സ് ഉണ്ടാക്കാനും പാർട്ട് പേയ്‌മെന്റുകൾ രേഖപ്പെടുത്താനും സാധിക്കും.',
+              'Manage upcoming functions separately from completed past events, print clean standalone documents, and send PDFs with auto-attached WhatsApp captions.',
             stepsMl: [
-              'ക്വൊട്ടേഷൻ ക്ലയന്റ് ഓക്കെ ആക്കിയാൽ "Approve Quote & Convert to Invoice" അമർത്തി ഒറ്റ ക്ലിക്കിൽ പുതിയ ഇൻവോയ്‌സ് നമ്പറുള്ള ഇൻവോയ്‌സ് ആയി മാറ്റാം.',
-              'ഇൻവോയ്‌സിൽ എന്തെങ്കിലും മാറ്റങ്ങളോ ഡിസ്കൗണ്ടോ (Discount & Note) നൽകാനുണ്ടെങ്കിൽ അതേ ഇൻവോയ്‌സിൽ തന്നെ എഡിറ്റ് ചെയ്ത് ചേർക്കാം.',
-              'ക്ലയന്റ് നൽകുന്ന അഡ്വാൻസും പാർട്ട് പേയ്‌മെന്റുകളും (Bank/UPI അക്കൗണ്ട് അല്ലെങ്കിൽ Cash) രേഖപ്പെടുത്തുമ്പോൾ അവയെല്ലാം ഇൻവോയ്‌സിൽ വ്യക്തമായി രേഖപ്പെടുത്തപ്പെടും.',
-              'മുഴുവൻ തുകയും ലഭിച്ചു കഴിഞ്ഞാൽ (Full Payment) ആ ഇൻവോയ്‌സ് തനിയെ "Final Settlement Invoice" ആയി മാറുകയും അതിൽ നിന്ന് Payment Terms ഓട്ടോമാറ്റിക്കായി ഒഴിവാക്കപ്പെടുകയും ചെയ്യും.',
-              'ഇൻവോയ്‌സും "📲 Send PDF & Text Together on WhatsApp" ബട്ടൺ വഴി PDF ഫയലും സന്ദേശവും ഒരുമിച്ച് ക്ലയന്റിന് വാട്സാപ്പിൽ അയക്കാം.'
+              'Open "Events" to view "Upcoming Bookings" and "Previous / Completed Events" cleanly separated, with 1-click filter tabs ("Split View", "Upcoming Only", "Previous Only") and "+ New Booking".',
+              'Inside any event, add menu dishes, logistics/transport extras, and optional Bank/Payment Term toggles to generate a branded "Catering Proposal" quotation.',
+              'Click any "Print" button to print ONLY that specific quotation, invoice, or expense sheet in clean A4 format—never the surrounding web interface.',
+              'Click "Send on WhatsApp" -> "Send PDF & Text Together on WhatsApp": on smartphones, the PDF file and formatted client message attach together automatically in one step; on desktop/laptop browsers, an additional "Copy Text" button is provided for WhatsApp Web.'
             ]
-          }
-        ]
-      },
-      {
-        pageTitleMl: 'സ്റ്റോക്ക് ഇൻവെന്ററി, മെനു & സ്റ്റാഫ് ശമ്പളം',
-        chapters: [
+          },
           {
             number: '05',
-            titleMl: 'മെനു വിഭവങ്ങളും സ്റ്റോക്ക് ഇൻവെന്ററി നിയന്ത്രണവും',
-            menuLabel: 'More ▾ -> Menu & Recipes / Stock',
+            titleMl: 'Invoices, Discounts, Part Payments & Final Settlement',
+            menuLabel: 'Invoices',
             summaryMl:
-              'അടുക്കള സ്റ്റോക്ക്, സാധനങ്ങളുടെ എക്സ്പയറി തീയതി, Bulk Update, വെണ്ടർ ഓർഡറിനുള്ള CSV എക്സ്പോർട്ട് എന്നിവ കൈകാര്യം ചെയ്യാം.',
+              'Convert approved quotes into invoices, record bank or cash part payments, and automatically issue Final Settlement invoices.',
             stepsMl: [
-              '"Menu & Recipes" വിഭാഗത്തിൽ ഓരോ വിഭവത്തിന്റെയും വിലയും ഒരു പ്ലേറ്റിന്/കിലോയ്ക്ക് വേണ്ട ചേരുവകളുടെ അളവും സെറ്റ് ചെയ്യാം; റെസിപ്പി ചേർക്കുമ്പോൾ സ്റ്റോക്കിൽ ഇല്ലാത്ത പുതിയ ചേരുവകളും "+ New Ingredient (Not in Stock)" വഴി അവിടെ വെച്ച് തന്നെ ചേർക്കാവുന്നതാണ്.',
-              '"Stock" പേജിൽ ഓരോ ചേരുവയുടെയും ലഭ്യമായ അളവ്, സേഫ്റ്റി പരിധി (Safety Threshold), എക്സ്പയറി തീയതി (Expiry Date) എന്നിവ ചേർക്കാം; കാലാവധി അടുക്കുന്ന സാധനങ്ങൾ പട്ടികയിൽ പ്രത്യേകം കാണിക്കും.',
-              'സ്റ്റോക്ക് കുറഞ്ഞ സാധനങ്ങൾ മാത്രം വേഗത്തിൽ കാണാൻ "Low Stock Only" ചെക്ക്ബോക്സ് ടിക്ക് ചെയ്യുക.',
-              'ഒന്നിലധികം ചേരുവകൾ ഒരുമിച്ച് തിരഞ്ഞെടുത്ത് ഒരേ അളവിൽ സ്റ്റോക്ക് കൂട്ടാനോ കുറയ്ക്കാനോ "Bulk Update" ഉപയോഗിക്കാം.',
-              'ഗോഡൗൺ മാനേജ്‌മെന്റിനും വെണ്ടർമാർക്ക് ഓർഡർ നൽകാനുമായി നിലവിലെ സ്റ്റോക്കും കുറവുള്ള സാധനങ്ങളുടെ ലിസ്റ്റും "Export CSV" ബട്ടൺ വഴി ഡൗൺലോഡ് ചെയ്യാം.'
-            ]
-          },
-          {
-            number: '06',
-            titleMl: 'സിംപിൾ സ്റ്റാഫ് പേജ്, ഹാജർ, പാസ്‌വേഡ് റീസെറ്റ് & സാലറി സ്ലിപ്പ് PDF',
-            menuLabel: 'Staff -> Crew & Events / Payroll Report',
-            summaryMl:
-              'ഓരോ സ്റ്റാഫും ഇതുവരെ പങ്കെടുത്ത പരിപാടികളും വരാനിരിക്കുന്ന പരിപാടികളും വെവ്വേറെ കാണാനും, പാസ്‌വേഡ് റീസെറ്റ് ചെയ്യാനും, സാലറി സ്ലിപ്പ് PDF എടുക്കാനും സാധിക്കും.',
-            stepsMl: [
-              '"Staff" പേജിലെ ഓരോ സ്റ്റാഫ് കാർഡിലും വരാനിരിക്കുന്ന പരിപാടികളും (Upcoming Events) ഇതുവരെ പങ്കെടുത്ത പരിപാടികളും (Attended Events) പ്രത്യേകം വേർതിരിച്ച് കാണാം.',
-              'സ്റ്റാഫുകൾ പാസ്‌വേഡ് മറന്നുപോയാൽ ലോഗിൻ സ്ക്രീനിലെ "Forgot Staff Password?" വഴിയോ, Staff പേജിലെ "🔑 Reset PW" ബട്ടൺ വഴിയോ ഉടൻ പുതിയ പാസ്‌വേഡ് സെറ്റ് ചെയ്യാം.',
-              'ഡ്യൂട്ടി പൂർത്തിയാക്കിയ സ്റ്റാഫിന്റെ ഹാജർ "Present" എന്ന് രേഖപ്പെടുത്തുമ്പോൾ മാത്രമേ അവരുടെ ജോലി മണിക്കൂറും ഷിഫ്റ്റ് വരുമാനവും കണക്കാക്കൂ.',
-              '"Payroll Report" ടാബിൽ തീയതി പരിധി തിരഞ്ഞെടുത്ത് സാലറി സ്ലിപ്പ് PDF ഡൗൺലോഡ് ചെയ്യാനോ, സ്റ്റാഫിന്റെ വാട്സാപ്പ് നമ്പറിലേക്ക് നേരിട്ട് PDF + Text ഒരുമിച്ച് അയക്കാനോ സാധിക്കും.'
+              'Click "Approve Quote & Convert to Invoice" on a confirmed event (or "+ Create Invoice" in the Invoices module) to generate a sequentially numbered invoice (INV-...).',
+              'Apply client discounts with an explanation note whenever needed and record advance or part payments specifying exact Bank/UPI destination account or Cash in Hand.',
+              'Once 100% of the invoice balance is collected, the document automatically upgrades to a "Final Settlement Invoice" and hides pending payment-term clauses.'
             ]
           }
         ]
       },
       {
-        pageTitleMl: 'പ്രോഫിറ്റ് & ലോസ്, നോട്ടിഫിക്കേഷനുകൾ & PDF മാനുവലുകൾ',
+        pageTitleMl: 'Flexible Staff Payroll, Salary Advances & Confidential Profit & Loss',
         chapters: [
           {
-            number: '07',
-            titleMl: 'ഇവന്റ് ചെലവുകളും പ്രോഫിറ്റ് & ലോസ് (P&L) മൊഡ്യൂളും',
-            menuLabel: 'P&L (ഓണർക്ക് മാത്രം)',
+            number: '06',
+            titleMl: '3 Staff Salary Structures, Quick Salary Advance & Salary Slip PDFs',
+            menuLabel: 'Staff -> Crew & Shifts / Payroll Report',
             summaryMl:
-              'ഓരോ ഇവന്റ് കഴിയുമ്പോഴും ആകെ ചെലവായ തുകയും അറ്റ ലാഭവും (Net Profit / Loss) ഓണർക്ക് മാത്രമായി പരിശോധിക്കാം.',
+              'Configure Per-Hour, Per-Event, or Monthly Fixed pay upfront when adding staff, and keep Salary Advances strictly separated from Standard Salary Payouts.',
             stepsMl: [
-              'ഓരോ ഇവന്റിന്റെയും അധിക ചെലവുകളായ സ്റ്റോക്ക് പ്രൈസിങ് (Stock Pricing), എക്സ്ട്രാസ് ചെലവുകൾ (Extras Taken), സ്റ്റാഫ് ചെലവുകൾ (Staff Expenses), മറ്റ് ചെലവുകൾ (Other Expenses) എന്നിവ ഓണർക്കും മാനേജർക്കും അക്കൗണ്ടന്റിനും ചേർക്കാവുന്നതാണ്.',
-              'ഇവന്റ് പൂർത്തിയായി "Completed" ആകുമ്പോൾ "P&L" മൊഡ്യൂളിൽ ആ ഇവന്റിന് ചെലവായ മൊത്തം തുക (എല്ലാ സ്റ്റാഫ് അലവൻസുകളും ഉൾപ്പെടെ) വ്യക്തമായി കാണിക്കും.',
-              'ആകെ ബിൽ തുകയിൽ നിന്ന് മൊത്തം ചെലവുകൾ കഴിച്ച് ആ ഇവന്റിൽ ഉണ്ടായ യഥാർത്ഥ ലാഭമോ നഷ്ടമോ (Profit / Loss) ശതമാനക്കണക്കോടെ കാണാം.',
-              'ഈ Profit & Loss മൊഡ്യൂൾ ഓണർക്ക് മാത്രമേ കാണാൻ സാധിക്കൂ; മാനേജർക്കോ അക്കൗണ്ടന്റിനോ സ്റ്റാഫിനോ ഇത് ദൃശ്യമാകില്ല.'
+              'Open "Staff" and click "+ Add Staff": choose the staff member’s exact salary structure upfront — (1) Per Hour Salary (₹/hr), (2) Per Event Salary (₹/event per attended shift), or (3) Monthly Fixed Salary (₹/month + Effective Start Date).',
+              'Assign event shifts, send 1-tap English duty rosters on WhatsApp, and mark attendance ("Present" / "Absent") after each function so wages calculate accurately.',
+              'Click the dedicated amber "Salary Advance" button on any staff card (or in the header) to record an advance payout quickly. Salary Advances are tracked and displayed separately from Standard Salary Payouts across KPI cards, staff ledgers, Excel/CSV exports, and A4 Salary Slips.',
+              'Switch to the "Payroll Report & Salary Slips" tab, select any date range, and export A4 Payroll Summary PDFs or individual Staff Salary Slip PDFs (with Print and WhatsApp PDF+Text sharing).'
             ],
             importantNoteMl:
-              'സ്വകാര്യത ഉറപ്പാക്കുന്നതിനായി ലാഭനഷ്ട കണക്കുകൾ ഓണർ ലോഗിനിൽ മാത്രം സുരക്ഷിതമായി പരിമിതപ്പെടുത്തിയിരിക്കുന്നു.'
+              'If a staff member forgets their login password, either click the "Reset Password" key icon on their row in Staff or Users, or let them use "Forgot Staff Password?" on the Sign-In screen.'
           },
           {
-            number: '08',
-            titleMl: 'നോട്ടിഫിക്കേഷനുകൾ, യൂസർ അക്കൗണ്ടുകൾ, സെറ്റിംഗ്‌സ് & PDF മാനുവലുകൾ',
-            menuLabel: '🔔 Notifications / More ▾ -> Users, Settings, Manuals',
+            number: '07',
+            titleMl: 'Confidential Owner Profit & Loss (P&L) Analytics',
+            menuLabel: 'Profit & Loss',
             summaryMl:
-              'ആപ്പിൽ നടക്കുന്ന മാറ്റങ്ങൾ പരിശോധിക്കാനും, യൂസർ ലോഗിനുകൾ, ബാങ്ക് വിവരങ്ങൾ, മലയാളം PDF മാനുവലുകൾ എന്നിവ എടുക്കാനും സാധിക്കും.',
+              'Audit true net profit across every event by comparing invoiced revenue against all four operational cost heads and staff wages.',
             stepsMl: [
-              'മറ്റു യൂസർമാർ വരുത്തുന്ന മാറ്റങ്ങൾ ശല്യപ്പെടുത്തുന്ന അലേർട്ടുകളായി വരാതെ മുകളിലെ "🔔" (Notifications) ഐക്കണിൽ രേഖപ്പെടുത്തും; എപ്പോൾ വേണമെങ്കിലും തുറന്ന് പഴയ ഡാറ്റയും പുതിയ ഡാറ്റയും പരിശോധിക്കാം.',
-              '"More ▾ -> Users" പേജിൽ ഓണർ, മാനേജർ, അക്കൗണ്ടന്റ്, സ്റ്റാഫ് എന്നിവരുടെ ലോഗിൻ യൂസർനെയിമും പാസ്‌വേഡും നിർമ്മിക്കാനും തിരുത്താനും സാധിക്കും.',
-              '"More ▾ -> Settings" പേജിൽ സ്ഥാപനത്തിന്റെ പേര്, വിലാസം (Outdoor Catering • Event Management • Calicut), ബാങ്ക് അക്കൗണ്ട്, UPI ID എന്നിവ അപ്ഡേറ്റ് ചെയ്യാനും Excel ബാക്കപ്പ് എടുക്കാനും സാധിക്കും.',
-              '"More ▾ -> Manuals (മലയാളം)" പേജിൽ നിന്ന് 4 വിഭാഗം ഉപയോക്താക്കൾക്കുമുള്ള മലയാളം യൂസർ മാനുവലുകൾ A4 PDF ഫയലുകളായി നേരിട്ട് ഡൗൺലോഡ് ചെയ്യാം.'
+              'Open "Profit & Loss" (visible exclusively to the Owner) to inspect total contract revenue, raw-material stock pricing, extras/rentals cost, staff wages + allowances + extra staff expenses, and miscellaneous event expenses.',
+              'Filter by event status or month, drill into individual event margin percentages, and print standalone A4 P&L statements for executive review.'
+            ]
+          }
+        ]
+      },
+      {
+        pageTitleMl: 'Full Database Backup, Disaster Restore, 15-Day Reminder & Audit Log',
+        chapters: [
+          {
+            number: '08',
+            titleMl: 'Full Database Backup (.json / Excel / CSV) & Full Restore After Reset',
+            menuLabel: 'Settings (or Dashboard) -> Full Database Backup & Restore',
+            summaryMl:
+              'Download a complete restorable snapshot of all business records and upload it anytime to restore 100% of your data if the database is ever reset.',
+            stepsMl: [
+              'Open "Settings" (or scroll to the Backup card on the Owner Dashboard) and click "Download Full Restorable Backup (.json)" to save a complete snapshot of clients, menu items, recipes, stock, vendor bills, events, quotes, shifts, staff payroll/advances, invoices, payments, and team accounts.',
+              'You can also export multi-sheet ".xlsx" Excel workbooks or module-wise ".csv" spreadsheets anytime for offline accounting.',
+              'If the app or database is ever reset or moved, click "Upload Backup (.json) File" under "Restore Full Database from Backup File", review the instant record-count preview, and click "Confirm & Restore Full Database Now" to repopulate both the live app and online cloud database automatically.'
+            ],
+            importantNoteMl:
+              'Automated 15-Day Backup Notification: Every 15 days after your last backup download, a persistent reminder appears in your Owner Notification Bell and Dashboard and remains active until you download a fresh backup.'
+          },
+          {
+            number: '09',
+            titleMl: 'Simplified Edit Activity Notifications & User Credential Control',
+            menuLabel: 'Bell Icon (Top Bar) / More -> Users',
+            summaryMl:
+              'Review exact field edits (Previous Data -> New Data) quietly inside the Notification Bell without intrusive popups, and manage team logins.',
+            stepsMl: [
+              'Click the Notification Bell in the top navigation bar whenever an unread badge appears to inspect staff, manager, or accountant edits—showing exact "Previous Data -> Updated Data" diffs.',
+              'Open "More -> Users" to create or update Manager, Accountant, and Staff login credentials or perform 1-click password resets.'
             ]
           }
         ]
       }
     ],
     bestPracticesMl: [
-      'Events പേജിലെ Upcoming വിഭാഗം ദിവസവും പരിശോധിച്ച് അടുത്ത പരിപാടികൾക്കുള്ള സ്റ്റോക്കും സ്റ്റാഫ് ഷിഫ്റ്റും ഉറപ്പുവരുത്തുക.',
-      'ക്വൊട്ടേഷനും ഇൻവോയ്‌സും വാട്സാപ്പിൽ അയക്കുമ്പോൾ "Send PDF & Text Together on WhatsApp" ഉപയോഗിച്ചാൽ PDF ഫയലും വിവരങ്ങളും ഒരുമിച്ച് ക്ലയന്റിന് ലഭിക്കും.',
-      'ഓരോ ഇവന്റ് കഴിയുമ്പോഴും സ്റ്റാഫ് ഹാജർ "Present" ആണെന്നും അധിക ചെലവുകൾ ചേർത്തിട്ടുണ്ടെന്നും ഉറപ്പാക്കിയ ശേഷം P&L പരിശോധിക്കുക.',
-      'ഏത് ഡോക്യുമെന്റിന്റെ പ്രിന്റ് ഐക്കൺ ക്ലിക്ക് ചെയ്താലും വെബ് പേജ് ഉൾപ്പെടാതെ ആ ഡോക്യുമെന്റ് മാത്രമേ A4 ഫോർമാറ്റിൽ പ്രിന്റ് ആവുകയുള്ളൂ.'
+      'Download the "Full Restorable Backup (.json)" promptly whenever the 15-day Owner Backup Reminder appears and store a copy in cloud drive or email.',
+      'Check the "Top Clients Leaderboard" in the Clients module before quoting repeat corporate or wedding clients to reward loyal accounts.',
+      'Always use the dedicated "Salary Advance" button for mid-month staff advances so standard monthly/event salary settlements remain crystal clear.',
+      'Mark event status as "Completed" and verify all 4 event expense categories after each function for accurate Owner Profit & Loss reporting.'
     ]
   },
 
   manager: {
     key: 'manager',
-    pdfFilename: 'IPPAS-Manager-User-Manual-Malayalam.pdf',
-    docCode: 'DOC-ML-MANAGER-02',
-    malayalamRoleName: 'മാനേജർ',
+    pdfFilename: 'IPPAS-Manager-User-Manual-EN.pdf',
+    docCode: 'DOC-EN-MANAGER-01',
+    malayalamRoleName: 'Manager',
     englishRoleLabel: 'Manager',
-    titleMl: 'മാനേജർ യൂസർ മാനുവൽ',
+    titleMl: 'Manager User Manual',
     subtitleMl:
-      'വരാനിരിക്കുന്നതും കഴിഞ്ഞുപോയതുമായ ഇവന്റുകൾ, ക്വൊട്ടേഷൻ, മെനു & റെസിപ്പി, സ്റ്റോക്ക് ഇൻവെന്ററി, സ്റ്റാഫ് ഡ്യൂട്ടി ക്രമീകരണം എന്നിവയ്ക്കുള്ള മാർഗ്ഗനിർദ്ദേശം',
-    accentColor: '#2563eb',
+      'Complete Operations Guide to Client Onboarding, Menu Recipes, Upcoming & Previous Bookings, Warehouse Stock, Shortage CSVs, and Staff Roster Management',
+    accentColor: '#1d4ed8',
     overviewMl:
-      'കാറ്ററിംഗ് ഇവന്റുകളുടെ ദൈനംദിന പ്രവർത്തനങ്ങൾ, വരാനിരിക്കുന്ന ബുക്കിംഗുകൾക്ക് ക്വൊട്ടേഷൻ തയ്യാറാക്കൽ, അടുക്കള സ്റ്റോക്ക് നിയന്ത്രണം, സ്റ്റാഫ് ഡ്യൂട്ടി ക്രമീകരണം, ഇവന്റ് ചെലവുകൾ രേഖപ്പെടുത്തൽ എന്നിവയാണ് മാനേജർ അക്കൗണ്ടിന്റെ പ്രധാന ചുമതലകൾ.',
+      'The Manager workspace in IPPAS Pulse streamlines day-to-day catering operations in Calicut—from registering enquiries and reviewing Top Clients to building custom event quotations, creating new recipe ingredients on the fly, checking warehouse stock sufficiency, exporting vendor shortage CSVs, scheduling crew shifts with flexible salary plans, and logging event operational expenses.',
     accessibleModulesMl: [
-      'Dashboard (വരാനിരിക്കുന്ന ഇവന്റുകളും സ്റ്റോക്ക് അലേർട്ടുകളും)',
-      'Events (Upcoming & Previous ഇവന്റ് ബുക്കിംഗുകൾ, ക്വൊട്ടേഷൻ & ഇവന്റ് ചെലവുകൾ)',
-      'Stock (സ്റ്റോക്ക്, എക്സ്പയറി തീയതി, Low Stock, Bulk Update & CSV Export)',
-      'Staff (സ്റ്റാഫ് ഷിഫ്റ്റ് ക്രമീകരണം, ഹാജർ & ശമ്പള വിവരങ്ങൾ)',
-      'More ▾ -> Clients, Menu & Recipes & Manuals (മലയാളം PDF ഡൗൺലോഡ്)'
+      'Dashboard (Operations Overview, Upcoming Functions, Low-Stock & Expiry Alerts)',
+      'Events (Upcoming vs Previous Bookings, Quotations, Shortage CSV & WhatsApp PDF+Text)',
+      'Stock (Warehouse Inventory, Expiry Tracking, Bulk Stock Update, CSV Export & Vendor Purchases)',
+      'Staff (Onboarding with 3 Salary Plans, Shift Assignment, Attendance & WhatsApp Duty Alerts)',
+      'More Menu -> Clients (with Top Clients Leaderboard), Menu & Recipes & Manuals (PDF)'
     ],
     pages: [
       {
-        pageTitleMl: 'ലോഗിൻ, 1-Tap ആപ്പ് ഇൻസ്റ്റാളേഷൻ & ഡാഷ്‌ബോർഡ്',
+        pageTitleMl: 'App Setup, Operations Dashboard, Clients & Menu Recipes',
         chapters: [
           {
             number: '01',
-            titleMl: 'ലോഗിൻ ചെയ്യലും സ്മാർട്ട്ഫോൺ ആപ്പ് ഇൻസ്റ്റാളേഷനും',
-            menuLabel: 'Login / Install App / Profile Menu',
+            titleMl: 'Sign-In, 1-Tap Smartphone App Install & Operations Dashboard',
+            menuLabel: 'Login / Install App / Dashboard',
             summaryMl:
-              'മാനേജർ യൂസർനെയിമും പാസ്‌വേഡും ഉപയോഗിച്ച് സൈറ്റിലോ മൊബൈലിലോ എളുപ്പത്തിൽ ലോഗിൻ ചെയ്യാം.',
+              'Access live event schedules, guest counts, and warehouse alerts from your phone or desktop.',
             stepsMl: [
-              'ലോഗിൻ പേജിൽ നിങ്ങൾക്ക് നൽകിയ Username, Password എന്നിവ ടൈപ്പ് ചെയ്ത് "Sign In" ക്ലിക്ക് ചെയ്യുക.',
-              'ഫോണിലെ "📲 Install App" ബട്ടൺ അമർത്തുമ്പോൾ യാതൊരു അധിക പെർമിഷനും ആവശ്യമില്ലാതെ മറ്റ് ആപ്പുകൾക്കൊപ്പം App Drawer-ലും ഹോം സ്ക്രീൻ ഷോർട്ട്കട്ടായും IPPAS Pulse ഇൻസ്റ്റാൾ ആകും.',
-              'ഡെസ്ക്ടോപ്പിൽ മുകളിലെ സിംഗിൾ-റോ നാവിഗേഷൻ ബാറും "More ▾" മെനുവും, ഫോണിൽ താഴെയുള്ള 5-ടാബ് ബാറും ഉപയോഗിച്ച് എല്ലാ പേജുകളിലേക്കും വേഗത്തിൽ എത്താം.',
-              'വലതുവശത്തെ പ്രൊഫൈൽ മെനുവിൽ (അല്ലെങ്കിൽ മൊബൈൽ Menu-ൽ) നിന്ന് "Change Password" ഉപയോഗിച്ച് സ്വന്തം പാസ്‌വേഡ് മാറ്റാം.'
-            ],
-            importantNoteMl:
-              'ആപ്ലിക്കേഷൻ തത്സമയ ക്ലൗഡ് ഡാറ്റാബേസിൽ പ്രവർത്തിക്കുന്നതിനാൽ മാറ്റങ്ങൾ വരുത്തുമ്പോൾ ഇന്റർനെറ്റ് കണക്ഷൻ ഉണ്ടായിരിക്കണം.'
+              'Sign in using your Manager username and password provided by the Owner.',
+              'Tap "Install App" once to add IPPAS Pulse to your phone’s App Drawer and Home Screen without needing any special device permissions (on iPhone Safari, tap Share -> "Add to Home Screen").',
+              'Use the Operations Dashboard to review confirmed upcoming bookings, total guest pax, low-stock ingredients, and items approaching expiry.'
+            ]
           },
           {
             number: '02',
-            titleMl: 'മാനേജർ ഡാഷ്‌ബോർഡും ക്ലയന്റ് ഡയറക്ടറിയും',
-            menuLabel: 'Dashboard / More ▾ -> Clients',
+            titleMl: 'Client Directory, Top Clients Leaderboard & Menu Recipe Builder',
+            menuLabel: 'More -> Clients / Menu & Recipes',
             summaryMl:
-              'നടക്കാനിരിക്കുന്ന പരിപാടികളും കുറവുള്ള അടുക്കള സാധനങ്ങളും ഡാഷ്‌ബോർഡിൽ നിന്ന് ഉടൻ മനസ്സിലാക്കാം.',
+              'Identify top-performing clients instantly and maintain accurate dish recipes—including non-stock ingredients.',
             stepsMl: [
-              'Dashboard തുറക്കുമ്പോൾ വരാനിരിക്കുന്ന ഇവന്റുകളുടെ പട്ടിക, തീയതി, വേദി, ആകെ അതിഥികളുടെ എണ്ണം (Guest Count) എന്നിവ കാണാം.',
-              'അടുക്കളയിൽ തീർന്നുപോകാറായ ചേരുവകളുടെ എണ്ണം മുകളിലെ "⚠️ Low Stock" അറിയിപ്പിൽ കാണാൻ സാധിക്കും.',
-              '"Clients" പേജിൽ പുതിയ കസ്റ്റമർമാരുടെ പേര്, ഫോൺ നമ്പർ, കമ്പനി വിവരങ്ങൾ എന്നിവ ചേർക്കാനും മുൻകാല ഇവന്റുകൾ തിരയാനും സാധിക്കും.'
+              'Open "Clients" to add new customer profiles and view the "Top Clients Leaderboard" highlighting your "Highest Paying Clients" and "Most Events Conducted".',
+              'Open "Menu & Recipes" to add catering dishes (priced Per Guest or Per Kg) and click "Edit Recipe" to define ingredient quantities per guest/kg.',
+              'When building a recipe, if an ingredient is not yet in warehouse stock, click "+ Create New Ingredient (Not in Stock)" right inside the recipe window to register and link it without leaving the screen.'
             ]
           }
         ]
       },
       {
-        pageTitleMl: 'ഇവന്റ് ബുക്കിംഗുകൾ (Upcoming & Previous) & ക്വൊട്ടേഷൻ',
+        pageTitleMl: 'Catering Bookings, Quotations, Stock Sufficiency & Warehouse Control',
         chapters: [
           {
             number: '03',
-            titleMl: 'വരാനിരിക്കുന്നതും കഴിഞ്ഞുപോയതുമായ ഇവന്റുകളും ക്വൊട്ടേഷൻ അയക്കലും',
-            menuLabel: 'Events -> Upcoming / Previous',
+            titleMl: 'Upcoming vs Previous Bookings, Standalone Print & WhatsApp Sharing',
+            menuLabel: 'Events -> Event Detail',
             summaryMl:
-              'Events പേജിൽ വരാനിരിക്കുന്ന ബുക്കിംഗുകളും കഴിഞ്ഞുപോയ പരിപാടികളും വെവ്വേറെ കണ്ട് "Catering Proposal" ക്വൊട്ടേഷൻ വാട്സാപ്പിൽ അയക്കാം.',
+              'Create catering proposals, separate upcoming functions from past events, and share clean PDFs with auto-attached client messages.',
             stepsMl: [
-              '"Events" പേജിൽ വരാനിരിക്കുന്ന ഇവന്റുകൾ (Upcoming Bookings) മുകളിലും, കഴിഞ്ഞുപോയ ഇവന്റുകൾ (Previous Events) താഴെയുമായി പ്രത്യേകം വേർതിരിച്ചിരിക്കുന്നു; "+ New Booking" വഴി പുതിയ ഇവന്റ് ചേർക്കാം.',
-              'ഇവന്റ് പേജിൽ കയറി ആവശ്യമായ മെനു ഐറ്റംസ് തിരഞ്ഞെടുക്കുക; തുടർന്ന് ലോജിസ്റ്റിക്സ്, ട്രാൻസ്പോർട്ട്, മറ്റ് എക്സ്ട്രാ ചാർജുകൾ എന്നിവ ചേർക്കുക.',
-              'ക്വൊട്ടേഷനിൽ ബാങ്ക് വിവരങ്ങളും പേയ്‌മെന്റ് നിബന്ധനകളും കാണിക്കണമെങ്കിൽ Enable ചെയ്യുക, അല്ലെങ്കിൽ Disable ചെയ്യുക.',
-              'പ്രിന്റ് ബട്ടൺ അമർത്തിയാൽ വെബ് പേജ് ഉൾപ്പെടാതെ ആ ക്വൊട്ടേഷൻ ഡോക്യുമെന്റ് മാത്രം വൃത്തിയായി A4 പ്രിന്റ് എടുക്കാം.',
-              'വാട്സാപ്പ് ഷെയർ ബട്ടണിൽ "📲 Send PDF & Text Together on WhatsApp" അമർത്തുമ്പോൾ ക്വൊട്ടേഷൻ PDF ഫയലും മെസ്സേജ് ടെക്സ്റ്റും ഒരുമിച്ച് ക്ലയന്റിന്റെ വാട്സാപ്പിലേക്ക് അറ്റാച്ച് ആകും (കമ്പ്യൂട്ടറിൽ "Copy Text" സൗകര്യവുമുണ്ട്).'
+              'Open "Events" to view "Upcoming Bookings" clearly separated from "Previous / Completed Events", or click "+ New Booking" to register a new function.',
+              'Inside the event workspace, add menu items, rental/transport extras, and toggle Bank Details or Payment Terms on the quotation.',
+              'Click "Print Proposal" to print ONLY the A4 quotation document (excluding web navigation).',
+              'Click "Send on WhatsApp" -> "Send PDF & Text Together on WhatsApp" to share both the PDF proposal and greeting text together on mobile (with a "Copy Text" helper shown on desktop web view).'
             ]
           },
           {
             number: '04',
-            titleMl: 'ഇവന്റിന് വേണ്ട ചേരുവകളുടെ കണക്കും അധിക ചെലവുകളും',
-            menuLabel: 'Event -> Stock & Expenses Tabs',
+            titleMl: 'Warehouse Inventory, Expiry Alerts, Vendor Purchases & Shortage CSV Export',
+            menuLabel: 'Stock / Event Sufficiency',
             summaryMl:
-              'അതിഥികളുടെ എണ്ണത്തിനനുസരിച്ച് വേണ്ട സാധനങ്ങൾ സിസ്റ്റം തനിയെ കണക്കാക്കും; കൂടാതെ ഇവന്റ് ചെലവുകൾ ചേർക്കാം.',
+              'Keep kitchen raw materials up to date and export instant CSV purchase lists for vendors.',
             stepsMl: [
-              'ഇവന്റ് പേജിലെ "Stock" ടാബിൽ തിരഞ്ഞെടുത്ത മെനു അനുസരിച്ച് വേണ്ട ചേരുവകളും നിലവിലെ ഗോഡൗൺ സ്റ്റോക്കും തമ്മിലുള്ള താരതമ്യം കാണാം.',
-              'കുറവുള്ള സാധനങ്ങളുടെ ലിസ്റ്റ് CSV ഫയലായി ഡൗൺലോഡ് ചെയ്യാനോ പർച്ചേസ് ഓർഡർ രേഖപ്പെടുത്താനോ സാധിക്കും.',
-              '"Expenses" ടാബിൽ ഓരോ ഇവന്റിന്റെയും എക്സ്ട്രാ ചെലവുകളായ സ്റ്റോക്ക് പ്രൈസിങ് (Stock Pricing), എക്സ്ട്രാസ് കൊണ്ടുപോയതിന്റെ ചെലവുകൾ (Extras Taken), സ്റ്റാഫ് ചെലവുകൾ (Staff Expenses), മറ്റ് ചെലവുകൾ (Other Expenses) എന്നിവ കൃത്യമായി ആഡ് ചെയ്യുക.'
+              'Open "Stock" to add raw materials, track batch expiry dates, record "Vendor Stock Purchases" (with bill numbers), or run a fast "Bulk Stock Update" after physical kitchen counts.',
+              'Click "Export Inventory & Shortage CSV" on the Stock page (or inside an Event’s Stock Sufficiency panel) to download a clean spreadsheet of current stock levels and exact shortage quantities needed for vendor ordering.'
             ]
           }
         ]
       },
       {
-        pageTitleMl: 'സ്റ്റോക്ക് ഇൻവെന്ററി, CSV എക്സ്പോർട്ട് & സ്റ്റാഫ് ക്രമീകരണം',
+        pageTitleMl: 'Staff Salary Plans, Shift Roster, Attendance & Event Expenses',
         chapters: [
           {
             number: '05',
-            titleMl: 'മെനു റെസിപ്പികളും സ്റ്റോക്ക് ഇൻവെന്ററി ഫീച്ചറുകളും',
-            menuLabel: 'Menu & Recipes / Stock',
+            titleMl: 'Onboarding Staff (3 Salary Plans), Shift Rosters & Password Resets',
+            menuLabel: 'Staff / Event -> Crew Shifts',
             summaryMl:
-              'എക്സ്പയറി തീയതി പരിശോധന, Bulk Stock Update, Low Stock ഫിൽട്ടർ, CSV എക്സ്പോർട്ട് എന്നിവയിലൂടെ ഗോഡൗൺ കൃത്യമായി കൈകാര്യം ചെയ്യാം.',
+              'Choose the right pay structure when adding staff, dispatch WhatsApp shift alerts, mark attendance, and log on-site event expenses.',
             stepsMl: [
-              '"Menu & Recipes" പേജിൽ പുതിയ വിഭവം ചേർത്ത ഉടൻ "Create & Add Recipe" വഴി റെസിപ്പി സെറ്റ് ചെയ്യാം; നിലവിൽ സ്റ്റോക്കിൽ ഇല്ലാത്ത ചേരുവകളും "+ New Ingredient (Not in Stock)" വഴി അവിടെ വെച്ച് തന്നെ റെസിപ്പിയിലേക്ക് ചേർക്കാം.',
-              '"Stock" പേജിൽ ഓരോ സാധനത്തിന്റെയും Expiry Date ചേർക്കാം; കാലാവധി അടുക്കാറായ സാധനങ്ങൾ പട്ടികയിൽ ഉടൻ തിരിച്ചറിയാം.',
-              'സുരക്ഷാ പരിധിയിൽ (Safety Threshold) താഴെ പോയ സാധനങ്ങൾ മാത്രം കാണാൻ "Low Stock Only" ചെക്ക്ബോക്സ് ഉപയോഗിക്കുക.',
-              '"Bulk Update" വഴി ഒന്നിലധികം ചേരുവകൾ ഒരുമിച്ച് സെലക്ട് ചെയ്ത് ഒരേ അളവ് സ്റ്റോക്ക് ഒറ്റയടിക്ക് കൂട്ടാനോ കുറയ്ക്കാനോ സാധിക്കും.',
-              'വെണ്ടർമാർക്ക് ഓർഡർ നൽകുന്നതിനായി നിലവിലെ സ്റ്റോക്കും കുറവുള്ള സാധനങ്ങളുടെ പട്ടികയും "Export CSV" ബട്ടൺ അമർത്തി ഫയലായി ഡൗൺലോഡ് ചെയ്യാം.'
-            ]
-          },
-          {
-            number: '06',
-            titleMl: 'സിംപിൾ സ്റ്റാഫ് പേജ്, ഹാജർ & പാസ്‌വേഡ് റീസെറ്റ്',
-            menuLabel: 'Staff -> Crew & Events / Shift Attendance',
-            summaryMl:
-              'ഓരോ സ്റ്റാഫിന്റെയും വരാനിരിക്കുന്നതും പങ്കെടുത്തതുമായ പരിപാടികൾ വെവ്വേറെ കാണാനും ഹാജർ രേഖപ്പെടുത്താനും പാസ്‌വേഡ് റീസെറ്റ് ചെയ്യാനും സാധിക്കും.',
-            stepsMl: [
-              '"Staff" പേജിൽ ഓരോ സ്റ്റാഫും ഇതുവരെ പങ്കെടുത്ത പരിപാടികളും (Attended Events) വരാനിരിക്കുന്ന പരിപാടികളും (Upcoming Events) വളരെ ലളിതമായി വെവ്വേറെ കാണാം.',
-              'പരിപാടി കഴിയുമ്പോൾ ഡ്യൂട്ടിക്ക് എത്തിയവരുടെ ഹാജർ "Present" എന്നും എത്താത്തവരുടേത് "Absent" എന്നും കൃത്യമായി മാർക്ക് ചെയ്യുക; പാസ്‌വേഡ് മറന്ന സ്റ്റാഫുകൾക്ക് "🔑 Reset PW" ബട്ടൺ വഴി പുതിയ പാസ്‌വേഡ് നൽകാം.',
-              'തിരഞ്ഞെടുത്ത തീയതികളിലെ ശമ്പള വിവരങ്ങൾ "Payroll Report" വ്യൂവിലൂടെ പരിശോധിച്ച് Salary Slip PDF-ഉം മെസ്സേജും ഒരുമിച്ച് സ്റ്റാഫിന്റെ വാട്സാപ്പ് നമ്പറിലേക്ക് നേരിട്ട് അയക്കാം.',
-              '"Manuals (മലയാളം)" പേജിൽ നിന്ന് മാനേജർ, സ്റ്റാഫ് യൂസർ മാനുവലുകൾ PDF ഫയലായി ഡൗൺലോഡ് ചെയ്യാവുന്നതാണ്.'
-            ]
+              'When adding a crew member in "Staff -> + Add Staff", select their salary structure upfront: Per Hour Salary (₹/hr), Per Event Salary (₹/event), or Monthly Fixed Salary (₹/month).',
+              'Assign crew members to event shifts with reporting/closing times and duty notes, then click the WhatsApp button to send their formatted English duty notification.',
+              'After the function, mark each assigned crew member "Present" or "Absent" so payroll earnings update automatically, and log actual Stock Pricing, Extras Taken, Staff Extra Expenses, and Other Expenses under the event’s Expenses tab.',
+              'If a staff member forgets their login password, click the key icon ("Reset Password") next to their profile to issue a fresh password immediately.'
+            ],
+            importantNoteMl:
+              'Only shifts marked "Present" count toward Per-Hour and Per-Event wage calculations—always verify attendance right after every event.'
           }
         ]
       }
     ],
     bestPracticesMl: [
-      'Events പേജിലെ Upcoming വിഭാഗം പരിശോധിച്ച് അടുത്ത പരിപാടികൾക്കുള്ള സാധനങ്ങൾ Stock പേജിൽ ഉണ്ടെന്ന് ഉറപ്പാക്കുക.',
-      'എല്ലാ ആഴ്ചയും Stock പേജിൽ കയറി Expiry Date അടുക്കുന്ന സാധനങ്ങളും Low Stock Only ലിസ്റ്റും പരിശോധിക്കുക.',
-      'ഇവന്റ് കഴിഞ്ഞ ഉടൻ തന്നെ ഇവന്റ് സ്റ്റാറ്റസ് "Completed" ആക്കുകയും സ്റ്റാഫ് ഹാജരും എക്സ്ട്രാ ചെലവുകളും രേഖപ്പെടുത്തുകയും ചെയ്യുക.'
+      'Check the Event Stock Sufficiency table 48 hours before every confirmed event and export the Shortage CSV for timely vendor procurement.',
+      'Use "+ Create New Ingredient" inside Menu Recipes whenever chefs introduce specialty spices or garnishes so event raw-material estimates stay 100% complete.',
+      'Mark crew shift attendance ("Present" / "Absent") immediately after each catering function concludes.'
     ]
   },
 
   accountant: {
     key: 'accountant',
-    pdfFilename: 'IPPAS-Accountant-User-Manual-Malayalam.pdf',
-    docCode: 'DOC-ML-ACCOUNTANT-03',
-    malayalamRoleName: 'അക്കൗണ്ടന്റ്',
+    pdfFilename: 'IPPAS-Accountant-User-Manual-EN.pdf',
+    docCode: 'DOC-EN-ACCOUNTANT-01',
+    malayalamRoleName: 'Accountant',
     englishRoleLabel: 'Accountant',
-    titleMl: 'അക്കൗണ്ടന്റ് യൂസർ മാനുവൽ',
+    titleMl: 'Accountant User Manual',
     subtitleMl:
-      'ക്വൊട്ടേഷൻ, ഇൻവോയ്‌സ് ബില്ലിംഗ്, ക്ലയന്റ് വാട്സാപ്പ് PDF+Text, സ്റ്റാഫ് ശമ്പള പേയ്‌മെന്റ് & വെണ്ടർ പേയ്‌മെന്റ് മാർഗ്ഗനിർദ്ദേശം',
-    accentColor: '#059669',
+      'Complete Accounting Guide to Client Billing, Bank vs Cash Treasury, Separated Salary Advances, Date-Range Payroll Slips, and Vendor Settlements',
+    accentColor: '#047857',
     overviewMl:
-      'ഇവന്റുകളുടെ ക്വൊട്ടേഷനുകളും ഇൻവോയ്‌സുകളും ക്ലയന്റിന്റെ വാട്സാപ്പ് നമ്പറിലേക്ക് PDF ഡോക്യുമെന്റും ടെക്സ്റ്റും ഒരുമിച്ച് അയക്കൽ, ഡിസ്കൗണ്ടുകളും പാർട്ട് പേയ്‌മെന്റുകളും രേഖപ്പെടുത്തൽ, സ്റ്റാഫുകൾക്കുള്ള ശമ്പള വിതരണം (Staff Salary Payment), വെണ്ടർമാർക്കുള്ള പേയ്‌മെന്റ് (Vendor Payment) എന്നിവയാണ് അക്കൗണ്ടന്റ് അക്കൗണ്ടിന്റെ പ്രധാന ചുമതലകൾ.',
+      'The Accountant workspace in IPPAS Pulse centralizes all receivables, payables, and payroll operations—covering client invoicing, discounts, bank vs cash collection tracking, Top Clients revenue rankings, vendor credit settlements, event expense vouchers, flexible staff salary structures, separated Salary Advances, and printable A4 Salary Slips.',
     accessibleModulesMl: [
-      'Dashboard (സെയിൽസ്, കളക്ഷൻ, സ്റ്റാഫ് ശമ്പളം & വെണ്ടർ കുടിശ്ശിക അവലോകനം)',
-      'Invoices (ഇൻവോയ്‌സ്, ഡിസ്കൗണ്ട്, പാർട്ട് പേയ്‌മെന്റ് & ഫൈനൽ സെറ്റിൽമെന്റ്)',
-      'Events (Upcoming & Previous ഇവന്റുകൾ, ക്വൊട്ടേഷൻ & അധിക ചെലവുകൾ)',
-      'Staff (സ്റ്റാഫുകൾക്കുള്ള സാലറി പേയ്‌മെന്റ്, അലവൻസ് & Salary Slip PDF)',
-      'Vendors (വെണ്ടർ ബില്ലുകളും വെണ്ടർമാർക്കുള്ള പേയ്‌മെന്റും രേഖപ്പെടുത്താൻ)',
-      'More ▾ -> Clients & Manuals (മലയാളം PDF ഡൗൺലോഡ്)'
+      'Dashboard (Financial Overview, Receivables, Payables & Bank vs Cash Treasury)',
+      'Invoices (Billing Invoices, Discounts, Part Payments, Final Settlement & WhatsApp PDF+Text)',
+      'Events (Contract Totals, Billing Status & 4-Head Event Extra Expense Ledger)',
+      'Staff (Per-Hour / Per-Event / Monthly Payroll, Quick Salary Advance & A4 Salary Slip PDFs)',
+      'Stock (Vendor Purchase Bills, Credit Balances & Supplier Payment Settlements)',
+      'More Menu -> Clients (with Top Clients Leaderboard) & Manuals (PDF)'
     ],
     pages: [
       {
-        pageTitleMl: 'ലോഗിൻ, ആപ്പ് ഇൻസ്റ്റാളേഷൻ & ഫിനാൻഷ്യൽ ഡാഷ്‌ബോർഡ്',
+        pageTitleMl: 'Financial Dashboard, Treasury Reconciliation & Client Billing',
         chapters: [
           {
             number: '01',
-            titleMl: 'ലോഗിൻ, 1-Tap ആപ്പ് ഇൻസ്റ്റാളേഷൻ & ഡാഷ്‌ബോർഡ്',
-            menuLabel: 'Login / Install App / Dashboard',
+            titleMl: 'Sign-In, 1-Tap App Install, Treasury Holdings & Top Clients',
+            menuLabel: 'Dashboard / More -> Clients',
             summaryMl:
-              'മൊത്തം ബില്ലിംഗ് തുക, പിരിഞ്ഞുകിട്ടിയ തുക, വെണ്ടർ കുടിശ്ശിക, സ്റ്റാഫ് ശമ്പള കുടിശ്ശിക എന്നിവ ഡാഷ്‌ബോർഡിൽ തത്സമയം കാണാം.',
+              'Track total invoiced revenue, pending client dues, bank vs cash balances, and highest-paying clients.',
             stepsMl: [
-              'നിങ്ങളുടെ അക്കൗണ്ടന്റ് Username, Password എന്നിവ ഉപയോഗിച്ച് ലോഗിൻ ചെയ്യുക; "📲 Install App" അമർത്തി യാതൊരു അധിക പെർമിഷനും കൂടാതെ ഫോണിലെ App Drawer-ലും ഹോം സ്ക്രീനിലും ആപ്പ് ഇൻസ്റ്റാൾ ചെയ്യാം.',
-              'Dashboard-ൽ ആകെ സെയിൽസ്, കളക്ട് ചെയ്ത തുക, ക്ലയന്റ് കുടിശ്ശിക, വെണ്ടർ കുടിശ്ശിക (Vendor Dues), സ്റ്റാഫ് ശമ്പള ബാക്കി (Staff Salary Payable) എന്നിവ പരിശോധിക്കാം.',
-              'ഡാഷ്‌ബോർഡിലെ "💸 Pay Staff Salary", "💳 Pay Vendor Bills" എന്നീ ബട്ടണുകൾ വഴി സ്റ്റാഫ് ശമ്പളവും വെണ്ടർ പേയ്‌മെന്റും നേരിട്ട് നൽകാം.',
-              'ഓരോ ബാങ്ക് അക്കൗണ്ടിലും ക്യാഷ് ആയും എത്ര തുക വീതം ലഭിച്ചിട്ടുണ്ട് എന്നതിന്റെ കണക്ക് (Account-wise Collections) ഡാഷ്‌ബോർഡിൽ ലഭ്യമാണ്.'
+              'Sign in with your Accountant credentials and tap "Install App" once to add IPPAS Pulse to your desktop or smartphone without extra permissions.',
+              'Review "Account-wise Invoice Collections" on the Dashboard to reconcile exact amounts received in each Bank/UPI account versus Cash in Hand.',
+              'Open "More -> Clients" to inspect the "Top Clients Leaderboard" ("Highest Paying Clients" and "Most Events Conducted") and monitor client-wise pending receivables.'
             ]
           },
           {
             number: '02',
-            titleMl: 'ക്ലയന്റിന്റെ വാട്സാപ്പ് നമ്പറിലേക്ക് നേരിട്ട് PDF + Text അയക്കൽ',
-            menuLabel: 'Events / Invoices -> WhatsApp Share',
+            titleMl: 'Invoices, Discounts, Part Payments, Standalone Print & WhatsApp PDF+Text',
+            menuLabel: 'Invoices',
             summaryMl:
-              'ക്വൊട്ടേഷനും ഇൻവോയ്‌സും ക്ലയന്റിന്റെ വാട്സാപ്പ് നമ്പറിലേക്ക് ടെക്സ്റ്റും PDF ഡോക്യുമെന്റും ഒരുമിച്ച് നേരിട്ട് അയക്കാം.',
+              'Issue accurate client invoices, log every advance/installment, and share standalone PDFs with auto-attached text.',
             stepsMl: [
-              '"Events" പേജിൽ വരാനിരിക്കുന്ന ഇവന്റുകളും (Upcoming) പൂർത്തിയായ മുൻകാല ഇവന്റുകളും (Previous) പ്രത്യേകം സെക്ഷനുകളായി കാണാം.',
-              'ക്വൊട്ടേഷനിലോ ഇൻവോയ്‌സിലോ വാട്സാപ്പ് ബട്ടൺ ക്ലിക്ക് ചെയ്ത് "📲 Send to Client WhatsApp (Text + PDF)" അമർത്തുമ്പോൾ ക്ലയന്റിന്റെ വാട്സാപ്പ് ചാറ്റ് നേരിട്ട് തുറക്കുകയും മെസ്സേജ് ടെക്സ്റ്റും ഔദ്യോഗിക PDF ഡോക്യുമെന്റും ഒരുമിച്ച് അറ്റാച്ച് ആവുകയും ചെയ്യും.',
-              'ഡെസ്ക്ടോപ്പ് / ലാപ്ടോപ്പ് വെബ് വ്യൂവിൽ മാത്രം ആവശ്യമെങ്കിൽ "Copy Text" ഓപ്ഷനും ലഭ്യമാണ്.',
-              'ഓരോ ഇവന്റിന്റെയും അധിക ചെലവുകൾ (സ്റ്റോക്ക്, എക്സ്ട്രാസ്, സ്റ്റാഫ്, മറ്റ് ചെലവുകൾ) ഇവന്റിലെ "Expenses" ടാബിൽ ചേർക്കാം.'
+              'Convert approved event proposals into sequentially numbered invoices (INV-...) or create deposit/final invoices directly from the "Invoices" page.',
+              'Apply authorized discounts with clear notes and click "Record Payment" for every client receipt—selecting whether funds arrived via Bank/UPI (choosing the exact bank account) or Cash in Hand.',
+              'When an invoice is paid in full, IPPAS Pulse automatically converts it into a "Final Settlement Invoice" and removes pending payment-term clauses.',
+              'Use "Print" to print ONLY the A4 invoice (never the web page chrome), or click "Send on WhatsApp" -> "Send PDF & Text Together on WhatsApp" to attach both the invoice PDF and message text automatically.'
             ]
           }
         ]
       },
       {
-        pageTitleMl: 'ഇൻവോയ്‌സ്, പാർട്ട് പേയ്‌മെന്റ് & വെണ്ടർ പേയ്‌മെന്റുകൾ',
+        pageTitleMl: 'Staff Payroll, Quick Salary Advance Separation & Salary Slip PDFs',
         chapters: [
           {
             number: '03',
-            titleMl: 'ഇൻവോയ്‌സ് ഡിസ്കൗണ്ട്, പാർട്ട് പേയ്‌മെന്റ് & ഫൈനൽ സെറ്റിൽമെന്റ്',
-            menuLabel: 'Invoices',
+            titleMl: 'Quick "Salary Advance" Button vs Standard Salary Payouts',
+            menuLabel: 'Staff -> Crew & Shifts',
             summaryMl:
-              'അഡ്വാൻസും പാർട്ട് പേയ്‌മെന്റുകളും രേഖപ്പെടുത്തി മുഴുവൻ തുകയും ലഭിക്കുമ്പോൾ ഫൈനൽ സെറ്റിൽമെന്റ് ഇൻവോയ്‌സ് നൽകാം.',
+              'Record mid-period staff advances in one click while keeping them strictly separated from regular monthly or event salary payouts.',
             stepsMl: [
-              'ക്ലയന്റ് ക്വൊട്ടേഷൻ അംഗീകരിച്ചു കഴിഞ്ഞാൽ പുതിയ ഇൻവോയ്‌സ് ജനറേറ്റ് ചെയ്യുക; ഡിസ്കൗണ്ട് ഉണ്ടെങ്കിൽ അതേ ഇൻവോയ്‌സിൽ എഡിറ്റ് ചെയ്ത് ചേർക്കുക.',
-              '"Record Payment" വഴി തുക, തീയതി, Cash / Bank / UPI വിവരം രേഖപ്പെടുത്തുമ്പോൾ ബാക്കി തുക (Balance Due) തനിയെ കണക്കാക്കും.',
-              'മുഴുവൻ തുകയും ലഭിച്ചു കഴിയുമ്പോൾ ആ ഇൻവോയ്‌സ് തനിയെ "Final Settlement Invoice" ആയി മാറുകയും Payment Terms ഒഴിവാക്കപ്പെടുകയും ചെയ്യും.'
+              'Open "Staff" to view each crew member’s configured pay plan: Per Hour (₹/hr), Per Event (₹/event), or Monthly Fixed Salary (₹/month).',
+              'When issuing a mid-month or pre-event advance, click the amber "Salary Advance" button on the staff card (or top toolbar), enter the advance amount, payment method (Cash / UPI / Bank), and note, and save.',
+              'When settling regular wages, click "Pay Salary" to record a Standard Salary Payout, or click "+ Allowance" to add travel/overtime bonuses.',
+              'Both Standard Salary Payouts and Salary Advances deduct accurately from Net Balance Payable while remaining clearly separated in KPI cards, transaction ledgers, and salary statements.'
             ],
             importantNoteMl:
-              'ഏത് ഇൻവോയ്‌സിന്റെ പ്രിന്റ് ഐക്കൺ ആണോ ക്ലിക്ക് ചെയ്യുന്നത്, വെബ് പേജ് ഉൾപ്പെടാതെ ആ ഇൻവോയ്‌സ് ഡോക്യുമെന്റ് മാത്രമേ A4 പ്രിന്റ് ഫോർമാറ്റിൽ വരികയുള്ളൂ.'
+              'Never mix advance disbursements into generic notes on regular payouts—always use the dedicated "Salary Advance" button for clean audit trails.'
           },
           {
             number: '04',
-            titleMl: 'വെണ്ടർമാർക്കുള്ള പേയ്‌മെന്റ് രേഖപ്പെടുത്തൽ (Vendor Payments)',
-            menuLabel: 'Vendors (Stock Purchases & Dues)',
+            titleMl: 'Date-Range Payroll Reports & Printable A4 Staff Salary Slips',
+            menuLabel: 'Staff -> Payroll Report & Salary Slips',
             summaryMl:
-              'സാധനങ്ങൾ വാങ്ങിയ വെണ്ടർമാർക്കുള്ള ബിൽ തുകയും കുടിശ്ശിക പേയ്‌മെന്റുകളും അക്കൗണ്ടന്റിന് നേരിട്ട് പേ ചെയ്യാം.',
+              'Generate custom date-range payroll summaries and export or WhatsApp official A4 Salary Slip PDFs.',
             stepsMl: [
-              'മുകളിലെ നാവിഗേഷൻ ബാറിലെ "Vendors" (അല്ലെങ്കിൽ ഡാഷ്‌ബോർഡിലെ "💳 Pay Vendor Bills") തുറക്കുക.',
-              'കുടിശ്ശികയുള്ള ഏത് വെണ്ടർ ബില്ലിന്റെയും നേരെയുള്ള "💳 Pay Vendor" ക്ലിക്ക് ചെയ്ത് നൽകുന്ന തുക, തീയതി, പേയ്‌മെന്റ് രീതി (UPI / Bank / Cash), ട്രാൻസാക്ഷൻ വിവരം എന്നിവ സേവ് ചെയ്യുക.',
-              'പുതിയ വെണ്ടർ പർച്ചേസ് ബിൽ രേഖപ്പെടുത്തണമെങ്കിൽ "🛒 + Record Stock Purchase" ബട്ടണും ഉപയോഗിക്കാം.'
+              'Open the "Payroll Report & Salary Slips" tab on the Staff page and select your target Start Date and End Date (or tap "This Month" / "Last Month").',
+              'Review period hours worked, shifts attended, base/shift earnings, allowances, Standard Salary Paid, Salary Advances Taken, and closing payable balance for every staff member.',
+              'Click "Slip PDF" or "Print" on any row to download or print a standalone A4 Staff Salary Slip, or click "WhatsApp" to send the PDF slip + text summary directly to the staff member.'
             ]
           }
         ]
       },
       {
-        pageTitleMl: 'സ്റ്റാഫ് ശമ്പള വിതരണവും സാലറി സ്ലിപ്പ് PDF-ഉം',
+        pageTitleMl: 'Vendor Purchase Bills & Event Extra Expense Accounting',
         chapters: [
           {
             number: '05',
-            titleMl: 'സ്റ്റാഫുകൾക്കുള്ള സാലറി പേയ്‌മെന്റും അലവൻസുകളും',
-            menuLabel: 'Staff -> 💸 Pay Staff Salary',
+            titleMl: 'Supplier Credit Settlements & 4-Category Event Extra Expenses',
+            menuLabel: 'Stock -> Vendor Purchases / Events -> Expenses',
             summaryMl:
-              'സ്റ്റാഫുകൾക്ക് നൽകാനുള്ള ശമ്പളവും അധിക അലവൻസുകളും അക്കൗണ്ടന്റിന് എളുപ്പത്തിൽ പേ ചെയ്യാം.',
+              'Settle pending supplier bills and record complete event-level expenditure vouchers.',
             stepsMl: [
-              '"Staff" പേജിൽ ഓരോ സ്റ്റാഫും പങ്കെടുത്ത പരിപാടികളും വരാനിരിക്കുന്ന പരിപാടികളും അവർക്ക് നൽകാനുള്ള ശമ്പള ബാക്കിയും (Balance Due) കാണാം.',
-              'ശമ്പളം നൽകുമ്പോൾ "💸 Pay Salary" ക്ലിക്ക് ചെയ്ത് തുക, തീയതി, UPI / Cash / Bank വിവരം എന്നിവ രേഖപ്പെടുത്തി സേവ് ചെയ്യുക.',
-              'യാത്രാബത്തയോ അധിക ബോണസോ ഉണ്ടെങ്കിൽ "+ Bonus / Allowance" വഴി ചേർക്കാവുന്നതാണ്.'
-            ]
-          },
-          {
-            number: '06',
-            titleMl: 'തീയതി തിരിച്ചുള്ള ശമ്പള റിപ്പോർട്ടും വാട്സാപ്പ് സാലറി സ്ലിപ്പും',
-            menuLabel: 'Staff -> Payroll Report',
-            summaryMl:
-              'തീയതി പരിധി തിരഞ്ഞെടുത്ത് സാലറി സ്ലിപ്പ് PDF ഡൗൺലോഡ് ചെയ്യുകയോ സ്റ്റാഫിന്റെ വാട്സാപ്പിലേക്ക് അയക്കുകയോ ചെയ്യാം.',
-            stepsMl: [
-              'Staff പേജിലെ "Payroll Report" ടാബ് തുറന്ന് Start Date, End Date എന്നിവ തിരഞ്ഞെടുക്കുക.',
-              'ആ കാലയളവിലെ ആകെ ജോലി മണിക്കൂറുകൾ, വരുമാനം, കൈപ്പറ്റിയ ശമ്പളം, ബാക്കി തുക എന്നിവ പട്ടികയിൽ കാണാം.',
-              'സാലറി സ്ലിപ്പ് A4 PDF ആയി ഡൗൺലോഡ് ചെയ്യുകയോ, "💬 WA" ബട്ടൺ വഴി സ്റ്റാഫിന്റെ വാട്സാപ്പ് നമ്പറിലേക്ക് PDF + Text ഒരുമിച്ച് നേരിട്ട് അയക്കുകയോ ചെയ്യാം.'
+              'Open "Stock -> Vendor Purchases" to review all raw-material purchase bills, partial payments, and outstanding supplier credit balances, and click "Record Payment" whenever vendor dues are cleared.',
+              'Open any booking under "Events -> Expenses" to log or verify the 4 operational cost heads: (1) Stock Pricing, (2) Extras Taken Cost, (3) Staff Extra Expenses, and (4) Other Expenses, and print standalone A4 Event Expense Sheets when required.'
             ]
           }
         ]
       }
     ],
     bestPracticesMl: [
-      'പേയ്‌മെന്റ് രേഖപ്പെടുത്തുമ്പോൾ അത് Cash ആണോ അതോ ഏത് Bank Account-ലേക്കാണോ വന്നതെന്ന് കൃത്യമായി തിരഞ്ഞെടുക്കുക.',
-      'ഡിസ്കൗണ്ട് നൽകുമ്പോൾ ഇൻവോയ്‌സിൽ അതിന്റെ കാരണം/വിവരം കൂടി രേഖപ്പെടുത്തുന്നത് പിന്നീടുള്ള കണക്കുകൾക്ക് സഹായകരമാകും.',
-      'ശമ്പളം തീർപ്പാക്കുന്നതിന് മുൻപ് തിരഞ്ഞെടുത്ത തീയതിയിലെ Payroll Report പരിശോധിച്ച് Salary Slip PDF സ്റ്റാഫിന് നൽകുക.'
+      'Always verify the exact destination Bank Account vs Cash in Hand before saving any client invoice payment.',
+      'Use the "Payroll Report & Salary Slips" date-range view at month-end to export batch A4 Salary Slips for your accounting records.',
+      'Reconcile pending supplier bills in "Stock -> Vendor Purchases" weekly to keep payables accurate.'
     ]
   },
 
   staff: {
     key: 'staff',
-    pdfFilename: 'IPPAS-Staff-User-Manual-Malayalam.pdf',
-    docCode: 'DOC-ML-STAFF-04',
-    malayalamRoleName: 'സ്റ്റാഫ്',
+    pdfFilename: 'IPPAS-Staff-User-Manual-EN.pdf',
+    docCode: 'DOC-EN-STAFF-01',
+    malayalamRoleName: 'Staff',
     englishRoleLabel: 'Staff',
-    titleMl: 'സ്റ്റാഫ് യൂസർ മാനുവൽ',
+    titleMl: 'Staff User Manual',
     subtitleMl:
-      'കാറ്ററിംഗ് ഡ്യൂട്ടി സമയം, ഇവന്റ് വേദി, ഹാജർ വിവരങ്ങൾ, ലഭിച്ച ശമ്പളവും ബാക്കി തുകയും പരിശോധിക്കുന്നതിനുള്ള ലളിതമായ സഹായി',
-    accentColor: '#7c3aed',
+      'Simple Crew Guide to Mobile Sign-In, Self-Service Password Reset, 1-Tap App Install, Upcoming vs Attended Events, and Salary & Advance Tracking',
+    accentColor: '#6d28d9',
     overviewMl:
-      'IPPAS Food Service & Events-ലെ കാറ്ററിംഗ് സ്റ്റാഫ് അംഗങ്ങൾക്ക് അവരുടെ അടുത്ത ഡ്യൂട്ടി ഏത് സ്ഥലത്താണ്, ഏത് സമയത്താണ്, എത്ര മണിക്കൂർ ജോലി ചെയ്തു, എത്ര രൂപ ശമ്പളം ലഭിച്ചു, ഇനി എത്ര രൂപ കിട്ടാനുണ്ട് എന്നീ വിവരങ്ങൾ സ്വന്തം മൊബൈൽ ഫോണിൽ എളുപ്പത്തിൽ പരിശോധിക്കാൻ തയ്യാറാക്കിയ പോർട്ടലാണിത്.',
+      'The IPPAS Pulse Staff Portal gives every catering crew member, chef, captain, and server a clean, mobile-friendly view of their upcoming catering duties, Google Maps venue locations, completed event history, configured salary rate (Per Hour, Per Event, or Monthly Fixed), Standard Salary Received, Salary Advances taken, and exact Pending Balance Payable.',
     accessibleModulesMl: [
-      'Duty & Salary (അടുത്ത ഡ്യൂട്ടി വിവരങ്ങളും ശമ്പള കണക്കും)',
-      'Install App (യാതൊരു അധിക പെർമിഷനും ഇല്ലാതെ ഫോണിൽ ആപ്പ് ഇൻസ്റ്റാൾ ചെയ്യാൻ)',
-      'Manuals (സ്റ്റാഫ് മലയാളം യൂസർ മാനുവൽ PDF ഡൗൺലോഡ് ചെയ്യാൻ)',
-      'Profile / Menu -> Change Password & Logout'
+      'My Portal (Upcoming Events, Attended Events History & Salary / Advance Summary)',
+      'Manuals (Downloadable Official Staff User Manual A4 PDF)',
+      'Profile / Menu -> Change Password & Secure Logout'
     ],
     pages: [
       {
-        pageTitleMl: 'ലോഗിൻ ചെയ്യലും 1-Tap മൊബൈൽ ആപ്പ് ഇൻസ്റ്റാളേഷനും',
+        pageTitleMl: 'Mobile Sign-In, Password Recovery & 1-Tap Smartphone App Install',
         chapters: [
           {
             number: '01',
-            titleMl: 'മൊബൈൽ നമ്പർ ഉപയോഗിച്ച് ലോഗിൻ ചെയ്യേണ്ട വിധം',
-            menuLabel: 'Sign In (Login)',
+            titleMl: 'Signing In with Your Mobile Number & Self-Service Password Reset',
+            menuLabel: 'Sign In / Forgot Staff Password?',
             summaryMl:
-              'നിങ്ങളുടെ രജിസ്റ്റർ ചെയ്ത മൊബൈൽ ഫോൺ നമ്പറും പാസ്‌വേഡും ഉപയോഗിച്ച് വളരെ വേഗത്തിൽ ലോഗിൻ ചെയ്യാം.',
+              'Log in effortlessly using your registered 10-digit mobile number and reset your password anytime if forgotten.',
             stepsMl: [
-              'നിങ്ങളുടെ ഫോണിൽ ഇന്റർനെറ്റ് ഓൺ ആണെന്ന് ഉറപ്പുവരുത്തിയ ശേഷം ആപ്ലിക്കേഷൻ തുറക്കുക.',
-              '"Username or Phone Number" എന്ന ആദ്യ കോളത്തിൽ നിങ്ങളുടെ രജിസ്റ്റർ ചെയ്ത മൊബൈൽ നമ്പർ ടൈപ്പ് ചെയ്യുക.',
-              '"Password" എന്ന കോളത്തിൽ സ്ഥാപനത്തിൽ നിന്ന് നൽകിയ പാസ്‌വേഡ് നൽകി "Sign In" ബട്ടൺ അമർത്തുക.',
-              'പാസ്‌വേഡ് മറന്നുപോയാൽ ലോഗിൻ സ്ക്രീനിലെ "Forgot Staff Password? (പാസ്‌വേഡ് മറന്നുപോയോ?)" ക്ലിക്ക് ചെയ്ത് നിങ്ങളുടെ രജിസ്റ്റർ ചെയ്ത മൊബൈൽ നമ്പറും പേരും നൽകി ഉടൻ തന്നെ പുതിയ പാസ്‌വേഡ് സെറ്റ് ചെയ്യാം.'
+              'Open IPPAS Pulse on your smartphone and enter your registered 10-digit mobile number in the "Username or Phone Number" field.',
+              'Enter your password and tap "Sign In" to open your personal Staff Duty & Salary Portal.',
+              'If you ever forget your password, tap "Forgot Staff Password?" right on the Sign-In screen, verify your registered mobile number and full name, and set a new password immediately (or ask your Manager/Owner for a 1-click reset).'
             ],
             importantNoteMl:
-              'തത്സമയ ഡ്യൂട്ടി വിവരങ്ങൾ കാണുന്നതിനായി ആപ്പ് തുറക്കുമ്പോൾ മൊബൈൽ ഡാറ്റ അല്ലെങ്കിൽ വൈഫൈ ഓൺ ആയിരിക്കണം.'
+              'Keep Mobile Data or Wi-Fi turned on when opening the app so your latest shift assignments and salary updates sync automatically.'
           },
           {
             number: '02',
-            titleMl: 'സ്മാർട്ട്ഫോണിൽ മറ്റ് ആപ്പുകൾക്കൊപ്പം ഇൻസ്റ്റാൾ ചെയ്യേണ്ട വിധം',
-            menuLabel: '📲 Install App',
+            titleMl: '1-Tap Smartphone App Installation (Zero Extra Permissions)',
+            menuLabel: 'Install App Banner / Button',
             summaryMl:
-              'യാതൊരു അധിക പെർമിഷനും ആവശ്യമില്ലാതെ ഫോണിലെ മറ്റ് ആപ്പുകളുടെ കൂടെയും ഹോം സ്ക്രീനിലും IPPAS Pulse ഐക്കൺ ചേർക്കാം.',
+              'Add the IPPAS Pulse icon alongside your other phone apps and on your Home Screen in one tap.',
             stepsMl: [
-              'ലോഗിൻ സ്ക്രീനിലോ ലോഗിൻ ചെയ്ത ശേഷം മുകളിലോ താഴെയോ കാണുന്ന "📲 Install App" എന്ന ബട്ടൺ ഒറ്റത്തവണ അമർത്തുക.',
-              'Android ഫോണുകളിൽ "Install" എന്ന് അമർത്തുമ്പോൾ തന്നെ ഫോണിലെ മറ്റ് ആപ്പുകൾക്കൊപ്പം (App Drawer) ആപ്പ് ഐക്കൺ വരികയും ഹോം സ്ക്രീനിൽ ഷോർട്ട്കട്ട് തനിയെ ഉണ്ടാവുകയും ചെയ്യും.',
-              'ഇതിന് കോൺടാക്ട്സ്, ഫയലുകൾ തുടങ്ങിയ വേറൊരു പെർമിഷനും എടുക്കേണ്ട ആവശ്യമില്ല.',
-              'iPhone (Safari) ഉപയോഗിക്കുന്നവർ താഴെയുള്ള Share ബട്ടൺ അമർത്തി "Add to Home Screen" തിരഞ്ഞെടുക്കുക.'
+              'Tap the "Install App" button shown on the Sign-In screen or at the top of your Staff Portal.',
+              'On Android phones, confirm "Install" once—IPPAS Pulse will appear in your phone’s App Drawer alongside all other apps and create a Home Screen shortcut automatically without asking for contacts, storage, or camera permissions.',
+              'On iPhone (Safari), tap the bottom "Share" icon and choose "Add to Home Screen".'
             ]
           }
         ]
       },
       {
-        pageTitleMl: 'വരാനിരിക്കുന്നവയും പങ്കെടുത്തതുമായ പരിപാടികളും ശമ്പള വിവരങ്ങളും',
+        pageTitleMl: 'Upcoming Duties, Attended Events, Salary Plan & Advances',
         chapters: [
           {
             number: '03',
-            titleMl: 'വരാനിരിക്കുന്ന പരിപാടികളും (Upcoming) പങ്കെടുത്ത പരിപാടികളും (Attended)',
-            menuLabel: 'Home -> Upcoming Events / Attended Events',
+            titleMl: 'Checking Upcoming Events & Attended Events Separately',
+            menuLabel: 'My Portal -> Upcoming Events / Attended Events',
             summaryMl:
-              'നിങ്ങളുടെ വരാനിരിക്കുന്ന ഡ്യൂട്ടികളും ഇതുവരെ പങ്കെടുത്ത പരിപാടികളും ആശയക്കുഴപ്പമില്ലാതെ വെവ്വേറെ പരിശോധിക്കാം.',
+              'View your next scheduled catering function, reporting time, and venue map separately from completed duties.',
             stepsMl: [
-              'ലോഗിൻ ചെയ്ത ഉടൻ കാണുന്ന "വരാനിരിക്കുന്ന പരിപാടികൾ (Upcoming Events)" വിഭാഗത്തിൽ നിങ്ങളുടെ അടുത്ത ഡ്യൂട്ടിയുടെ തീയതി, സമയം, റോൾ, സ്ഥലം (Google Maps ലിങ്ക് സഹിതം) എന്നിവ വ്യക്തമായി കാണാം.',
-              'തൊട്ടുതാഴെയുള്ള "ഇതുവരെ പങ്കെടുത്ത പരിപാടികൾ (Events Attended So Far)" വിഭാഗത്തിൽ നിങ്ങൾ ഇതുവരെ പങ്കെടുത്ത എല്ലാ പരിപാടികളും, ജോലി ചെയ്ത മണിക്കൂറുകളും, ഓരോ പരിപാടിക്കും ലഭിച്ച തുകയും വെവ്വേറെ കാണാം.',
-              'മുകളിലെ ഫിൽട്ടർ ബട്ടണുകൾ ഉപയോഗിച്ച് Upcoming Events മാത്രമായോ Attended Events മാത്രമായോ വേഗത്തിൽ നോക്കാം.'
+              'Under "Upcoming Events", check your "Next Scheduled Duty" card for the exact event date, reporting and closing times, assigned role, guest count, duty instructions, and the 1-tap "Open Venue in Google Maps" button.',
+              'Scroll to "Events Attended So Far" (or tap the filter tab at the top) to see every completed catering event you have worked, hours logged, attendance status ("Attended" vs "Attendance Pending"), and shift earnings.',
+              'Use the segmented filter bar ("All Overview", "Upcoming Events", "Attended Events", "Salary Received") to focus on any single section instantly.'
             ]
           },
           {
             number: '04',
-            titleMl: 'ലഭിച്ച ശമ്പളം & കിട്ടാനുള്ള ബാക്കി തുക',
-            menuLabel: 'Salary Summary',
+            titleMl: 'Understanding Your Salary Plan, Standard Payouts & Salary Advances',
+            menuLabel: 'My Portal -> Salary KPIs & Payouts Table',
             summaryMl:
-              'നിങ്ങൾ പങ്കെടുത്ത ഷിഫ്റ്റുകൾ, അധിക അലവൻസുകൾ, കൈപ്പറ്റിയ തുക, ഇനി കിട്ടാനുള്ള ബാക്കി തുക എന്നിവ സുതാര്യമായി പരിശോധിക്കാം.',
+              'Track your total earnings, regular salary payouts, salary advances, and remaining balance transparently.',
             stepsMl: [
-              'നിങ്ങൾ ഡ്യൂട്ടിയിൽ പങ്കെടുത്ത് ഹാജർ "Present" എന്ന് രേഖപ്പെടുത്തുമ്പോൾ ആ ഷിഫ്റ്റിലെ മണിക്കൂറുകൾ നിങ്ങളുടെ മണിക്കൂർ നിരക്കുമായി ഗുണിച്ച് ശമ്പളത്തിൽ തനിയെ ചേർക്കപ്പെടും.',
-              'നിങ്ങൾക്ക് അനുവദിച്ച അധിക ഡ്യൂട്ടി അലവൻസുകളും ബോണസുകളും (Allowances) മൊത്തം വരുമാനത്തിനൊപ്പം കാണാം.',
-              'ഇതുവരെ കൈപ്പറ്റിയ ശമ്പള തുകയും (Salary Received) ഏത് തീയതിയിലാണ് ലഭിച്ചതെന്ന വിവരവും പേയ്‌മെന്റ് പട്ടികയിൽ കാണാം.',
-              'ആകെ വരുമാനത്തിൽ നിന്ന് കൈപ്പറ്റിയ തുക കഴിച്ച് ഇനി നിങ്ങൾക്ക് കിട്ടാനുള്ള കൃത്യമായ ബാക്കി തുക (Pending Balance Payable) മുകളിലെ കളർ കാർഡിൽ എപ്പോഴും കാണാൻ സാധിക്കും.'
+              'Your configured pay plan—Per Hour (₹/hr), Per Event (₹/event), or Monthly Fixed Salary (₹/month)—is displayed clearly at the top of your portal.',
+              'The 4 summary cards show: (1) Total Salary Earned (including any extra duty allowances/bonuses), (2) Standard Salary Paid, (3) Salary Advances Taken (tracked separately), and (4) Pending Balance Payable.',
+              'Open "Salary Payouts & Advances Received" to see every payment date, whether it was a "Standard Salary" payout or a "Salary Advance", payment method (Cash / UPI / Bank), and exact amount.'
             ]
           },
           {
             number: '05',
-            titleMl: 'പാസ്‌വേഡ് മാറ്റൽ, PDF മാനുവൽ & ലോഗൗട്ട്',
-            menuLabel: 'Profile / Menu -> Change Password & Logout',
+            titleMl: 'Changing Your Password, Downloading This PDF & Signing Out',
+            menuLabel: 'Change Password / Manuals / Logout',
             summaryMl:
-              'നിങ്ങളുടെ ശമ്പള വിവരങ്ങൾ മറ്റാരും കാണാതിരിക്കാൻ സ്വന്തം പാസ്‌വേഡ് സുരക്ഷിതമായി സൂക്ഷിക്കുക.',
+              'Keep your personal salary portal private and save this guide offline on your phone.',
             stepsMl: [
-              'ആദ്യമായി ലോഗിൻ ചെയ്ത ശേഷം മുകളിലെ "Change Password" ബട്ടണോ താഴത്തെ "Menu -> Change Password" ഓപ്ഷനോ അമർത്തി നിങ്ങൾക്ക് മാത്രം അറിയാവുന്ന പുതിയ പാസ്‌വേഡ് സെറ്റ് ചെയ്യുക.',
-              '"Manuals" പേജിൽ നിന്ന് ഈ സ്റ്റാഫ് യൂസർ മാനുവൽ എപ്പോൾ വേണമെങ്കിലും PDF ഫയലായി ഫോണിലേക്ക് ഡൗൺലോഡ് ചെയ്യാം.',
-              'മറ്റൊരാളുടെ ഫോണിലോ പൊതുവായ കമ്പ്യൂട്ടറിലോ ലോഗിൻ ചെയ്തിട്ടുണ്ടെങ്കിൽ വിവരങ്ങൾ നോക്കിയ ഉടൻ തന്നെ "Logout" അമർത്തി പുറത്തിറങ്ങുക.'
+              'Tap "Change Password" in your portal header (or bottom Menu) after your first login to set a private password known only to you.',
+              'Tap "Staff User Manual (PDF)" anytime to download this A4 English guide onto your smartphone for offline reference.',
+              'Always tap "Logout" if you sign in from a shared phone or office computer.'
             ]
           }
         ]
       }
     ],
     bestPracticesMl: [
-      'പരിപാടിയുടെ തലേദിവസം ആപ്പ് തുറന്ന് റിപ്പോർട്ടിംഗ് സമയവും വേദിയും (Venue) ഒരിക്കൽ കൂടി ഉറപ്പുവരുത്തുക.',
-      'ഓരോ പരിപാടി കഴിയുമ്പോഴും നിങ്ങളുടെ ഹാജർ "Present" ആയി രേഖപ്പെടുത്തിയിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.',
-      'നിങ്ങളുടെ ലോഗിൻ പാസ്‌വേഡ് മറ്റുള്ളവരുമായി പങ്കുവെക്കാതിരിക്കുക.'
+      'Open IPPAS Pulse the evening before every scheduled function to double-check your reporting time, uniform/duty note, and Google Maps venue pin.',
+      'After completing an event shift, verify that your attendance is marked "Attended" so your earnings reflect immediately.',
+      'Keep your password private so your salary and advance records remain confidential.'
     ]
   }
 };

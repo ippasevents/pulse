@@ -210,8 +210,8 @@ export default function EventsPage() {
           }}
         >
           {sectionKind === 'upcoming'
-            ? 'വരാനിരിക്കുന്ന ഇവന്റുകൾ നിലവിലില്ല (No upcoming catering bookings match your filter).'
-            : 'കഴിഞ്ഞുപോയ ഇവന്റുകൾ കണ്ടെത്താനായില്ല (No previous events match your filter).'}
+            ? 'No upcoming catering bookings match your current filter.'
+            : 'No previous or completed events match your current filter.'}
         </div>
       );
     }
@@ -405,7 +405,7 @@ export default function EventsPage() {
         <div>
           <h1 className="page-title">Catering Events &amp; Bookings</h1>
           <p className="page-subtitle">
-            വരാനിരിക്കുന്ന ബുക്കിംഗുകളും (Upcoming) കഴിഞ്ഞുപോയ ഇവന്റുകളും (Previous) പ്രത്യേകം വേർതിരിച്ച് കൈകാര്യം ചെയ്യാം.
+            Manage upcoming banquet schedules and completed catering records in clearly separated views.
           </p>
         </div>
         {canEdit && (
@@ -444,7 +444,7 @@ export default function EventsPage() {
           }}
         >
           <span className="stats-label" style={{ color: '#4338ca' }}>
-            Upcoming Bookings (വരാനിരിക്കുന്നവ)
+            Upcoming Bookings
           </span>
           <span className="stats-value" style={{ color: '#312e81' }}>
             {allUpcomingCount}
@@ -482,7 +482,7 @@ export default function EventsPage() {
           }}
         >
           <span className="stats-label" style={{ color: '#b45309' }}>
-            Previous Events (കഴിഞ്ഞുപോയവ)
+            Previous Events
           </span>
           <span className="stats-value" style={{ color: '#92400e' }}>
             {allPreviousCount}
@@ -535,7 +535,7 @@ export default function EventsPage() {
                 timelineView === 'split' ? '0 1px 3px rgba(15, 23, 42, 0.1)' : 'none'
             }}
           >
-            Split View (രണ്ടും വെവ്വേറെ)
+            Split View (Both)
           </button>
           <button
             type="button"
@@ -638,7 +638,7 @@ export default function EventsPage() {
                   margin: 0
                 }}
               >
-                📅 Upcoming Events &amp; Bookings (വരാനിരിക്കുന്ന ഇവന്റുകൾ)
+                📅 Upcoming Events &amp; Bookings
               </h2>
               <p style={{ fontSize: '0.78rem', color: '#475569', margin: '0.15rem 0 0 0' }}>
                 Active inquiries, quotations, and confirmed upcoming functions sorted by nearest date.
@@ -689,7 +689,7 @@ export default function EventsPage() {
                   margin: 0
                 }}
               >
-                🕘 Previous &amp; Completed Events (കഴിഞ്ഞുപോയ ഇവന്റുകൾ)
+                🕘 Previous &amp; Completed Events
               </h2>
               <p style={{ fontSize: '0.78rem', color: '#475569', margin: '0.15rem 0 0 0' }}>
                 Past functions, completed settlements, and archived event records sorted most recent first.

@@ -20,6 +20,7 @@ import {
   EventExpense,
   EventExpenseCategory,
   StaffMember,
+  StaffSalaryType,
   Shift,
   ShiftAttendanceStatus,
   StaffSalaryRecord,
@@ -55,25 +56,162 @@ export const EVENT_EXPENSE_CATEGORY_LABELS: Record<
 > = {
   stock_pricing: {
     en: 'Stock Pricing / Raw Materials',
-    ml: 'സ്റ്റോക്കിന്റെ പ്രൈസിങ്',
+    ml: 'Raw Material & Stock Cost',
     short: 'Stock Pricing'
   },
   extras_cost: {
     en: 'Extras Taken / Logistics Cost',
-    ml: 'എക്സ്ട്രാസ് കൊണ്ടുപോയതിന്റെ ചെലവുകൾ',
+    ml: 'Logistics, Rentals & Extras',
     short: 'Extras Cost'
   },
   staff_expense: {
     en: 'Staff Extra Expenses',
-    ml: 'സ്റ്റാഫിന്റെ ചെലവുകൾ',
+    ml: 'Crew Food, Travel & Misc',
     short: 'Staff Expenses'
   },
   other_expense: {
     en: 'Other Event Expenses',
-    ml: 'മറ്റ് ചെലവുകൾ',
+    ml: 'General Operational Cost',
     short: 'Other Expenses'
   }
 };
+
+const STAFF_SALARY_STRUCTURES_CACHE_KEY = 'ippas_staff_salary_structures_v1';
+const LAST_BACKUP_STORAGE_KEY = 'ippas_last_backup_downloaded_at';
+export const BACKUP_REMINDER_INTERVAL_DAYS = 15;
+const BACKUP_REMINDER_INTERVAL_MS = BACKUP_REMINDER_INTERVAL_DAYS * 24 * 60 * 60 * 1000;
+
+export function getStaffSalaryType(staff?: Partial<StaffMember> | null): StaffSalaryType {
+  if (!staff) return 'hourly';
+  if (staff.salary_type === 'per_event' || staff.salary_type === 'monthly' || staff.salary_type === 'hourly') {
+    return staff.salary_type;
+  }
+  return 'hourly';
+}
+
+export function getStaffPrimaryRate(staff?: Partial<StaffMember> | null): number {
+  if (!staff) return 0;
+  const sType = getStaffSalaryType(staff);
+  if (sType === 'per_event') {
+    return Number(staff.event_rate ?? staff.hourly_rate ?? 0);
+  }
+  if (sType === 'monthly') {
+    return Number(staff.monthly_salary ?? staff.hourly_rate ?? 0);
+  }
+  return Number(staff.hourly_rate ?? 0);
+}
+
+export function formatStaffSalaryTypeLabel(type?: StaffSalaryType): string {
+  if (type === 'per_event') return 'Per Event';
+  if (type === 'monthly') return 'Monthly Fixed';
+  return 'Per Hour';
+}
+
+export function formatStaffSalaryRate(staff?: Partial<StaffMember> | null): string {
+  const sType = getStaffSalaryType(staff);
+  const rate = getStaffPrimaryRate(staff);
+  if (sType === 'per_event') {
+    return `₹${rate.toLocaleString('en-IN')}/event`;
+  }
+  if (sType === 'monthly') {
+    return `₹${rate.toLocaleString('en-IN')}/month`;
+  }
+  return `₹${rate.toLocaleString('en-IN')}/hr`;
+}
+
+export function isSalaryAdvanceRecord(rec?: Partial<StaffSalaryRecord> | null): boolean {
+  if (!rec) return false;
+  if (rec.record_type === 'advance') return true;
+  if (rec.record_type === 'earning') return false;
+  const methodStr = String(rec.method || '');
+  return /^\[ADVANCE\]/i.test(methodStr) || /^salary\s+advance\b/i.test(methodStr);
+}
+
+export function calculateMonthlySalaryMonthsCount(
+  staff: StaffMember,
+  allShifts: Shift[],
+  allSalaryRecords: StaffSalaryRecord[],
+  startDate?: string,
+  endDate?: string
+): number {
+  if (getStaffSalaryType(staff) !== 'monthly') return 0;
+
+  const now = new Date();
+  const currentYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  // Determine earliest active YYYY-MM for this monthly staff member
+  let effectiveStartYm = staff.salary_start_date ? staff.salary_start_date.slice(0, 7) : '';
+  if (!/^\d{4}-\d{2}$/.test(effectiveStartYm)) {
+    const candidateYms: string[] = [];
+    for (const sh of allShifts) {
+      if (sh.staff_member_id === staff.id && sh.starts_at) {
+        const ym = sh.starts_at.slice(0, 7);
+        if (/^\d{4}-\d{2}$/.test(ym)) candidateYms.push(ym);
+      }
+    }
+    for (const sr of allSalaryRecords) {
+      if (sr.staff_member_id === staff.id && sr.recorded_at) {
+        const ym = sr.recorded_at.slice(0, 7);
+        if (/^\d{4}-\d{2}$/.test(ym)) candidateYms.push(ym);
+      }
+    }
+    candidateYms.sort();
+    effectiveStartYm = candidateYms[0] || currentYm;
+  }
+
+  const fromYm =
+    startDate && /^\d{4}-\d{2}/.test(startDate)
+      ? startDate.slice(0, 7) > effectiveStartYm
+        ? startDate.slice(0, 7)
+        : effectiveStartYm
+      : effectiveStartYm;
+
+  const toYm =
+    endDate && /^\d{4}-\d{2}/.test(endDate)
+      ? endDate.slice(0, 7) < currentYm
+        ? endDate.slice(0, 7)
+        : endDate.slice(0, 7)
+      : currentYm;
+
+  if (fromYm > toYm) {
+    return !startDate && !endDate && staff.active ? 1 : 0;
+  }
+
+  const [sY, sM] = fromYm.split('-').map(Number);
+  const [eY, eM] = toYm.split('-').map(Number);
+  if (isNaN(sY) || isNaN(sM) || isNaN(eY) || isNaN(eM)) return staff.active ? 1 : 0;
+
+  const months = (eY - sY) * 12 + (eM - sM) + 1;
+  return Math.max(0, months);
+}
+
+export interface BackupReminderStatus {
+  isDue: boolean;
+  lastBackupAt: string | null;
+  daysSinceBackup: number | null;
+  nextDueAt: string | null;
+  intervalDays: number;
+}
+
+export interface DatabaseBackupPreview {
+  valid: boolean;
+  error?: string;
+  exportedAt?: string;
+  backupVersion?: string;
+  businessName?: string;
+  counts: {
+    clients: number;
+    events: number;
+    invoices: number;
+    payments: number;
+    staff: number;
+    shifts: number;
+    salaryRecords: number;
+    menuItems: number;
+    ingredients: number;
+    stockPurchases: number;
+  };
+}
 
 export interface EventFinancialSummary {
   eventId: string;
@@ -104,6 +242,8 @@ export interface StaffShiftEarningItem {
   event?: EventRecord;
   hours: number;
   hourlyRate: number;
+  salaryType: StaffSalaryType;
+  rateLabel: string;
   attendanceStatus: ShiftAttendanceStatus;
   isAttended: boolean;
   earnedAmount: number;
@@ -111,6 +251,11 @@ export interface StaffShiftEarningItem {
 
 export interface StaffSalarySummary {
   staffId: string;
+  salaryType: StaffSalaryType;
+  primaryRate: number;
+  rateDisplay: string;
+  monthlyMonthsCount: number;
+  monthlyBaseEarnings: number;
   shiftItems: StaffShiftEarningItem[];
   attendedShiftsCount: number;
   absentShiftsCount: number;
@@ -119,9 +264,13 @@ export interface StaffSalarySummary {
   shiftEarnings: number;
   extraEarnings: number;
   totalEarned: number;
+  totalRegularPaid: number;
+  totalAdvancePaid: number;
   totalPaid: number;
   balancePayable: number;
   advanceExcess: number;
+  regularPaymentRecords: StaffSalaryRecord[];
+  advanceRecords: StaffSalaryRecord[];
   paymentRecords: StaffSalaryRecord[];
   earningRecords: StaffSalaryRecord[];
 }
@@ -1427,14 +1576,111 @@ class DataStore {
     };
   }
 
+  private readStaffStructureCache(): Record<
+    string,
+    {
+      salary_type: StaffSalaryType;
+      hourly_rate: number;
+      event_rate?: number;
+      monthly_salary?: number;
+      salary_start_date?: string;
+    }
+  > {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem(STAFF_SALARY_STRUCTURES_CACHE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private writeStaffStructureCacheEntry(s: StaffMember) {
+    if (typeof window === 'undefined' || !s?.id) return;
+    try {
+      const current = this.readStaffStructureCache();
+      current[s.id] = {
+        salary_type: getStaffSalaryType(s),
+        hourly_rate: Number(s.hourly_rate || 0),
+        event_rate: s.event_rate !== undefined ? Number(s.event_rate || 0) : undefined,
+        monthly_salary: s.monthly_salary !== undefined ? Number(s.monthly_salary || 0) : undefined,
+        salary_start_date: s.salary_start_date || undefined
+      };
+      localStorage.setItem(STAFF_SALARY_STRUCTURES_CACHE_KEY, JSON.stringify(current));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  private buildStaffStructureAuditTag(s: StaffMember): string {
+    return `SalaryStructure: ${JSON.stringify({
+      salary_type: getStaffSalaryType(s),
+      hourly_rate: Number(s.hourly_rate || 0),
+      event_rate: Number(s.event_rate ?? 0),
+      monthly_salary: Number(s.monthly_salary ?? 0),
+      salary_start_date: s.salary_start_date || null
+    })}`;
+  }
+
+  private extractStaffStructureFromLogs(
+    staffId: string,
+    rawLogs: any[]
+  ): {
+    salary_type?: StaffSalaryType;
+    hourly_rate?: number;
+    event_rate?: number;
+    monthly_salary?: number;
+    salary_start_date?: string;
+  } | null {
+    for (const al of rawLogs) {
+      if (String(al.entity_id || '') === String(staffId) && al.details) {
+        const det = String(al.details);
+        const match = det.match(/SalaryStructure:\s*(\{[^\n•]+\})/);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[1]);
+            if (parsed && typeof parsed === 'object') {
+              return {
+                salary_type:
+                  parsed.salary_type === 'per_event' ||
+                  parsed.salary_type === 'monthly' ||
+                  parsed.salary_type === 'hourly'
+                    ? parsed.salary_type
+                    : undefined,
+                hourly_rate:
+                  parsed.hourly_rate !== undefined ? Number(parsed.hourly_rate || 0) : undefined,
+                event_rate:
+                  parsed.event_rate !== undefined ? Number(parsed.event_rate || 0) : undefined,
+                monthly_salary:
+                  parsed.monthly_salary !== undefined ? Number(parsed.monthly_salary || 0) : undefined,
+                salary_start_date: parsed.salary_start_date ? String(parsed.salary_start_date) : undefined
+              };
+            }
+          } catch {
+            // ignore malformed JSON
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   private toStaffSqlRow(s: StaffMember) {
+    const sType = getStaffSalaryType(s);
+    const primaryRate = getStaffPrimaryRate(s);
     return {
       id: s.id,
       name: s.name,
       phone: s.phone || null,
       password: s.password || 'password123',
       role_title: s.role_title || null,
-      hourly_rate: Number(s.hourly_rate || 0),
+      salary_type: sType,
+      hourly_rate: sType === 'hourly' ? Number(s.hourly_rate || 0) : primaryRate,
+      event_rate: Number(s.event_rate || (sType === 'per_event' ? primaryRate : 0)),
+      monthly_salary: Number(s.monthly_salary || (sType === 'monthly' ? primaryRate : 0)),
+      salary_start_date: s.salary_start_date || null,
       active: s.active !== false
     };
   }
@@ -2267,21 +2513,102 @@ class DataStore {
           }))
         : [];
 
-      const loadedStaff: StaffMember[] = (staffRes?.data || []).map((s: any) => ({
-        id: s.id,
-        name: s.name,
-        phone: s.phone || '',
-        password: s.password || 'password123',
-        role_title: s.role_title || 'Service Crew',
-        hourly_rate: Number(s.hourly_rate || 0),
-        active: s.active !== false
-      }));
+      const rawActivityLogsForSync = !activityLogsRes?.error
+        ? ((activityLogsRes?.data || []) as any[])
+        : [];
+      const staffCache = this.readStaffStructureCache();
+
+      const loadedStaff: StaffMember[] = (staffRes?.data || []).map((s: any) => {
+        const existingLocal = this.state.staff.find((old) => old.id === s.id);
+        const fromLogs = this.extractStaffStructureFromLogs(s.id, rawActivityLogsForSync);
+        const fromCache = staffCache[s.id];
+
+        const dbSalaryType: StaffSalaryType | undefined =
+          s.salary_type === 'per_event' || s.salary_type === 'monthly' || s.salary_type === 'hourly'
+            ? s.salary_type
+            : undefined;
+
+        const resolvedType: StaffSalaryType =
+          dbSalaryType ||
+          fromLogs?.salary_type ||
+          fromCache?.salary_type ||
+          existingLocal?.salary_type ||
+          'hourly';
+
+        const rawDbHourly = Number(s.hourly_rate || 0);
+        const resolvedHourly =
+          resolvedType === 'hourly'
+            ? rawDbHourly
+            : Number(
+                fromLogs?.hourly_rate ??
+                  fromCache?.hourly_rate ??
+                  existingLocal?.hourly_rate ??
+                  200
+              );
+
+        const resolvedEventRate =
+          s.event_rate !== undefined && s.event_rate !== null
+            ? Number(s.event_rate)
+            : fromLogs?.event_rate !== undefined
+            ? fromLogs.event_rate
+            : fromCache?.event_rate !== undefined
+            ? fromCache.event_rate
+            : existingLocal?.event_rate !== undefined
+            ? existingLocal.event_rate
+            : resolvedType === 'per_event'
+            ? rawDbHourly
+            : 0;
+
+        const resolvedMonthly =
+          s.monthly_salary !== undefined && s.monthly_salary !== null
+            ? Number(s.monthly_salary)
+            : fromLogs?.monthly_salary !== undefined
+            ? fromLogs.monthly_salary
+            : fromCache?.monthly_salary !== undefined
+            ? fromCache.monthly_salary
+            : existingLocal?.monthly_salary !== undefined
+            ? existingLocal.monthly_salary
+            : resolvedType === 'monthly'
+            ? rawDbHourly
+            : 0;
+
+        const resolvedStartDate =
+          (s.salary_start_date ? String(s.salary_start_date).slice(0, 10) : undefined) ||
+          fromLogs?.salary_start_date ||
+          fromCache?.salary_start_date ||
+          existingLocal?.salary_start_date ||
+          undefined;
+
+        return {
+          id: s.id,
+          name: s.name,
+          phone: s.phone || '',
+          password: s.password || 'password123',
+          role_title: s.role_title || 'Service Crew',
+          salary_type: resolvedType,
+          hourly_rate: resolvedHourly,
+          event_rate: resolvedEventRate,
+          monthly_salary: resolvedMonthly,
+          salary_start_date: resolvedStartDate,
+          active: s.active !== false
+        };
+      });
 
       this.state = {
         ...this.state,
         settings: settingsRes?.data
-          ? { ...INITIAL_SETTINGS, ...settingsRes.data }
-          : INITIAL_SETTINGS,
+          ? {
+              ...INITIAL_SETTINGS,
+              ...settingsRes.data,
+              last_backup_downloaded_at:
+                settingsRes.data.last_backup_downloaded_at ||
+                this.state.settings?.last_backup_downloaded_at ||
+                undefined
+            }
+          : {
+              ...INITIAL_SETTINGS,
+              last_backup_downloaded_at: this.state.settings?.last_backup_downloaded_at
+            },
         profiles: loadedProfiles,
         clients: (clientsRes?.data || []).map((c: any) => ({
           id: c.id,
@@ -2544,16 +2871,26 @@ class DataStore {
             };
           }),
         staffSalaryRecords: !salaryRecordsRes?.error
-          ? (salaryRecordsRes?.data || []).map((sr: any) => ({
-              id: sr.id,
-              staff_member_id: sr.staff_member_id,
-              event_id: sr.event_id || undefined,
-              record_type: (sr.record_type === 'earning' ? 'earning' : 'payment') as StaffSalaryRecordType,
-              amount: Number(sr.amount || 0),
-              method: sr.method || 'Cash',
-              note: sr.note || '',
-              recorded_at: sr.recorded_at || new Date().toISOString()
-            }))
+          ? (salaryRecordsRes?.data || []).map((sr: any) => {
+              const rawMethod = String(sr.method || 'Cash');
+              const isAdvance =
+                sr.record_type === 'advance' ||
+                /^\[ADVANCE\]\s*/i.test(rawMethod) ||
+                /^salary\s+advance\b/i.test(rawMethod);
+              const cleanMethod = rawMethod.replace(/^\[ADVANCE\]\s*/i, '').trim() || 'Cash';
+              const resolvedType: StaffSalaryRecordType =
+                sr.record_type === 'earning' ? 'earning' : isAdvance ? 'advance' : 'payment';
+              return {
+                id: sr.id,
+                staff_member_id: sr.staff_member_id,
+                event_id: sr.event_id || undefined,
+                record_type: resolvedType,
+                amount: Number(sr.amount || 0),
+                method: cleanMethod,
+                note: sr.note || '',
+                recorded_at: sr.recorded_at || new Date().toISOString()
+              };
+            })
           : [],
         invoices: (invoicesRes?.data || []).map((inv: any) => {
           const existingLocal = this.state.invoices.find((old) => old.id === inv.id);
@@ -3449,7 +3786,7 @@ class DataStore {
   }
 
   public resetToDefault(ownerPassword?: string): { success: boolean; error?: string } {
-    if (this.state.currentRole !== 'owner') {
+    if (this.state.currentRole !== 'owner' && this.state.currentRole !== 'super_admin') {
       return {
         success: false,
         error: 'Permission denied: Only Owner has authority to reset the database.'
@@ -3462,6 +3799,702 @@ class DataStore {
       success: false,
       error: 'Owner password is required to reset database.'
     };
+  }
+
+  /**
+   * Records that the Owner downloaded a full database backup, resetting the 15-day reminder timer
+   * across both localStorage and online Supabase activity_logs / business_settings.
+   */
+  public recordBackupDownloaded(formatLabel: string = 'Full JSON Backup') {
+    const nowIso = new Date().toISOString();
+    this.state.settings = {
+      ...this.state.settings,
+      last_backup_downloaded_at: nowIso
+    };
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(LAST_BACKUP_STORAGE_KEY, nowIso);
+      } catch {
+        // ignore storage errors
+      }
+    }
+
+    this.logMutation({
+      entity_type: 'database',
+      entity_id: 'full_backup_download',
+      action: 'create',
+      summary: `Owner downloaded full database backup (${formatLabel})`,
+      details: `BackupTimestamp: ${nowIso} • Format: ${formatLabel}`
+    });
+
+    this.enqueueSqlOperations('Update Last Backup Timestamp', [
+      {
+        type: 'upsert',
+        table: 'business_settings',
+        values: {
+          ...this.state.settings,
+          id: 1,
+          last_backup_downloaded_at: nowIso
+        },
+        onConflict: 'id'
+      }
+    ]);
+
+    this.save();
+  }
+
+  /**
+   * Computes whether the 15-day Owner database backup notification is currently due.
+   * Remains persistently due across reloads and sessions until the Owner downloads a full backup.
+   */
+  public getBackupReminderStatus(): BackupReminderStatus {
+    const candidates: number[] = [];
+
+    if (this.state.settings?.last_backup_downloaded_at) {
+      const ms = new Date(this.state.settings.last_backup_downloaded_at).getTime();
+      if (!isNaN(ms)) candidates.push(ms);
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(LAST_BACKUP_STORAGE_KEY);
+        if (stored) {
+          const ms = new Date(stored).getTime();
+          if (!isNaN(ms)) candidates.push(ms);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    for (const log of this.state.auditLogs || []) {
+      if (log.entity_id === 'full_backup_download') {
+        const ms = new Date(log.created_at).getTime();
+        if (!isNaN(ms)) candidates.push(ms);
+      } else if (log.details && log.details.includes('BackupTimestamp:')) {
+        const m = log.details.match(/BackupTimestamp:\s*([^\s•]+)/);
+        if (m) {
+          const ms = new Date(m[1]).getTime();
+          if (!isNaN(ms)) candidates.push(ms);
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      return {
+        isDue: true,
+        lastBackupAt: null,
+        daysSinceBackup: null,
+        nextDueAt: null,
+        intervalDays: BACKUP_REMINDER_INTERVAL_DAYS
+      };
+    }
+
+    const latestMs = Math.max(...candidates);
+    const lastBackupAt = new Date(latestMs).toISOString();
+    const elapsedMs = Math.max(0, Date.now() - latestMs);
+    const daysSinceBackup = Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
+    const isDue = elapsedMs >= BACKUP_REMINDER_INTERVAL_MS;
+    const nextDueAt = new Date(latestMs + BACKUP_REMINDER_INTERVAL_MS).toISOString();
+
+    return {
+      isDue,
+      lastBackupAt,
+      daysSinceBackup,
+      nextDueAt,
+      intervalDays: BACKUP_REMINDER_INTERVAL_DAYS
+    };
+  }
+
+  /**
+   * Builds a complete, lossless JSON backup object containing all 17 database collections.
+   */
+  public buildFullDatabaseBackupPayload() {
+    const role = this.state.currentRole;
+    if (role !== 'owner' && role !== 'super_admin') {
+      throw new Error('Unauthorized: Only the Owner can export a full database backup.');
+    }
+
+    const exportedAt = new Date().toISOString();
+    return {
+      appIdentifier: 'IPPAS_CATERING_DATABASE_BACKUP',
+      backupVersion: '2.0',
+      exportedAt,
+      businessName: this.state.settings?.name || 'IPPAS Catering & Events',
+      counts: {
+        clients: this.state.clients.length,
+        events: this.state.events.length,
+        invoices: this.state.invoices.length,
+        payments: this.state.payments.length,
+        staff: this.state.staff.length,
+        shifts: this.state.shifts.length,
+        salaryRecords: (this.state.staffSalaryRecords || []).length,
+        menuItems: this.state.menuItems.length,
+        ingredients: this.state.ingredients.length,
+        stockPurchases: (this.state.stockPurchases || []).length
+      },
+      data: {
+        settings: this.state.settings,
+        // Omit super_admin from exported profiles so stealth account is never exposed in external files
+        profiles: this.state.profiles.filter((p) => p.role !== 'super_admin'),
+        clients: this.state.clients,
+        ingredients: this.state.ingredients,
+        menuItems: this.state.menuItems,
+        recipes: this.state.recipes,
+        events: this.state.events,
+        eventItems: this.state.eventItems,
+        eventExtras: this.state.eventExtras,
+        eventExpenses: this.state.eventExpenses || [],
+        staff: this.state.staff,
+        shifts: this.state.shifts,
+        staffSalaryRecords: this.state.staffSalaryRecords || [],
+        invoices: this.state.invoices,
+        payments: this.state.payments,
+        stockPurchases: this.state.stockPurchases || [],
+        stockPurchasePayments: this.state.stockPurchasePayments || [],
+        auditLogs: (this.state.auditLogs || []).filter((l) => l.actor_role !== 'super_admin')
+      }
+    };
+  }
+
+  /**
+   * Syncs latest live Supabase rows, downloads a full restorable .json backup file,
+   * and resets the 15-day Owner backup reminder.
+   */
+  public async downloadFullDatabaseBackupJson(): Promise<{ filename: string }> {
+    const role = this.state.currentRole;
+    if (role !== 'owner' && role !== 'super_admin') {
+      throw new Error('Only the Owner account is authorized to download the full database backup.');
+    }
+
+    if (this.isOnline()) {
+      await this.syncFromSupabase(true);
+    }
+
+    const payload = this.buildFullDatabaseBackupPayload();
+    const jsonString = JSON.stringify(payload, null, 2);
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const filename = `IPPAS_Full_Database_Backup_${dateStamp}.json`;
+
+    if (typeof window !== 'undefined') {
+      const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2500);
+    }
+
+    this.recordBackupDownloaded('Restorable JSON Backup');
+    return { filename };
+  }
+
+  /**
+   * Validates and summarizes an uploaded .json backup file before restoring.
+   */
+  public previewDatabaseBackupPayload(rawJson: string): DatabaseBackupPreview {
+    try {
+      const parsed = JSON.parse(rawJson);
+      const d = parsed?.data || parsed;
+      if (!d || typeof d !== 'object' || (!Array.isArray(d.clients) && !Array.isArray(d.events) && !Array.isArray(d.menuItems))) {
+        return {
+          valid: false,
+          error: 'Invalid backup file format. Please select a valid IPPAS Full Database Backup (.json) file.',
+          counts: {
+            clients: 0,
+            events: 0,
+            invoices: 0,
+            payments: 0,
+            staff: 0,
+            shifts: 0,
+            salaryRecords: 0,
+            menuItems: 0,
+            ingredients: 0,
+            stockPurchases: 0
+          }
+        };
+      }
+
+      return {
+        valid: true,
+        exportedAt: parsed.exportedAt || undefined,
+        backupVersion: parsed.backupVersion || '1.0',
+        businessName: parsed.businessName || d.settings?.name || 'IPPAS Catering & Events',
+        counts: {
+          clients: Array.isArray(d.clients) ? d.clients.length : 0,
+          events: Array.isArray(d.events) ? d.events.length : 0,
+          invoices: Array.isArray(d.invoices) ? d.invoices.length : 0,
+          payments: Array.isArray(d.payments) ? d.payments.length : 0,
+          staff: Array.isArray(d.staff) ? d.staff.length : 0,
+          shifts: Array.isArray(d.shifts) ? d.shifts.length : 0,
+          salaryRecords: Array.isArray(d.staffSalaryRecords) ? d.staffSalaryRecords.length : 0,
+          menuItems: Array.isArray(d.menuItems) ? d.menuItems.length : 0,
+          ingredients: Array.isArray(d.ingredients) ? d.ingredients.length : 0,
+          stockPurchases: Array.isArray(d.stockPurchases) ? d.stockPurchases.length : 0
+        }
+      };
+    } catch {
+      return {
+        valid: false,
+        error: 'Could not parse JSON file. Please upload a valid .json backup file downloaded from this app.',
+        counts: {
+          clients: 0,
+          events: 0,
+          invoices: 0,
+          payments: 0,
+          staff: 0,
+          shifts: 0,
+          salaryRecords: 0,
+          menuItems: 0,
+          ingredients: 0,
+          stockPurchases: 0
+        }
+      };
+    }
+  }
+
+  /**
+   * Restores 100% of database tables from a downloaded .json backup file into both live state
+   * and the online Supabase database (even after a full database reset).
+   */
+  public async restoreFullDatabaseBackup(rawJson: string): Promise<{
+    success: boolean;
+    error?: string;
+    restoredSummary?: string;
+  }> {
+    const role = this.state.currentRole;
+    if (role !== 'owner' && role !== 'super_admin') {
+      return { success: false, error: 'Unauthorized: Only the Owner can restore a database backup.' };
+    }
+
+    const preview = this.previewDatabaseBackupPayload(rawJson);
+    if (!preview.valid) {
+      return { success: false, error: preview.error || 'Invalid backup file.' };
+    }
+
+    try {
+      const parsed = JSON.parse(rawJson);
+      const d = parsed?.data || parsed;
+
+      const preservedRole = this.state.currentRole;
+      const preservedUserId = this.state.currentUserId;
+      const preservedSuperAdmin =
+        this.state.profiles.find((p) => p.role === 'super_admin') || INITIAL_PROFILES[0];
+      const activeUserBefore = this.getCurrentUser();
+
+      const restoredProfilesRaw: Profile[] = Array.isArray(d.profiles) ? d.profiles : [];
+      const mergedProfiles: Profile[] = [
+        preservedSuperAdmin,
+        ...restoredProfilesRaw.filter((p) => p && p.role !== 'super_admin')
+      ];
+      if (!mergedProfiles.some((p) => p.role === 'owner')) {
+        const fallbackOwner =
+          (activeUserBefore && activeUserBefore.role === 'owner' ? activeUserBefore : undefined) ||
+          INITIAL_PROFILES.find((p) => p.role === 'owner')!;
+        mergedProfiles.push(fallbackOwner);
+      }
+
+      const restoredSettings: BusinessSettings = {
+        ...INITIAL_SETTINGS,
+        ...(d.settings || {}),
+        id: 1,
+        last_backup_downloaded_at:
+          d.settings?.last_backup_downloaded_at ||
+          this.state.settings?.last_backup_downloaded_at ||
+          new Date().toISOString()
+      };
+
+      const restoredClients: Client[] = Array.isArray(d.clients) ? d.clients : [];
+      const restoredIngredients: Ingredient[] = Array.isArray(d.ingredients) ? d.ingredients : [];
+      const restoredMenuItems: MenuItem[] = Array.isArray(d.menuItems) ? d.menuItems : [];
+      const restoredRecipes: MenuItemIngredient[] = Array.isArray(d.recipes) ? d.recipes : [];
+      const restoredEvents: EventRecord[] = Array.isArray(d.events) ? d.events : [];
+      const restoredEventItems: EventItem[] = Array.isArray(d.eventItems) ? d.eventItems : [];
+      const restoredEventExtras: EventExtra[] = Array.isArray(d.eventExtras) ? d.eventExtras : [];
+      const restoredEventExpenses: EventExpense[] = Array.isArray(d.eventExpenses) ? d.eventExpenses : [];
+      const restoredStaff: StaffMember[] = Array.isArray(d.staff) ? d.staff : [];
+      const restoredShifts: Shift[] = Array.isArray(d.shifts) ? d.shifts : [];
+      const restoredSalaryRecords: StaffSalaryRecord[] = Array.isArray(d.staffSalaryRecords)
+        ? d.staffSalaryRecords
+        : [];
+      const restoredInvoices: Invoice[] = Array.isArray(d.invoices) ? d.invoices : [];
+      const restoredPayments: Payment[] = Array.isArray(d.payments) ? d.payments : [];
+      const restoredPurchases: StockPurchase[] = Array.isArray(d.stockPurchases) ? d.stockPurchases : [];
+      const restoredPurchasePayments: StockPurchasePayment[] = Array.isArray(d.stockPurchasePayments)
+        ? d.stockPurchasePayments
+        : [];
+      const restoredAuditLogs: AuditLogEntry[] = Array.isArray(d.auditLogs) ? d.auditLogs : [];
+
+      const activeMatchedProfile =
+        mergedProfiles.find((p) => p.id === preservedUserId) ||
+        mergedProfiles.find((p) => p.role === preservedRole) ||
+        mergedProfiles[0];
+
+      this.state = {
+        ...this.state,
+        settings: restoredSettings,
+        profiles: mergedProfiles,
+        clients: restoredClients,
+        ingredients: restoredIngredients,
+        menuItems: restoredMenuItems,
+        recipes: restoredRecipes,
+        events: restoredEvents,
+        eventItems: restoredEventItems,
+        eventExtras: restoredEventExtras,
+        eventExpenses: restoredEventExpenses,
+        staff: restoredStaff,
+        shifts: restoredShifts,
+        staffSalaryRecords: restoredSalaryRecords,
+        invoices: restoredInvoices,
+        payments: restoredPayments,
+        stockPurchases: restoredPurchases,
+        stockPurchasePayments: restoredPurchasePayments,
+        auditLogs: restoredAuditLogs,
+        currentRole: preservedRole,
+        currentUserId: activeMatchedProfile?.id || preservedUserId,
+        isAuthenticated: true
+      };
+
+      // Cache staff salary structures locally as well
+      for (const st of restoredStaff) {
+        this.writeStaffStructureCacheEntry(st);
+      }
+
+      const ops: SqlOperation[] = [
+        // 1. Clear existing child-to-parent tables cleanly so restored snapshot is exact
+        { type: 'delete_all', table: 'payments' },
+        { type: 'delete_all', table: 'invoices' },
+        { type: 'delete_all', table: 'shifts' },
+        { type: 'delete_all', table: 'staff_salary_records' },
+        { type: 'delete_all', table: 'event_expenses' },
+        { type: 'delete_all', table: 'event_items' },
+        { type: 'delete_all', table: 'event_extras' },
+        { type: 'delete_all', table: 'events' },
+        { type: 'delete_all', table: 'stock_purchase_payments' },
+        { type: 'delete_all', table: 'stock_purchase_items' },
+        { type: 'delete_all', table: 'stock_purchases' },
+        { type: 'delete_all', table: 'menu_item_ingredients' },
+        { type: 'delete_all', table: 'menu_items' },
+        { type: 'delete_all', table: 'ingredients' },
+        { type: 'delete_all', table: 'staff_members' },
+        { type: 'delete_all', table: 'clients' },
+
+        // 2. Restore Settings & Profiles
+        {
+          type: 'upsert',
+          table: 'business_settings',
+          values: { ...restoredSettings, id: 1 },
+          onConflict: 'id'
+        }
+      ];
+
+      for (const prof of mergedProfiles) {
+        if (isValidUUID(prof.id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'profiles',
+            values: {
+              id: prof.id,
+              username: prof.username,
+              password: prof.password || null,
+              full_name: prof.full_name,
+              phone: prof.phone || null,
+              role: prof.role
+            },
+            onConflict: 'id'
+          });
+        }
+      }
+
+      for (const c of restoredClients) {
+        if (isValidUUID(c.id)) {
+          ops.push({ type: 'upsert', table: 'clients', values: this.toClientSqlRow(c), onConflict: 'id' });
+        }
+      }
+
+      for (const ing of restoredIngredients) {
+        if (isValidUUID(ing.id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'ingredients',
+            values: this.toIngredientSqlRow(ing),
+            onConflict: 'id'
+          });
+        }
+      }
+
+      for (const mi of restoredMenuItems) {
+        if (isValidUUID(mi.id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'menu_items',
+            values: this.toMenuItemSqlRow(mi),
+            onConflict: 'id'
+          });
+        }
+      }
+
+      for (const rec of restoredRecipes) {
+        if (isValidUUID(rec.menu_item_id) && isValidUUID(rec.ingredient_id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'menu_item_ingredients',
+            values: {
+              menu_item_id: rec.menu_item_id,
+              ingredient_id: rec.ingredient_id,
+              qty_per_guest: Number(rec.qty_per_guest || 0)
+            },
+            onConflict: 'menu_item_id,ingredient_id'
+          });
+        }
+      }
+
+      for (const st of restoredStaff) {
+        if (isValidUUID(st.id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'staff_members',
+            values: this.toStaffSqlRow(st),
+            onConflict: 'id'
+          });
+          // Also persist SalaryStructure metadata into activity_logs so unmigrated schemas preserve salary_type
+          const structureLogId = generateUUID();
+          ops.push({
+            type: 'upsert',
+            table: 'activity_logs',
+            values: {
+              id: structureLogId,
+              entity_type: 'staff',
+              entity_id: st.id,
+              parent_event_id: null,
+              action: 'update',
+              summary: `Restored staff profile "${st.name}"`,
+              details: this.buildStaffStructureAuditTag(st),
+              actor_username: 'owner',
+              actor_name: 'Database Restore',
+              actor_role: 'owner',
+              source: 'app',
+              is_read_by_owner: true,
+              created_at: new Date().toISOString()
+            },
+            onConflict: 'id'
+          });
+        }
+      }
+
+      for (const ev of restoredEvents) {
+        if (isValidUUID(ev.id) && isValidUUID(ev.client_id)) {
+          ops.push({ type: 'upsert', table: 'events', values: this.toEventSqlRow(ev), onConflict: 'id' });
+        }
+      }
+
+      for (const ei of restoredEventItems) {
+        if (isValidUUID(ei.id) && isValidUUID(ei.event_id) && isValidUUID(ei.menu_item_id)) {
+          const unitPrice = Number(ei.price_per_unit ?? ei.price_per_guest ?? 0);
+          ops.push({
+            type: 'upsert',
+            table: 'event_items',
+            values: {
+              id: ei.id,
+              event_id: ei.event_id,
+              menu_item_id: ei.menu_item_id,
+              pricing_type: ei.pricing_type || 'per_guest',
+              price_per_unit: unitPrice,
+              price_per_guest: unitPrice,
+              quantity: ei.quantity !== undefined ? Number(ei.quantity) : null
+            },
+            onConflict: 'id'
+          });
+        }
+      }
+
+      for (const ex of restoredEventExtras) {
+        if (isValidUUID(ex.id) && isValidUUID(ex.event_id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'event_extras',
+            values: {
+              id: ex.id,
+              event_id: ex.event_id,
+              description: ex.description,
+              amount: Number(ex.amount || 0)
+            },
+            onConflict: 'id'
+          });
+        }
+      }
+
+      for (const exp of restoredEventExpenses) {
+        if (isValidUUID(exp.id) && isValidUUID(exp.event_id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'event_expenses',
+            values: {
+              id: exp.id,
+              event_id: exp.event_id,
+              category: exp.category,
+              description: exp.description,
+              amount: Number(exp.amount || 0),
+              expense_date: exp.expense_date,
+              notes: exp.notes || null,
+              created_by_role: exp.created_by_role || null,
+              created_by_name: exp.created_by_name || null,
+              created_at: exp.created_at || new Date().toISOString()
+            },
+            onConflict: 'id'
+          });
+        }
+      }
+
+      for (const sh of restoredShifts) {
+        if (isValidUUID(sh.id) && isValidUUID(sh.event_id) && isValidUUID(sh.staff_member_id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'shifts',
+            values: {
+              id: sh.id,
+              event_id: sh.event_id,
+              staff_member_id: sh.staff_member_id,
+              role_label: sh.role_label || null,
+              starts_at: sh.starts_at,
+              ends_at: sh.ends_at,
+              duty_note: sh.duty_note || null,
+              whatsapp_notified_at: sh.whatsapp_notified_at || null,
+              attendance_status: sh.attendance_status || 'pending',
+              attendance_marked_at: sh.attendance_marked_at || null
+            },
+            onConflict: 'id'
+          });
+        }
+      }
+
+      for (const sr of restoredSalaryRecords) {
+        if (isValidUUID(sr.id) && isValidUUID(sr.staff_member_id)) {
+          const isAdv = isSalaryAdvanceRecord(sr);
+          const cleanM = String(sr.method || 'Cash').replace(/^\[ADVANCE\]\s*/i, '').trim() || 'Cash';
+          ops.push({
+            type: 'upsert',
+            table: 'staff_salary_records',
+            values: {
+              id: sr.id,
+              staff_member_id: sr.staff_member_id,
+              event_id: isValidUUID(sr.event_id) ? sr.event_id : null,
+              record_type: sr.record_type === 'earning' ? 'earning' : 'payment',
+              amount: Number(sr.amount || 0),
+              method: isAdv ? `[ADVANCE] ${cleanM}` : cleanM,
+              note: sr.note || null,
+              recorded_at: sr.recorded_at || new Date().toISOString()
+            },
+            onConflict: 'id'
+          });
+        }
+      }
+
+      for (const inv of restoredInvoices) {
+        if (isValidUUID(inv.id) && isValidUUID(inv.event_id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'invoices',
+            values: this.toInvoiceSqlRow(inv),
+            onConflict: 'id'
+          });
+        }
+      }
+
+      for (const pay of restoredPayments) {
+        if (isValidUUID(pay.id) && isValidUUID(pay.invoice_id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'payments',
+            values: {
+              id: pay.id,
+              invoice_id: pay.invoice_id,
+              amount: Number(pay.amount || 0),
+              method: pay.method || 'Cash',
+              payment_channel: pay.payment_channel || 'bank',
+              destination_account: pay.destination_account || null,
+              paid_at: pay.paid_at || new Date().toISOString(),
+              note: pay.note || null
+            },
+            onConflict: 'id'
+          });
+        }
+      }
+
+      for (const sp of restoredPurchases) {
+        if (isValidUUID(sp.id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'stock_purchases',
+            values: this.toStockPurchaseSqlRow(sp),
+            onConflict: 'id'
+          });
+          for (const item of sp.items || []) {
+            if (isValidUUID(item.id)) {
+              ops.push({
+                type: 'upsert',
+                table: 'stock_purchase_items',
+                values: {
+                  id: item.id,
+                  purchase_id: sp.id,
+                  ingredient_id: isValidUUID(item.ingredient_id) ? item.ingredient_id : null,
+                  item_name: item.item_name,
+                  quantity: Number(item.quantity || 0),
+                  unit: item.unit || 'kg',
+                  unit_price: Number(item.unit_price || 0),
+                  total_price: Number(item.total_price || 0)
+                },
+                onConflict: 'id'
+              });
+            }
+          }
+        }
+      }
+
+      for (const spp of restoredPurchasePayments) {
+        if (isValidUUID(spp.id) && isValidUUID(spp.purchase_id)) {
+          ops.push({
+            type: 'upsert',
+            table: 'stock_purchase_payments',
+            values: {
+              id: spp.id,
+              purchase_id: spp.purchase_id,
+              amount: Number(spp.amount || 0),
+              paid_at: spp.paid_at || new Date().toISOString(),
+              method: spp.method || 'Cash',
+              note: spp.note || null
+            },
+            onConflict: 'id'
+          });
+        }
+      }
+
+      this.enqueueSqlOperations('Restore Full Database Backup', ops);
+      await this.flushPendingSqlWrites();
+
+      this.logMutation({
+        entity_type: 'database',
+        entity_id: 'full_backup_restore',
+        action: 'update',
+        summary: `Restored full database from backup file (${preview.counts.clients} clients, ${preview.counts.events} events, ${preview.counts.invoices} invoices, ${preview.counts.staff} staff)`,
+        details: `Backup Exported At: ${preview.exportedAt || 'Unknown'}`
+      });
+
+      this.save();
+
+      return {
+        success: true,
+        restoredSummary: `Restored ${preview.counts.clients} clients, ${preview.counts.events} events, ${preview.counts.invoices} invoices, ${preview.counts.payments} payments, ${preview.counts.staff} staff, and ${preview.counts.ingredients} stock items.`
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.message || 'Failed to restore database from backup file.'
+      };
+    }
   }
 
   // Clients
@@ -4806,14 +5839,26 @@ class DataStore {
 
   // Staff & Shifts
   public addStaff(staff: Omit<StaffMember, 'id'>) {
-    const newStaff: StaffMember = { ...staff, id: generateUUID() };
+    const sType = getStaffSalaryType(staff);
+    const newStaff: StaffMember = {
+      ...staff,
+      id: generateUUID(),
+      salary_type: sType,
+      hourly_rate: Number(staff.hourly_rate || 0),
+      event_rate: Number(staff.event_rate || 0),
+      monthly_salary: Number(staff.monthly_salary || 0),
+      salary_start_date:
+        staff.salary_start_date ||
+        (sType === 'monthly' ? new Date().toISOString().slice(0, 10) : undefined)
+    };
     this.state.staff.push(newStaff);
+    this.writeStaffStructureCacheEntry(newStaff);
     this.logMutation({
       entity_type: 'staff',
       entity_id: newStaff.id,
       action: 'create',
-      summary: `Registered staff member "${newStaff.name}"`,
-      details: `${newStaff.role_title || 'Crew'} • ₹${newStaff.hourly_rate}/hr`
+      summary: `Registered staff member "${newStaff.name}" (${formatStaffSalaryTypeLabel(sType)}: ${formatStaffSalaryRate(newStaff)})`,
+      details: `${newStaff.role_title || 'Crew'} • ${formatStaffSalaryRate(newStaff)} • ${this.buildStaffStructureAuditTag(newStaff)}`
     });
     this.save();
 
@@ -4830,23 +5875,43 @@ class DataStore {
     let updatedStaff: StaffMember | undefined;
     this.state.staff = this.state.staff.map((s) => {
       if (s.id !== id) return s;
-      updatedStaff = { ...s, ...updates };
+      const merged = { ...s, ...updates };
+      const nextType = getStaffSalaryType(merged);
+      updatedStaff = {
+        ...merged,
+        salary_type: nextType,
+        salary_start_date:
+          merged.salary_start_date ||
+          (nextType === 'monthly' ? new Date().toISOString().slice(0, 10) : undefined)
+      };
       return updatedStaff;
     });
     if (updatedStaff) {
+      this.writeStaffStructureCacheEntry(updatedStaff);
       const diffs = buildRecordDiffs(prevSnapshot, updatedStaff, [
         { key: 'name', label: 'Staff Name' },
         { key: 'phone', label: 'Mobile' },
         { key: 'role_title', label: 'Role Title' },
+        {
+          key: 'salary_type',
+          label: 'Salary Type',
+          format: (v) => formatStaffSalaryTypeLabel((v as StaffSalaryType) || 'hourly')
+        },
         { key: 'hourly_rate', label: 'Hourly Rate', format: (v) => `₹${v ?? 0}/hr` },
+        { key: 'event_rate', label: 'Per-Event Rate', format: (v) => `₹${v ?? 0}/event` },
+        { key: 'monthly_salary', label: 'Monthly Salary', format: (v) => `₹${v ?? 0}/month` },
         { key: 'active', label: 'Status', format: (v) => (v ? 'Active' : 'Inactive') }
       ]);
+      const encodedDiffs = encodeAuditDetails({
+        changes: diffs,
+        note: this.buildStaffStructureAuditTag(updatedStaff)
+      });
       this.logMutation({
         entity_type: 'staff',
         entity_id: id,
         action: 'update',
-        summary: `Updated staff profile "${updatedStaff.name}"`,
-        details: encodeAuditDetails({ changes: diffs })
+        summary: `Updated staff profile "${updatedStaff.name}" (${formatStaffSalaryRate(updatedStaff)})`,
+        details: encodedDiffs
       });
     }
     this.save();
@@ -5190,7 +6255,11 @@ class DataStore {
 
   public getStaffSalarySummary(staffId: string): StaffSalarySummary {
     const staffMember = this.state.staff.find((s) => s.id === staffId);
+    const salaryType = getStaffSalaryType(staffMember);
+    const primaryRate = getStaffPrimaryRate(staffMember);
+    const rateDisplay = formatStaffSalaryRate(staffMember);
     const hourlyRate = Number(staffMember?.hourly_rate || 0);
+    const eventRate = Number(staffMember?.event_rate ?? staffMember?.hourly_rate ?? 0);
 
     const shiftItems: StaffShiftEarningItem[] = this.state.shifts
       .filter((sh) => sh.staff_member_id === staffId)
@@ -5202,13 +6271,30 @@ class DataStore {
             ? sh.attendance_status
             : 'pending';
         const isAttended = attendanceStatus === 'present' && event?.status !== 'cancelled';
-        // CRITICAL: Only count and expose shift pay when the staff member actually attended ('present')
-        const earnedAmount = isAttended ? Math.round(hours * hourlyRate) : 0;
+
+        // Calculate shift-based earnings according to the staff member's selected salary structure:
+        // - 'hourly': hours * hourlyRate (when Present)
+        // - 'per_event': flat eventRate per attended shift (when Present)
+        // - 'monthly': 0 per shift (covered by fixed monthly salary)
+        let earnedAmount = 0;
+        let rateLabel = `₹${hourlyRate.toLocaleString('en-IN')}/hr`;
+        if (salaryType === 'per_event') {
+          earnedAmount = isAttended ? Math.round(eventRate) : 0;
+          rateLabel = `₹${eventRate.toLocaleString('en-IN')}/event`;
+        } else if (salaryType === 'monthly') {
+          earnedAmount = 0;
+          rateLabel = 'Monthly Fixed';
+        } else {
+          earnedAmount = isAttended ? Math.round(hours * hourlyRate) : 0;
+        }
+
         return {
           shift: sh,
           event,
           hours,
           hourlyRate,
+          salaryType,
+          rateLabel,
           attendanceStatus,
           isAttended,
           earnedAmount
@@ -5233,22 +6319,45 @@ class DataStore {
       (sr) => sr.staff_member_id === staffId
     );
 
+    const monthlyMonthsCount = staffMember
+      ? calculateMonthlySalaryMonthsCount(staffMember, this.state.shifts, this.state.staffSalaryRecords || [])
+      : 0;
+    const monthlyBaseEarnings =
+      salaryType === 'monthly'
+        ? Math.round(monthlyMonthsCount * Number(staffMember?.monthly_salary ?? staffMember?.hourly_rate ?? 0))
+        : 0;
+
     const earningRecords = allRecords
       .filter((sr) => sr.record_type === 'earning')
       .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at));
 
-    const paymentRecords = allRecords
-      .filter((sr) => sr.record_type === 'payment')
+    const advanceRecords = allRecords
+      .filter((sr) => sr.record_type !== 'earning' && isSalaryAdvanceRecord(sr))
       .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at));
 
+    const regularPaymentRecords = allRecords
+      .filter((sr) => sr.record_type === 'payment' && !isSalaryAdvanceRecord(sr))
+      .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at));
+
+    const paymentRecords = [...regularPaymentRecords, ...advanceRecords].sort((a, b) =>
+      b.recorded_at.localeCompare(a.recorded_at)
+    );
+
     const extraEarnings = earningRecords.reduce((sum, r) => sum + Number(r.amount || 0), 0);
-    const totalEarned = shiftEarnings + extraEarnings;
-    const totalPaid = paymentRecords.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+    const totalEarned = shiftEarnings + monthlyBaseEarnings + extraEarnings;
+    const totalRegularPaid = regularPaymentRecords.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+    const totalAdvancePaid = advanceRecords.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+    const totalPaid = totalRegularPaid + totalAdvancePaid;
     const balancePayable = Math.max(0, totalEarned - totalPaid);
     const advanceExcess = Math.max(0, totalPaid - totalEarned);
 
     return {
       staffId,
+      salaryType,
+      primaryRate,
+      rateDisplay,
+      monthlyMonthsCount,
+      monthlyBaseEarnings,
       shiftItems,
       attendedShiftsCount,
       absentShiftsCount,
@@ -5257,9 +6366,13 @@ class DataStore {
       shiftEarnings,
       extraEarnings,
       totalEarned,
+      totalRegularPaid,
+      totalAdvancePaid,
       totalPaid,
       balancePayable,
       advanceExcess,
+      regularPaymentRecords,
+      advanceRecords,
       paymentRecords,
       earningRecords
     };
@@ -5274,13 +6387,14 @@ class DataStore {
     note?: string;
     recorded_at?: string;
   }): StaffSalaryRecord {
+    const cleanMethod = String(record.method || 'Cash').replace(/^\[ADVANCE\]\s*/i, '').trim() || 'Cash';
     const newRecord: StaffSalaryRecord = {
       id: generateUUID(),
       staff_member_id: record.staff_member_id,
       event_id: record.event_id || undefined,
       record_type: record.record_type,
       amount: Number(record.amount || 0),
-      method: record.method || 'Cash',
+      method: cleanMethod,
       note: (record.note || '').trim(),
       recorded_at: record.recorded_at || new Date().toISOString()
     };
@@ -5296,10 +6410,12 @@ class DataStore {
       parent_event_id: newRecord.event_id,
       action: 'create',
       summary:
-        newRecord.record_type === 'payment'
-          ? `Recorded salary payment ₹${newRecord.amount.toLocaleString('en-IN')} to "${staffMember?.name || 'Staff'}"`
+        newRecord.record_type === 'advance'
+          ? `Recorded Salary Advance ₹${newRecord.amount.toLocaleString('en-IN')} to "${staffMember?.name || 'Staff'}"`
+          : newRecord.record_type === 'payment'
+          ? `Recorded Salary Payout ₹${newRecord.amount.toLocaleString('en-IN')} to "${staffMember?.name || 'Staff'}"`
           : `Added duty wage/allowance ₹${newRecord.amount.toLocaleString('en-IN')} for "${staffMember?.name || 'Staff'}"`,
-      details: `${newRecord.method}${newRecord.note ? ` • ${newRecord.note}` : ''}`
+      details: `${newRecord.record_type === 'advance' ? 'Salary Advance • ' : ''}${newRecord.method}${newRecord.note ? ` • ${newRecord.note}` : ''}`
     });
     this.save();
 
@@ -5308,6 +6424,7 @@ class DataStore {
       if (newRecord.event_id && isValidUUID(newRecord.event_id)) {
         ops.push(...this.ensureEventParentOps(newRecord.event_id));
       }
+      // Save 'advance' safely as SQL record_type 'payment' with '[ADVANCE] ' prefix so PostgreSQL CHECK constraints never fail
       ops.push({
         type: 'upsert',
         table: 'staff_salary_records',
@@ -5315,9 +6432,10 @@ class DataStore {
           id: newRecord.id,
           staff_member_id: newRecord.staff_member_id,
           event_id: isValidUUID(newRecord.event_id) ? newRecord.event_id : null,
-          record_type: newRecord.record_type,
+          record_type: newRecord.record_type === 'earning' ? 'earning' : 'payment',
           amount: newRecord.amount,
-          method: newRecord.method,
+          method:
+            newRecord.record_type === 'advance' ? `[ADVANCE] ${newRecord.method}` : newRecord.method,
           note: newRecord.note || null,
           recorded_at: newRecord.recorded_at
         },
@@ -6029,7 +7147,7 @@ class DataStore {
       .filter((ex) => ex.category === 'other_expense')
       .reduce((s, ex) => s + Number(ex.amount || 0), 0);
 
-    // Attended shift wages for this event
+    // Attended shift wages for this event (honoring each staff member's salary structure)
     let staffShiftWages = 0;
     let attendedShiftCount = 0;
     if (event && event.status !== 'cancelled') {
@@ -6038,9 +7156,17 @@ class DataStore {
         if (sh.attendance_status === 'present') {
           attendedShiftCount += 1;
           const staffMember = this.state.staff.find((s) => s.id === sh.staff_member_id);
-          const rate = Number(staffMember?.hourly_rate || 0);
-          const hrs = this.calculateShiftHours(sh.starts_at, sh.ends_at);
-          staffShiftWages += Math.round(hrs * rate);
+          const sType = getStaffSalaryType(staffMember);
+          if (sType === 'per_event') {
+            staffShiftWages += Math.round(Number(staffMember?.event_rate ?? staffMember?.hourly_rate ?? 0));
+          } else if (sType === 'monthly') {
+            // Fixed monthly salaried staff do not accrue extra per-shift hourly cost
+            staffShiftWages += 0;
+          } else {
+            const rate = Number(staffMember?.hourly_rate || 0);
+            const hrs = this.calculateShiftHours(sh.starts_at, sh.ends_at);
+            staffShiftWages += Math.round(hrs * rate);
+          }
         }
       }
     }

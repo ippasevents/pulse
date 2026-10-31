@@ -34,7 +34,7 @@ export default function StaffWhatsAppModal({
   const [state, setState] = useState(store.getState());
   const [mode, setMode] = useState<'single' | 'broadcast'>(targetShift ? 'single' : 'broadcast');
   const [activeShiftId, setActiveShiftId] = useState<string>(targetShift?.id || '');
-  const [lang, setLang] = useState<WhatsAppTemplateLang>('bilingual');
+  const [lang] = useState<WhatsAppTemplateLang>('english');
   const [customNote, setCustomNote] = useState<string>(initialNote);
   const [messageText, setMessageText] = useState<string>('');
   const [phoneInput, setPhoneInput] = useState<string>('');
@@ -271,43 +271,8 @@ export default function StaffWhatsAppModal({
               </button>
             </div>
 
-            {/* Language Selector */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.73rem', color: '#166534', fontWeight: 600 }}>
-                Language:
-              </span>
-              <button
-                type="button"
-                onClick={() => setLang('bilingual')}
-                style={{
-                  padding: '0.2rem 0.5rem',
-                  fontSize: '0.72rem',
-                  fontWeight: 700,
-                  borderRadius: '4px',
-                  border: '1px solid #86efac',
-                  cursor: 'pointer',
-                  background: lang === 'bilingual' ? '#166534' : '#ffffff',
-                  color: lang === 'bilingual' ? '#ffffff' : '#166534'
-                }}
-              >
-                മലയാളം + EN
-              </button>
-              <button
-                type="button"
-                onClick={() => setLang('english')}
-                style={{
-                  padding: '0.2rem 0.5rem',
-                  fontSize: '0.72rem',
-                  fontWeight: 700,
-                  borderRadius: '4px',
-                  border: '1px solid #86efac',
-                  cursor: 'pointer',
-                  background: lang === 'english' ? '#166534' : '#ffffff',
-                  color: lang === 'english' ? '#ffffff' : '#166534'
-                }}
-              >
-                English
-              </button>
+            <div style={{ fontSize: '0.73rem', color: '#166534', fontWeight: 700 }}>
+              Format: Official English Duty Notice
             </div>
           </div>
         )}

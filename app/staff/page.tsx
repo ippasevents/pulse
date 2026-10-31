@@ -2,8 +2,21 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { store } from '@/lib/store';
-import { EventRecord, Shift, ShiftAttendanceStatus, StaffMember, StaffSalaryRecordType } from '@/lib/types';
+import {
+  formatStaffSalaryRate,
+  formatStaffSalaryTypeLabel,
+  getStaffSalaryType,
+  isSalaryAdvanceRecord,
+  store
+} from '@/lib/store';
+import {
+  EventRecord,
+  Shift,
+  ShiftAttendanceStatus,
+  StaffMember,
+  StaffSalaryRecordType,
+  StaffSalaryType
+} from '@/lib/types';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import StaffWhatsAppModal from '@/components/StaffWhatsAppModal';
 import SalarySlipWhatsAppModal from '@/components/SalarySlipWhatsAppModal';
@@ -39,15 +52,30 @@ export default function StaffPage() {
   const [search, setSearch] = useState('');
   const [crewFilter, setCrewFilter] = useState<'all' | 'due' | 'upcoming'>('all');
 
-  // Add / Edit Staff Modal
+  // Add / Edit Staff Modal (with 3 Salary Structures decided on registration)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    name: string;
+    phone: string;
+    password: string;
+    role_title: string;
+    salary_type: StaffSalaryType;
+    hourly_rate: number;
+    event_rate: number;
+    monthly_salary: number;
+    salary_start_date: string;
+    active: boolean;
+  }>({
     name: '',
     phone: '',
     password: 'password123',
     role_title: 'Buffet Server',
+    salary_type: 'hourly',
     hourly_rate: 200,
+    event_rate: 1200,
+    monthly_salary: 18000,
+    salary_start_date: toLocalYmd(new Date()),
     active: true
   });
 
@@ -57,7 +85,7 @@ export default function StaffPage() {
   const [resetPwBusy, setResetPwBusy] = useState(false);
   const [resetPwError, setResetPwError] = useState<string | null>(null);
 
-  // Individual Staff Events & Ledger Modal (Upcoming vs Attended vs Salary)
+  // Individual Staff Events & Ledger Modal (Upcoming vs Attended vs Salary & Advances)
   const [statementStaff, setStatementStaff] = useState<StaffMember | null>(null);
   const [statementTab, setStatementTab] = useState<'upcoming' | 'attended' | 'salary'>('upcoming');
 
@@ -72,11 +100,12 @@ export default function StaffPage() {
   const [reportStaffFilter, setReportStaffFilter] = useState<string>('');
   const [reportSearch, setReportSearch] = useState<string>('');
   const [reportActiveInPeriodOnly, setReportActiveInPeriodOnly] = useState<boolean>(false);
+  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'payment' | 'advance' | 'earning'>('all');
   const [previewSlipStaffId, setPreviewSlipStaffId] = useState<string | null>(null);
   const [waSlipRow, setWaSlipRow] = useState<StaffPeriodReportRow | null>(null);
   const [pdfBusyKey, setPdfBusyKey] = useState<string | null>(null);
 
-  // Salary Payment / Extra Wage Modal
+  // Salary Payout / Salary Advance / Bonus Modal
   const [salaryModalOpen, setSalaryModalOpen] = useState(false);
   const [salaryRecordType, setSalaryRecordType] = useState<StaffSalaryRecordType>('payment');
   const [salaryForm, setSalaryForm] = useState({
@@ -171,7 +200,8 @@ export default function StaffPage() {
   });
 
   const totalEarnedAll = staffRows.reduce((sum, r) => sum + r.summary.totalEarned, 0);
-  const totalPaidAll = staffRows.reduce((sum, r) => sum + r.summary.totalPaid, 0);
+  const totalRegularPaidAll = staffRows.reduce((sum, r) => sum + r.summary.totalRegularPaid, 0);
+  const totalAdvancePaidAll = staffRows.reduce((sum, r) => sum + r.summary.totalAdvancePaid, 0);
   const totalPendingAll = staffRows.reduce((sum, r) => sum + r.summary.balancePayable, 0);
   const activeCrewCount = state.staff.filter((s) => s.active).length;
 
@@ -199,10 +229,14 @@ export default function StaffPage() {
       filteredReportRows.reduce((s, r) => s + r.totalHoursWorked, 0).toFixed(2)
     ),
     shiftEarnings: filteredReportRows.reduce((s, r) => s + r.shiftEarnings, 0),
+    monthlyBaseEarnings: filteredReportRows.reduce((s, r) => s + r.monthlyBaseEarnings, 0),
     extraEarnings: filteredReportRows.reduce((s, r) => s + r.extraEarnings, 0),
     totalEarnings: filteredReportRows.reduce((s, r) => s + r.totalEarnings, 0),
+    regularPaymentsReceived: filteredReportRows.reduce((s, r) => s + r.regularPaymentsReceived, 0),
+    advancesReceived: filteredReportRows.reduce((s, r) => s + r.advancesReceived, 0),
     paymentsReceived: filteredReportRows.reduce((s, r) => s + r.paymentsReceived, 0),
-    paymentCount: filteredReportRows.reduce((s, r) => s + r.paymentRecords.length, 0),
+    paymentCount: filteredReportRows.reduce((s, r) => s + r.regularPaymentRecords.length, 0),
+    advanceCount: filteredReportRows.reduce((s, r) => s + r.advancePaymentRecords.length, 0),
     periodPayable: filteredReportRows.reduce((s, r) => s + r.periodPayable, 0)
   };
 
@@ -210,28 +244,47 @@ export default function StaffPage() {
     ? periodReport.rows.find((r) => r.staff.id === previewSlipStaffId) || null
     : null;
 
+  const resetStaffForm = () => ({
+    name: '',
+    phone: '',
+    password: 'password123',
+    role_title: 'Buffet Server',
+    salary_type: 'hourly' as StaffSalaryType,
+    hourly_rate: 200,
+    event_rate: 1200,
+    monthly_salary: 18000,
+    salary_start_date: toLocalYmd(new Date()),
+    active: true
+  });
+
   // Handlers
   const handleSubmitStaff = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim()) return;
 
+    const payload = {
+      name: formData.name.trim(),
+      phone: formData.phone.trim(),
+      password: formData.password,
+      role_title: formData.role_title.trim(),
+      salary_type: formData.salary_type,
+      hourly_rate: Number(formData.hourly_rate || 0),
+      event_rate: Number(formData.event_rate || 0),
+      monthly_salary: Number(formData.monthly_salary || 0),
+      salary_start_date: formData.salary_start_date || toLocalYmd(new Date()),
+      active: formData.active
+    };
+
     if (editingStaff) {
-      store.updateStaff(editingStaff.id, formData);
-      showNotice(`✓ Updated staff profile for ${formData.name}.`);
+      store.updateStaff(editingStaff.id, payload);
+      showNotice(`✓ Updated staff profile for ${payload.name} (${formatStaffSalaryRate(payload)}).`);
     } else {
-      store.addStaff(formData);
-      showNotice(`✓ Registered new staff member ${formData.name}.`);
+      store.addStaff(payload);
+      showNotice(`✓ Registered ${payload.name} on ${formatStaffSalaryTypeLabel(payload.salary_type)} plan (${formatStaffSalaryRate(payload)}).`);
     }
     setIsModalOpen(false);
     setEditingStaff(null);
-    setFormData({
-      name: '',
-      phone: '',
-      password: 'password123',
-      role_title: 'Buffet Server',
-      hourly_rate: 200,
-      active: true
-    });
+    setFormData(resetStaffForm());
   };
 
   const handleOpenResetPassword = (st: StaffMember) => {
@@ -269,13 +322,49 @@ export default function StaffPage() {
         type === 'payment'
           ? summary && summary.balancePayable > 0
             ? summary.balancePayable
-            : 500
+            : 1000
+          : type === 'advance'
+          ? 1000
           : 500,
-      method: type === 'payment' ? 'UPI / GPay' : 'Duty Allowance',
+      method: type === 'earning' ? 'Duty Allowance' : 'UPI / GPay',
       recorded_at: new Date().toISOString().slice(0, 10),
-      note: ''
+      note: type === 'advance' ? 'Salary Advance' : ''
     });
     setSalaryModalOpen(true);
+  };
+
+  const switchSalaryModalType = (nextType: StaffSalaryRecordType) => {
+    const sum = salaryForm.staff_member_id
+      ? store.getStaffSalarySummary(salaryForm.staff_member_id)
+      : null;
+    setSalaryRecordType(nextType);
+    setSalaryForm((prev) => ({
+      ...prev,
+      amount:
+        nextType === 'payment'
+          ? sum && sum.balancePayable > 0
+            ? sum.balancePayable
+            : prev.amount || 1000
+          : nextType === 'advance'
+          ? prev.amount || 1000
+          : prev.amount || 500,
+      method:
+        nextType === 'earning'
+          ? prev.method === 'UPI / GPay' || prev.method === 'Cash' || prev.method === 'Bank Transfer'
+            ? 'Duty Allowance'
+            : prev.method
+          : prev.method === 'Duty Allowance' ||
+            prev.method === 'Travel / Night Batta' ||
+            prev.method === 'Festival / Event Bonus'
+          ? 'UPI / GPay'
+          : prev.method,
+      note:
+        nextType === 'advance' && !prev.note
+          ? 'Salary Advance'
+          : nextType !== 'advance' && prev.note === 'Salary Advance'
+          ? ''
+          : prev.note
+    }));
   };
 
   const handleSubmitSalary = (e: React.FormEvent) => {
@@ -299,8 +388,10 @@ export default function StaffPage() {
 
     setSalaryModalOpen(false);
     showNotice(
-      salaryRecordType === 'payment'
-        ? `💸 Paid ₹${Number(salaryForm.amount).toLocaleString('en-IN')} salary to ${targetStaff?.name || 'Staff'}.`
+      salaryRecordType === 'advance'
+        ? `⚡ Recorded ₹${Number(salaryForm.amount).toLocaleString('en-IN')} Salary Advance for ${targetStaff?.name || 'Staff'}.`
+        : salaryRecordType === 'payment'
+        ? `💸 Paid ₹${Number(salaryForm.amount).toLocaleString('en-IN')} standard salary to ${targetStaff?.name || 'Staff'}.`
         : `✓ Added ₹${Number(salaryForm.amount).toLocaleString('en-IN')} allowance for ${targetStaff?.name || 'Staff'}.`
     );
   };
@@ -408,6 +499,16 @@ export default function StaffPage() {
     ? state.events.find((e) => e.id === attendanceEventFilter) || null
     : null;
 
+  const filteredSalaryRecords = [...(state.staffSalaryRecords || [])]
+    .filter((rec) => {
+      if (ledgerFilter === 'all') return true;
+      if (ledgerFilter === 'earning') return rec.record_type === 'earning';
+      const isAdv = isSalaryAdvanceRecord(rec);
+      if (ledgerFilter === 'advance') return rec.record_type !== 'earning' && isAdv;
+      return rec.record_type === 'payment' && !isAdv;
+    })
+    .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at));
+
   return (
     <div>
       {/* Page Header */}
@@ -415,13 +516,26 @@ export default function StaffPage() {
         <div>
           <h1 className="page-title">Staff Crew, Events &amp; Salary Payroll</h1>
           <p className="page-subtitle">
-            View upcoming vs attended events per staff member, mark attendance, pay salaries, and send PDF salary slips.
+            Manage Per Hour, Per Event, and Monthly staff salary plans, record Salary Advances separately from standard payouts, and export PDF slips.
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           {canManageSalary && (
             <>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{
+                  background: '#d97706',
+                  borderColor: '#d97706',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap'
+                }}
+                onClick={() => openSalaryModal('advance')}
+              >
+                ⚡ Salary Advance
+              </button>
               <button
                 type="button"
                 className="btn btn-primary"
@@ -450,14 +564,7 @@ export default function StaffPage() {
               type="button"
               onClick={() => {
                 setEditingStaff(null);
-                setFormData({
-                  name: '',
-                  phone: '',
-                  password: 'password123',
-                  role_title: 'Buffet Server',
-                  hourly_rate: 200,
-                  active: true
-                });
+                setFormData(resetStaffForm());
                 setIsModalOpen(true);
               }}
               className="btn btn-primary"
@@ -498,12 +605,12 @@ export default function StaffPage() {
         </div>
       )}
 
-      {/* 4 Colourful Summary KPI Cards */}
+      {/* 5 Summary KPI Cards (Separating Standard Salary Paid vs Salary Advances) */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-          gap: '0.9rem',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+          gap: '0.85rem',
           marginBottom: '1.25rem'
         }}
       >
@@ -520,7 +627,7 @@ export default function StaffPage() {
           <span className="stats-value" style={{ color: '#1d4ed8', fontVariantNumeric: 'tabular-nums' }}>
             ₹{totalEarnedAll.toLocaleString('en-IN')}
           </span>
-          <span className="stats-sub">Attended shifts + duty allowances</span>
+          <span className="stats-sub">Shifts, events, monthly &amp; bonus</span>
         </div>
 
         <div
@@ -531,12 +638,28 @@ export default function StaffPage() {
           }}
         >
           <span className="stats-label" style={{ color: '#047857' }}>
-            Salary Paid Out
+            Standard Salary Paid
           </span>
           <span className="stats-value" style={{ color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
-            ₹{totalPaidAll.toLocaleString('en-IN')}
+            ₹{totalRegularPaidAll.toLocaleString('en-IN')}
           </span>
-          <span className="stats-sub">Total settled crew payouts</span>
+          <span className="stats-sub">Regular salary settlements</span>
+        </div>
+
+        <div
+          className="stats-card"
+          style={{
+            borderTop: '3px solid #d97706',
+            background: 'linear-gradient(180deg, #fffbeb 0%, #ffffff 70%)'
+          }}
+        >
+          <span className="stats-label" style={{ color: '#b45309' }}>
+            Salary Advances Paid
+          </span>
+          <span className="stats-value" style={{ color: '#d97706', fontVariantNumeric: 'tabular-nums' }}>
+            ₹{totalAdvancePaidAll.toLocaleString('en-IN')}
+          </span>
+          <span className="stats-sub">Tracked separately from payouts</span>
         </div>
 
         <div
@@ -562,7 +685,7 @@ export default function StaffPage() {
             ₹{totalPendingAll.toLocaleString('en-IN')}
           </span>
           <span className="stats-sub">
-            {totalPendingAll > 0 ? 'Unpaid balance owed to staff' : 'All staff dues cleared'}
+            {totalPendingAll > 0 ? 'Net balance owed after advances' : 'All staff dues cleared'}
           </span>
         </div>
 
@@ -713,7 +836,7 @@ export default function StaffPage() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(370px, 1fr))',
                 gap: '1rem'
               }}
             >
@@ -739,7 +862,7 @@ export default function StaffPage() {
                       gap: '0.9rem'
                     }}
                   >
-                    {/* Top Row: Staff Name, Role, Phone & Rate */}
+                    {/* Top Row: Staff Name, Role, Phone & Configured Salary Plan */}
                     <div>
                       <div
                         style={{
@@ -761,7 +884,14 @@ export default function StaffPage() {
                               />
                             )}
                           </div>
-                          <div style={{ fontSize: '0.8rem', color: '#475569', marginTop: '0.18rem', fontVariantNumeric: 'tabular-nums' }}>
+                          <div
+                            style={{
+                              fontSize: '0.8rem',
+                              color: '#475569',
+                              marginTop: '0.18rem',
+                              fontVariantNumeric: 'tabular-nums'
+                            }}
+                          >
                             <span style={{ fontWeight: 700, color: '#4f46e5' }}>
                               {staff.role_title || 'Service Crew'}
                             </span>
@@ -780,9 +910,11 @@ export default function StaffPage() {
                           }}
                         >
                           <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0f172a' }}>
-                            ₹{staff.hourly_rate || 0}/hr
+                            {summary.rateDisplay}
                           </div>
-                          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Wage Rate</div>
+                          <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>
+                            {formatStaffSalaryTypeLabel(summary.salaryType)}
+                          </div>
                         </div>
                       </div>
 
@@ -819,7 +951,7 @@ export default function StaffPage() {
                               fontVariantNumeric: 'tabular-nums'
                             }}
                           >
-                            📅 വരാനിരിക്കുന്നവ ({upcomingItems.length})
+                            📅 Upcoming ({upcomingItems.length})
                           </div>
                           <div
                             style={{
@@ -863,7 +995,7 @@ export default function StaffPage() {
                               fontVariantNumeric: 'tabular-nums'
                             }}
                           >
-                            ✅ പങ്കെടുത്തവ ({attendedItems.length})
+                            ✅ Attended ({attendedItems.length})
                           </div>
                           <div
                             style={{
@@ -874,7 +1006,9 @@ export default function StaffPage() {
                               fontVariantNumeric: 'tabular-nums'
                             }}
                           >
-                            {summary.totalShiftHours} hrs worked
+                            {summary.salaryType === 'per_event'
+                              ? `${summary.attendedShiftsCount} paid event${summary.attendedShiftsCount === 1 ? '' : 's'}`
+                              : `${summary.totalShiftHours} hrs worked`}
                           </div>
                           <div
                             style={{
@@ -890,12 +1024,12 @@ export default function StaffPage() {
                         </button>
                       </div>
 
-                      {/* Clean Financial Row */}
+                      {/* Clean 4-Column Financial Row: Earned · Salary Paid · Advance · Balance Due */}
                       <div
                         style={{
                           display: 'grid',
-                          gridTemplateColumns: 'repeat(3, 1fr)',
-                          gap: '0.5rem',
+                          gridTemplateColumns: 'repeat(4, 1fr)',
+                          gap: '0.45rem',
                           marginTop: '0.75rem',
                           paddingTop: '0.7rem',
                           borderTop: '1px solid #f1f5f9',
@@ -903,22 +1037,28 @@ export default function StaffPage() {
                         }}
                       >
                         <div>
-                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Total Earned</div>
-                          <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#1d4ed8' }}>
+                          <div style={{ fontSize: '0.68rem', color: '#64748b' }}>Earned</div>
+                          <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1d4ed8' }}>
                             ₹{summary.totalEarned.toLocaleString('en-IN')}
                           </div>
                         </div>
                         <div>
-                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Paid Out</div>
-                          <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#059669' }}>
-                            ₹{summary.totalPaid.toLocaleString('en-IN')}
+                          <div style={{ fontSize: '0.68rem', color: '#64748b' }}>Salary Paid</div>
+                          <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#059669' }}>
+                            ₹{summary.totalRegularPaid.toLocaleString('en-IN')}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '0.68rem', color: '#b45309' }}>Advance</div>
+                          <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#d97706' }}>
+                            ₹{summary.totalAdvancePaid.toLocaleString('en-IN')}
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Balance Due</div>
+                          <div style={{ fontSize: '0.68rem', color: '#64748b' }}>Balance Due</div>
                           <div
                             style={{
-                              fontSize: '0.95rem',
+                              fontSize: '0.9rem',
                               fontWeight: 800,
                               color: summary.balancePayable > 0 ? '#dc2626' : '#059669'
                             }}
@@ -933,7 +1073,7 @@ export default function StaffPage() {
                     <div
                       style={{
                         display: 'flex',
-                        gap: '0.38rem',
+                        gap: '0.35rem',
                         flexWrap: 'wrap',
                         paddingTop: '0.65rem',
                         borderTop: '1px solid #f1f5f9'
@@ -941,6 +1081,21 @@ export default function StaffPage() {
                     >
                       {canManageSalary && (
                         <>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{
+                              background: '#fffbeb',
+                              borderColor: '#fcd34d',
+                              color: '#b45309',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap'
+                            }}
+                            title="Record a quick Salary Advance (tracked separately from standard salary payouts)"
+                            onClick={() => openSalaryModal('advance', staff)}
+                          >
+                            ⚡ Advance
+                          </button>
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"
@@ -975,7 +1130,7 @@ export default function StaffPage() {
                           setStatementTab(upcomingItems.length > 0 ? 'upcoming' : 'attended');
                         }}
                       >
-                        📋 Events &amp; Ledger
+                        📋 Ledger
                       </button>
 
                       <button
@@ -999,9 +1154,9 @@ export default function StaffPage() {
                             type="button"
                             className="btn btn-secondary btn-sm"
                             style={{
-                              background: '#fffbeb',
-                              borderColor: '#fde68a',
-                              color: '#b45309',
+                              background: '#f8fafc',
+                              borderColor: '#cbd5e1',
+                              color: '#334155',
                               fontWeight: 700,
                               whiteSpace: 'nowrap'
                             }}
@@ -1015,13 +1170,22 @@ export default function StaffPage() {
                             className="btn btn-secondary btn-sm"
                             style={{ whiteSpace: 'nowrap' }}
                             onClick={() => {
+                              const stType = getStaffSalaryType(staff);
                               setEditingStaff(staff);
                               setFormData({
                                 name: staff.name,
                                 phone: staff.phone || '',
                                 password: staff.password || 'password123',
                                 role_title: staff.role_title || 'Buffet Server',
-                                hourly_rate: staff.hourly_rate || 200,
+                                salary_type: stType,
+                                hourly_rate: Number(staff.hourly_rate || 200),
+                                event_rate: Number(
+                                  staff.event_rate || (stType === 'per_event' ? staff.hourly_rate : 1200)
+                                ),
+                                monthly_salary: Number(
+                                  staff.monthly_salary || (stType === 'monthly' ? staff.hourly_rate : 18000)
+                                ),
+                                salary_start_date: staff.salary_start_date || toLocalYmd(new Date()),
                                 active: staff.active
                               });
                               setIsModalOpen(true);
@@ -1060,7 +1224,7 @@ export default function StaffPage() {
                 📋 Event Duty Shifts &amp; Attendance Register
               </h2>
               <p style={{ fontSize: '0.82rem', color: '#64748b', margin: '0.2rem 0 0 0' }}>
-                Mark crew Present after duty to credit their hourly salary automatically.
+                Mark crew Present after duty to credit their Per-Hour or Per-Event wage automatically.
               </p>
             </div>
 
@@ -1169,7 +1333,7 @@ export default function StaffPage() {
                   <th>Event &amp; Date</th>
                   <th>Staff Member</th>
                   <th>Role &amp; Timing</th>
-                  <th style={{ textAlign: 'right' }}>Shift Wage</th>
+                  <th style={{ textAlign: 'right' }}>Shift / Event Pay</th>
                   <th style={{ textAlign: 'center' }}>Attendance</th>
                   <th style={{ textAlign: 'center' }}>Actions</th>
                 </tr>
@@ -1184,6 +1348,14 @@ export default function StaffPage() {
                 ) : (
                   allShiftRows.map(({ shift, staffMember, event, shiftCalc, isUpcoming }) => {
                     const att = shift.attendance_status || 'pending';
+                    const sType = getStaffSalaryType(staffMember);
+                    const estShiftPay =
+                      sType === 'per_event'
+                        ? Math.round(Number(staffMember?.event_rate ?? staffMember?.hourly_rate ?? 0))
+                        : sType === 'monthly'
+                        ? 0
+                        : Math.round((shiftCalc?.hours || 0) * (staffMember?.hourly_rate || 0));
+
                     return (
                       <tr key={shift.id}>
                         <td>
@@ -1202,7 +1374,7 @@ export default function StaffPage() {
                         <td>
                           <div style={{ fontWeight: 700, color: '#0f172a' }}>{staffMember!.name}</div>
                           <div style={{ fontSize: '0.75rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
-                            📱 {staffMember!.phone || '—'}
+                            📱 {staffMember!.phone || '—'} · {formatStaffSalaryRate(staffMember)}
                           </div>
                         </td>
                         <td style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -1222,7 +1394,11 @@ export default function StaffPage() {
                             color: att === 'present' ? '#059669' : '#64748b'
                           }}
                         >
-                          ₹{Math.round((shiftCalc?.hours || 0) * (staffMember?.hourly_rate || 0)).toLocaleString('en-IN')}
+                          {sType === 'monthly' ? (
+                            <span>Monthly Fixed</span>
+                          ) : (
+                            <span>₹{estShiftPay.toLocaleString('en-IN')}</span>
+                          )}
                           <div style={{ fontSize: '0.7rem', fontWeight: 600 }}>
                             {att === 'present' ? 'Credited' : att === 'absent' ? 'Absent (₹0)' : 'Pending'}
                           </div>
@@ -1331,7 +1507,7 @@ export default function StaffPage() {
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 3: PAYROLL REPORT, SALARY SLIP PDF & PAYMENT LEDGER               */}
+      {/* TAB 3: PAYROLL REPORT, SALARY SLIP PDF & PAYMENT/ADVANCE LEDGER       */}
       {/* ===================================================================== */}
       {activeTab === 'report' && (
         <div>
@@ -1352,8 +1528,7 @@ export default function StaffPage() {
                   📄 Staff Salary Report &amp; Printable PDF Slips
                 </h2>
                 <p style={{ fontSize: '0.82rem', color: '#64748b', margin: '0.2rem 0 0 0' }}>
-                  Period: <strong>{formatPeriodLabel(reportStartDate, reportEndDate)}</strong> · Download PDF or send
-                  PDF + Text directly to staff WhatsApp
+                  Period: <strong>{formatPeriodLabel(reportStartDate, reportEndDate)}</strong> · Separates Standard Salary Payouts from Salary Advances
                 </p>
               </div>
 
@@ -1516,18 +1691,19 @@ export default function StaffPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Staff Member</th>
-                    <th style={{ textAlign: 'center' }}>Hours Worked</th>
+                    <th>Staff Member &amp; Plan</th>
+                    <th style={{ textAlign: 'center' }}>Attendance</th>
                     <th style={{ textAlign: 'right' }}>Total Earnings</th>
-                    <th style={{ textAlign: 'right' }}>Payments Received</th>
+                    <th style={{ textAlign: 'right' }}>Salary Paid</th>
+                    <th style={{ textAlign: 'right' }}>Salary Advance</th>
                     <th style={{ textAlign: 'right' }}>Period Balance</th>
-                    <th style={{ textAlign: 'center' }}>Salary Slip &amp; Pay</th>
+                    <th style={{ textAlign: 'center' }}>Slip, Advance &amp; Pay</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredReportRows.length === 0 ? (
                     <tr>
-                      <td colSpan={6} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
                         No staff payroll rows match the selected period/filter.
                       </td>
                     </tr>
@@ -1537,7 +1713,7 @@ export default function StaffPage() {
                         <td>
                           <div style={{ fontWeight: 700, color: '#0f172a' }}>{r.staff.name}</div>
                           <div style={{ fontSize: '0.75rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
-                            {r.staff.role_title || 'Crew'} · {r.staff.phone || '—'} · ₹{r.staff.hourly_rate || 0}/hr
+                            {r.staff.role_title || 'Crew'} · {formatStaffSalaryTypeLabel(r.salaryType)} ({r.rateDisplay})
                           </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
@@ -1564,7 +1740,17 @@ export default function StaffPage() {
                             fontVariantNumeric: 'tabular-nums'
                           }}
                         >
-                          ₹{r.paymentsReceived.toLocaleString('en-IN')}
+                          ₹{r.regularPaymentsReceived.toLocaleString('en-IN')}
+                        </td>
+                        <td
+                          style={{
+                            textAlign: 'right',
+                            fontWeight: 700,
+                            color: '#d97706',
+                            fontVariantNumeric: 'tabular-nums'
+                          }}
+                        >
+                          ₹{r.advancesReceived.toLocaleString('en-IN')}
                         </td>
                         <td
                           style={{
@@ -1620,20 +1806,36 @@ export default function StaffPage() {
                               💬 WA
                             </button>
                             {canManageSalary && (
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                style={{
-                                  background: '#f5f3ff',
-                                  borderColor: '#c4b5fd',
-                                  color: '#5b21b6',
-                                  fontWeight: 700,
-                                  whiteSpace: 'nowrap'
-                                }}
-                                onClick={() => openSalaryModal('payment', r.staff)}
-                              >
-                                💸 Pay
-                              </button>
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  style={{
+                                    background: '#fffbeb',
+                                    borderColor: '#fcd34d',
+                                    color: '#b45309',
+                                    fontWeight: 700,
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  onClick={() => openSalaryModal('advance', r.staff)}
+                                >
+                                  ⚡ Adv
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  style={{
+                                    background: '#f5f3ff',
+                                    borderColor: '#c4b5fd',
+                                    color: '#5b21b6',
+                                    fontWeight: 700,
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  onClick={() => openSalaryModal('payment', r.staff)}
+                                >
+                                  💸 Pay
+                                </button>
+                              </>
                             )}
                           </div>
                         </td>
@@ -1645,13 +1847,65 @@ export default function StaffPage() {
             </div>
           </div>
 
-          {/* Recent Salary Payments & Allowances Ledger */}
+          {/* Recent Salary Payouts, Salary Advances & Allowances Ledger */}
           <div className="card">
-            <h3 className="card-title" style={{ marginBottom: '0.75rem' }}>
-              🧾 Recent Salary Payouts &amp; Allowances ({(state.staffSalaryRecords || []).length})
-            </h3>
-            {(state.staffSalaryRecords || []).length === 0 ? (
-              <p style={{ fontSize: '0.85rem', color: '#64748b' }}>No salary transactions recorded yet.</p>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.6rem',
+                marginBottom: '0.85rem'
+              }}
+            >
+              <h3 className="card-title" style={{ margin: 0 }}>
+                🧾 Salary Payouts, Advances &amp; Allowances Ledger ({filteredSalaryRecords.length})
+              </h3>
+
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '0.25rem',
+                  padding: '0.25rem',
+                  background: '#f1f5f9',
+                  borderRadius: '8px',
+                  flexWrap: 'wrap'
+                }}
+              >
+                {[
+                  { id: 'all' as const, label: 'All Entries' },
+                  { id: 'payment' as const, label: '💸 Salary Payouts' },
+                  { id: 'advance' as const, label: '⚡ Salary Advances' },
+                  { id: 'earning' as const, label: '➕ Allowances' }
+                ].map((flt) => {
+                  const active = ledgerFilter === flt.id;
+                  return (
+                    <button
+                      key={flt.id}
+                      type="button"
+                      onClick={() => setLedgerFilter(flt.id)}
+                      style={{
+                        padding: '0.32rem 0.65rem',
+                        borderRadius: '6px',
+                        border: 'none',
+                        background: active ? '#ffffff' : 'transparent',
+                        color: active ? '#0f172a' : '#475569',
+                        fontWeight: active ? 700 : 600,
+                        fontSize: '0.76rem',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {flt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {filteredSalaryRecords.length === 0 ? (
+              <p style={{ fontSize: '0.85rem', color: '#64748b' }}>No salary transactions match this filter.</p>
             ) : (
               <div className="data-table-container">
                 <table className="data-table">
@@ -1659,86 +1913,89 @@ export default function StaffPage() {
                     <tr>
                       <th>Date</th>
                       <th>Staff Member</th>
-                      <th>Type &amp; Method</th>
+                      <th>Transaction Type &amp; Method</th>
                       <th>Note</th>
                       <th style={{ textAlign: 'right' }}>Amount</th>
                       {canManageSalary && <th style={{ textAlign: 'center' }}>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {[...(state.staffSalaryRecords || [])]
-                      .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at))
-                      .slice(0, 40)
-                      .map((rec) => {
-                        const st = state.staff.find((s) => s.id === rec.staff_member_id);
-                        return (
-                          <tr key={rec.id}>
-                            <td style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                              {formatDisplayDate(rec.recorded_at)}
-                            </td>
-                            <td style={{ fontWeight: 700, color: '#0f172a' }}>{st?.name || 'Staff'}</td>
-                            <td>
-                              <span
-                                style={{
-                                  fontWeight: 700,
-                                  color: rec.record_type === 'payment' ? '#059669' : '#1d4ed8'
-                                }}
-                              >
-                                {rec.record_type === 'payment' ? '💸 Salary Paid' : '➕ Allowance'}
-                              </span>{' '}
-                              · {rec.method}
-                            </td>
-                            <td style={{ fontSize: '0.82rem', color: '#64748b' }}>{rec.note || '—'}</td>
-                            <td
-                              style={{
-                                textAlign: 'right',
-                                fontWeight: 800,
-                                fontVariantNumeric: 'tabular-nums',
-                                color: rec.record_type === 'payment' ? '#059669' : '#1d4ed8'
-                              }}
-                            >
-                              ₹{rec.amount.toLocaleString('en-IN')}
-                            </td>
-                            {canManageSalary && (
-                              <td style={{ textAlign: 'center' }}>
-                                {confirmDeleteSalaryId === rec.id ? (
-                                  <span style={{ display: 'inline-flex', gap: '0.25rem' }}>
-                                    <button
-                                      type="button"
-                                      className="btn btn-danger btn-sm"
-                                      style={{ fontSize: '0.72rem', padding: '0.2rem 0.45rem' }}
-                                      onClick={() => {
-                                        store.deleteStaffSalaryRecord(rec.id);
-                                        setConfirmDeleteSalaryId(null);
-                                        showNotice('Deleted salary entry.');
-                                      }}
-                                    >
-                                      Delete?
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="btn btn-secondary btn-sm"
-                                      style={{ fontSize: '0.72rem', padding: '0.2rem 0.4rem' }}
-                                      onClick={() => setConfirmDeleteSalaryId(null)}
-                                    >
-                                      No
-                                    </button>
-                                  </span>
-                                ) : (
+                    {filteredSalaryRecords.slice(0, 50).map((rec) => {
+                      const st = state.staff.find((s) => s.id === rec.staff_member_id);
+                      const isAdv = rec.record_type !== 'earning' && isSalaryAdvanceRecord(rec);
+                      const typeColor =
+                        rec.record_type === 'earning'
+                          ? '#1d4ed8'
+                          : isAdv
+                          ? '#b45309'
+                          : '#059669';
+                      const typeLabel =
+                        rec.record_type === 'earning'
+                          ? '➕ Allowance / Bonus'
+                          : isAdv
+                          ? '⚡ Salary Advance'
+                          : '💸 Standard Salary Payout';
+
+                      return (
+                        <tr key={rec.id}>
+                          <td style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                            {formatDisplayDate(rec.recorded_at)}
+                          </td>
+                          <td style={{ fontWeight: 700, color: '#0f172a' }}>{st?.name || 'Staff'}</td>
+                          <td>
+                            <span style={{ fontWeight: 700, color: typeColor }}>{typeLabel}</span> · {rec.method}
+                          </td>
+                          <td style={{ fontSize: '0.82rem', color: '#64748b' }}>{rec.note || '—'}</td>
+                          <td
+                            style={{
+                              textAlign: 'right',
+                              fontWeight: 800,
+                              fontVariantNumeric: 'tabular-nums',
+                              color: typeColor
+                            }}
+                          >
+                            ₹{rec.amount.toLocaleString('en-IN')}
+                          </td>
+                          {canManageSalary && (
+                            <td style={{ textAlign: 'center' }}>
+                              {confirmDeleteSalaryId === rec.id ? (
+                                <span style={{ display: 'inline-flex', gap: '0.25rem' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger btn-sm"
+                                    style={{ fontSize: '0.72rem', padding: '0.2rem 0.45rem' }}
+                                    onClick={() => {
+                                      store.deleteStaffSalaryRecord(rec.id);
+                                      setConfirmDeleteSalaryId(null);
+                                      showNotice('Deleted salary entry.');
+                                    }}
+                                  >
+                                    Delete?
+                                  </button>
                                   <button
                                     type="button"
                                     className="btn btn-secondary btn-sm"
-                                    style={{ color: '#dc2626' }}
-                                    onClick={() => setConfirmDeleteSalaryId(rec.id)}
+                                    style={{ fontSize: '0.72rem', padding: '0.2rem 0.4rem' }}
+                                    onClick={() => setConfirmDeleteSalaryId(null)}
                                   >
-                                    ✕
+                                    No
                                   </button>
-                                )}
-                              </td>
-                            )}
-                          </tr>
-                        );
-                      })}
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ color: '#dc2626' }}
+                                  onClick={() => setConfirmDeleteSalaryId(rec.id)}
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1760,7 +2017,7 @@ export default function StaffPage() {
             <div
               className="modal-content"
               onClick={(e) => e.stopPropagation()}
-              style={{ maxWidth: '680px', width: '96%', maxHeight: '90vh', overflowY: 'auto' }}
+              style={{ maxWidth: '720px', width: '96%', maxHeight: '90vh', overflowY: 'auto' }}
             >
               <div className="modal-header">
                 <div>
@@ -1768,8 +2025,8 @@ export default function StaffPage() {
                     🧑‍🍳 {statementStaff.name}
                   </h2>
                   <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.18rem 0 0 0' }}>
-                    {statementStaff.role_title || 'Crew'} · 📱 {statementStaff.phone || '—'} · Rate: ₹
-                    {statementStaff.hourly_rate || 0}/hr
+                    {statementStaff.role_title || 'Crew'} · 📱 {statementStaff.phone || '—'} ·{' '}
+                    <strong>{formatStaffSalaryTypeLabel(summary.salaryType)}</strong> ({summary.rateDisplay})
                   </p>
                 </div>
                 <button className="btn btn-secondary btn-sm" onClick={() => setStatementStaff(null)}>
@@ -1777,26 +2034,32 @@ export default function StaffPage() {
                 </button>
               </div>
 
-              {/* Balance Strip */}
+              {/* 4-Card Balance Strip Separating Standard Salary Paid & Salary Advance */}
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
-                  gap: '0.65rem',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))',
+                  gap: '0.6rem',
                   marginBottom: '1rem',
                   fontVariantNumeric: 'tabular-nums'
                 }}
               >
-                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '0.65rem 0.8rem' }}>
-                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#1d4ed8' }}>Total Earned</div>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#1e3a8a' }}>
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '0.65rem 0.75rem' }}>
+                  <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#1d4ed8' }}>Total Earned</div>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#1e3a8a' }}>
                     ₹{summary.totalEarned.toLocaleString('en-IN')}
                   </div>
                 </div>
-                <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '0.65rem 0.8rem' }}>
-                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#047857' }}>Salary Paid</div>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#059669' }}>
-                    ₹{summary.totalPaid.toLocaleString('en-IN')}
+                <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '0.65rem 0.75rem' }}>
+                  <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#047857' }}>Standard Salary Paid</div>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#059669' }}>
+                    ₹{summary.totalRegularPaid.toLocaleString('en-IN')}
+                  </div>
+                </div>
+                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '0.65rem 0.75rem' }}>
+                  <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#b45309' }}>Salary Advances</div>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#d97706' }}>
+                    ₹{summary.totalAdvancePaid.toLocaleString('en-IN')}
                   </div>
                 </div>
                 <div
@@ -1804,15 +2067,15 @@ export default function StaffPage() {
                     background: summary.balancePayable > 0 ? '#fff1f2' : '#f8fafc',
                     border: `1px solid ${summary.balancePayable > 0 ? '#fecdd3' : '#e2e8f0'}`,
                     borderRadius: '8px',
-                    padding: '0.65rem 0.8rem'
+                    padding: '0.65rem 0.75rem'
                   }}
                 >
-                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: summary.balancePayable > 0 ? '#be123c' : '#475569' }}>
+                  <div style={{ fontSize: '0.7rem', fontWeight: 700, color: summary.balancePayable > 0 ? '#be123c' : '#475569' }}>
                     Balance Payable
                   </div>
                   <div
                     style={{
-                      fontSize: '1.1rem',
+                      fontSize: '1.05rem',
                       fontWeight: 800,
                       color: summary.balancePayable > 0 ? '#dc2626' : '#059669'
                     }}
@@ -1830,13 +2093,17 @@ export default function StaffPage() {
                   padding: '0.3rem',
                   background: '#f1f5f9',
                   borderRadius: '8px',
-                  marginBottom: '1rem'
+                  marginBottom: '1rem',
+                  overflowX: 'auto'
                 }}
               >
                 {[
                   { id: 'upcoming' as const, label: `📅 Upcoming Events (${upcomingItems.length})` },
                   { id: 'attended' as const, label: `✅ Attended Events (${attendedItems.length})` },
-                  { id: 'salary' as const, label: `💸 Salary & Bonus (${summary.paymentRecords.length + summary.earningRecords.length})` }
+                  {
+                    id: 'salary' as const,
+                    label: `💸 Payouts, Advances & Bonus (${summary.paymentRecords.length + summary.earningRecords.length})`
+                  }
                 ].map((t) => {
                   const active = statementTab === t.id;
                   return (
@@ -1930,12 +2197,25 @@ export default function StaffPage() {
                                 {formatDisplayDate(si.event?.event_date || '')}
                               </td>
                               <td>
-                                <div style={{ fontWeight: 700, color: '#0f172a' }}>{si.event?.title}</div>
+                                <div style={{ fontWeight: 700, color: '#0f172a' }}>{si.event?.title || 'Event'}</div>
                                 <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📍 {si.event?.venue || '—'}</div>
                               </td>
-                              <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{si.hours} hrs</td>
-                              <td style={{ textAlign: 'right', fontWeight: 700, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
-                                {si.isAttended ? `₹${si.earnedAmount.toLocaleString('en-IN')}` : 'Pending'}
+                              <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+                                {si.hours} hrs
+                              </td>
+                              <td
+                                style={{
+                                  textAlign: 'right',
+                                  fontWeight: 700,
+                                  fontVariantNumeric: 'tabular-nums',
+                                  color: si.isAttended ? '#059669' : '#64748b'
+                                }}
+                              >
+                                {si.isAttended
+                                  ? summary.salaryType === 'monthly'
+                                    ? 'Monthly Fixed'
+                                    : `₹${si.earnedAmount.toLocaleString('en-IN')}`
+                                  : 'Pending Attendance'}
                               </td>
                             </tr>
                           ))}
@@ -1947,50 +2227,66 @@ export default function StaffPage() {
               )}
 
               {statementTab === 'salary' && (
-                <div className="data-table-container">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Type &amp; Method</th>
-                        <th>Note</th>
-                        <th style={{ textAlign: 'right' }}>Amount (₹)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {summary.paymentRecords.length === 0 && summary.earningRecords.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} style={{ textAlign: 'center', padding: '1.5rem', color: '#64748b' }}>
-                            No salary payments or bonuses recorded yet.
-                          </td>
-                        </tr>
-                      ) : (
-                        [...summary.paymentRecords, ...summary.earningRecords]
-                          .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at))
-                          .map((rec) => (
-                            <tr key={rec.id}>
-                              <td style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                                {formatDisplayDate(rec.recorded_at)}
-                              </td>
-                              <td style={{ fontWeight: 700, color: rec.record_type === 'payment' ? '#059669' : '#1d4ed8' }}>
-                                {rec.record_type === 'payment' ? '💸 Salary Paid' : '➕ Allowance'} · {rec.method}
-                              </td>
-                              <td style={{ fontSize: '0.8rem', color: '#64748b' }}>{rec.note || '—'}</td>
-                              <td
-                                style={{
-                                  textAlign: 'right',
-                                  fontWeight: 800,
-                                  fontVariantNumeric: 'tabular-nums',
-                                  color: rec.record_type === 'payment' ? '#059669' : '#1d4ed8'
-                                }}
-                              >
-                                ₹{rec.amount.toLocaleString('en-IN')}
-                              </td>
-                            </tr>
-                          ))
-                      )}
-                    </tbody>
-                  </table>
+                <div>
+                  {summary.paymentRecords.length === 0 && summary.earningRecords.length === 0 ? (
+                    <div style={{ padding: '1.5rem', textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: '8px' }}>
+                      No salary payouts, advances, or bonuses recorded yet.
+                    </div>
+                  ) : (
+                    <div className="data-table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>Method &amp; Note</th>
+                            <th style={{ textAlign: 'right' }}>Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...summary.paymentRecords, ...summary.earningRecords]
+                            .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at))
+                            .map((rec) => {
+                              const isAdv = rec.record_type !== 'earning' && isSalaryAdvanceRecord(rec);
+                              const color =
+                                rec.record_type === 'earning'
+                                  ? '#1d4ed8'
+                                  : isAdv
+                                  ? '#b45309'
+                                  : '#059669';
+                              const label =
+                                rec.record_type === 'earning'
+                                  ? '➕ Bonus / Allowance'
+                                  : isAdv
+                                  ? '⚡ Salary Advance'
+                                  : '💸 Standard Salary Payout';
+                              return (
+                                <tr key={rec.id}>
+                                  <td style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                                    {formatDisplayDate(rec.recorded_at)}
+                                  </td>
+                                  <td style={{ fontWeight: 700, color, whiteSpace: 'nowrap' }}>{label}</td>
+                                  <td style={{ fontSize: '0.82rem', color: '#475569' }}>
+                                    <strong>{rec.method}</strong>
+                                    {rec.note ? ` · ${rec.note}` : ''}
+                                  </td>
+                                  <td
+                                    style={{
+                                      textAlign: 'right',
+                                      fontWeight: 800,
+                                      fontVariantNumeric: 'tabular-nums',
+                                      color
+                                    }}
+                                  >
+                                    ₹{rec.amount.toLocaleString('en-IN')}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2006,23 +2302,37 @@ export default function StaffPage() {
                 }}
               >
                 {canManageSalary && (
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    style={{ background: '#059669', borderColor: '#059669', fontWeight: 700 }}
-                    onClick={() => {
-                      const target = statementStaff;
-                      setStatementStaff(null);
-                      openSalaryModal('payment', target);
-                    }}
-                  >
-                    💸 Pay Salary
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      style={{ background: '#d97706', borderColor: '#d97706', fontWeight: 700, whiteSpace: 'nowrap' }}
+                      onClick={() => {
+                        const target = statementStaff;
+                        setStatementStaff(null);
+                        openSalaryModal('advance', target);
+                      }}
+                    >
+                      ⚡ Salary Advance
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      style={{ background: '#059669', borderColor: '#059669', fontWeight: 700, whiteSpace: 'nowrap' }}
+                      onClick={() => {
+                        const target = statementStaff;
+                        setStatementStaff(null);
+                        openSalaryModal('payment', target);
+                      }}
+                    >
+                      💸 Pay Salary
+                    </button>
+                  </>
                 )}
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  style={{ fontWeight: 700 }}
+                  style={{ fontWeight: 700, whiteSpace: 'nowrap' }}
                   onClick={() => {
                     const id = statementStaff.id;
                     setStatementStaff(null);
@@ -2114,7 +2424,7 @@ export default function StaffPage() {
           <div
             className="modal-content"
             onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: '720px', width: '96%', maxHeight: '90vh', overflowY: 'auto' }}
+            style={{ maxWidth: '760px', width: '96%', maxHeight: '90vh', overflowY: 'auto' }}
           >
             <div className="modal-header">
               <div>
@@ -2122,7 +2432,8 @@ export default function StaffPage() {
                   📄 Salary Slip — {previewSlipRow.staff.name}
                 </h2>
                 <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.2rem 0 0 0' }}>
-                  Period: {formatPeriodLabel(reportStartDate, reportEndDate)}
+                  Period: {formatPeriodLabel(reportStartDate, reportEndDate)} ·{' '}
+                  <strong>{formatStaffSalaryTypeLabel(previewSlipRow.salaryType)}</strong> ({previewSlipRow.rateDisplay})
                 </p>
               </div>
               <button className="btn btn-secondary btn-sm" onClick={() => setPreviewSlipStaffId(null)}>
@@ -2133,68 +2444,80 @@ export default function StaffPage() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                gap: '0.65rem',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))',
+                gap: '0.6rem',
                 marginBottom: '1rem',
                 fontVariantNumeric: 'tabular-nums'
               }}
             >
-              <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                <div style={{ fontSize: '0.73rem', color: '#475569', fontWeight: 700 }}>Hours Worked</div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>
+              <div style={{ background: '#f8fafc', padding: '0.7rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                <div style={{ fontSize: '0.72rem', color: '#475569', fontWeight: 700 }}>Attendance</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>
                   {previewSlipRow.totalHoursWorked} hrs
                 </div>
-                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                  {previewSlipRow.attendedShiftsCount} attended shift{previewSlipRow.attendedShiftsCount === 1 ? '' : 's'}
+                <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                  {previewSlipRow.attendedShiftsCount} shift{previewSlipRow.attendedShiftsCount === 1 ? '' : 's'}
                 </div>
               </div>
 
-              <div style={{ background: '#eff6ff', padding: '0.75rem', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
-                <div style={{ fontSize: '0.73rem', color: '#1e40af', fontWeight: 700 }}>Total Earnings</div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1e3a8a' }}>
+              <div style={{ background: '#eff6ff', padding: '0.7rem', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                <div style={{ fontSize: '0.72rem', color: '#1e40af', fontWeight: 700 }}>Total Earnings</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#1e3a8a' }}>
                   ₹{previewSlipRow.totalEarnings.toLocaleString('en-IN')}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: '#1e40af' }}>Shifts + Allowances</div>
+                <div style={{ fontSize: '0.7rem', color: '#1e40af' }}>
+                  {formatStaffSalaryTypeLabel(previewSlipRow.salaryType)} + Bonus
+                </div>
               </div>
 
-              <div style={{ background: '#ecfdf5', padding: '0.75rem', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
-                <div style={{ fontSize: '0.73rem', color: '#065f46', fontWeight: 700 }}>Payments Received</div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#059669' }}>
-                  ₹{previewSlipRow.paymentsReceived.toLocaleString('en-IN')}
+              <div style={{ background: '#ecfdf5', padding: '0.7rem', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                <div style={{ fontSize: '0.72rem', color: '#065f46', fontWeight: 700 }}>Salary Paid</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#059669' }}>
+                  ₹{previewSlipRow.regularPaymentsReceived.toLocaleString('en-IN')}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: '#065f46' }}>
-                  {previewSlipRow.paymentRecords.length} payment{previewSlipRow.paymentRecords.length === 1 ? '' : 's'}
+                <div style={{ fontSize: '0.7rem', color: '#065f46' }}>
+                  {previewSlipRow.regularPaymentRecords.length} standard payout{previewSlipRow.regularPaymentRecords.length === 1 ? '' : 's'}
+                </div>
+              </div>
+
+              <div style={{ background: '#fffbeb', padding: '0.7rem', borderRadius: '8px', border: '1px solid #fde68a' }}>
+                <div style={{ fontSize: '0.72rem', color: '#b45309', fontWeight: 700 }}>Salary Advance</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#d97706' }}>
+                  ₹{previewSlipRow.advancesReceived.toLocaleString('en-IN')}
+                </div>
+                <div style={{ fontSize: '0.7rem', color: '#b45309' }}>
+                  {previewSlipRow.advancePaymentRecords.length} advance{previewSlipRow.advancePaymentRecords.length === 1 ? '' : 's'}
                 </div>
               </div>
 
               <div
                 style={{
                   background: previewSlipRow.periodPayable > 0 ? '#fef2f2' : '#f8fafc',
-                  padding: '0.75rem',
+                  padding: '0.7rem',
                   borderRadius: '8px',
                   border: `1px solid ${previewSlipRow.periodPayable > 0 ? '#fecaca' : '#cbd5e1'}`
                 }}
               >
                 <div
                   style={{
-                    fontSize: '0.73rem',
+                    fontSize: '0.72rem',
                     color: previewSlipRow.periodPayable > 0 ? '#991b1b' : '#334155',
                     fontWeight: 700
                   }}
                 >
-                  Net Period Payable
+                  Net Payable
                 </div>
                 <div
                   style={{
-                    fontSize: '1.2rem',
+                    fontSize: '1.1rem',
                     fontWeight: 800,
                     color: previewSlipRow.periodPayable > 0 ? '#dc2626' : '#059669'
                   }}
                 >
                   ₹{previewSlipRow.periodPayable.toLocaleString('en-IN')}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                  {previewSlipRow.periodPayable > 0 ? 'Balance due for period' : 'Period settled'}
+                <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                  {previewSlipRow.periodPayable > 0 ? 'Balance due' : 'Period settled'}
                 </div>
               </div>
             </div>
@@ -2216,24 +2539,45 @@ export default function StaffPage() {
                   ₹{previewSlipRow.overallBalancePayable.toLocaleString('en-IN')}
                 </strong>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                 {canManageSalary && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => {
-                      const target = previewSlipRow.staff;
-                      setPreviewSlipStaffId(null);
-                      openSalaryModal('payment', target);
-                    }}
-                  >
-                    💸 Pay Salary
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{
+                        background: '#fffbeb',
+                        borderColor: '#fcd34d',
+                        color: '#b45309',
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap'
+                      }}
+                      onClick={() => {
+                        const target = previewSlipRow.staff;
+                        setPreviewSlipStaffId(null);
+                        openSalaryModal('advance', target);
+                      }}
+                    >
+                      ⚡ Salary Advance
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ whiteSpace: 'nowrap' }}
+                      onClick={() => {
+                        const target = previewSlipRow.staff;
+                        setPreviewSlipStaffId(null);
+                        openSalaryModal('payment', target);
+                      }}
+                    >
+                      💸 Pay Salary
+                    </button>
+                  </>
                 )}
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  style={{ fontWeight: 700 }}
+                  style={{ fontWeight: 700, whiteSpace: 'nowrap' }}
                   onClick={() =>
                     printSingleStaffSalarySlip(previewSlipRow, reportStartDate, reportEndDate, state)
                   }
@@ -2257,7 +2601,7 @@ export default function StaffPage() {
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"
-                  style={{ fontWeight: 700 }}
+                  style={{ fontWeight: 700, whiteSpace: 'nowrap' }}
                   disabled={pdfBusyKey !== null}
                   onClick={() => handleDownloadSingleSlip(previewSlipRow)}
                 >
@@ -2270,21 +2614,82 @@ export default function StaffPage() {
       )}
 
       {/* ===================================================================== */}
-      {/* MODAL: RECORD SALARY PAYMENT / ALLOWANCE                              */}
+      {/* MODAL: RECORD SALARY ADVANCE / STANDARD SALARY PAYOUT / ALLOWANCE     */}
       {/* ===================================================================== */}
       {salaryModalOpen && (
         <div className="modal-overlay" onClick={() => setSalaryModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px' }}>
             <div className="modal-header">
               <h2 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>
-                {salaryRecordType === 'payment'
-                  ? '💸 Pay Staff Salary'
+                {salaryRecordType === 'advance'
+                  ? '⚡ Record Salary Advance'
+                  : salaryRecordType === 'payment'
+                  ? '💸 Pay Standard Staff Salary'
                   : '➕ Add Duty Bonus / Allowance'}
               </h2>
               <button className="btn btn-secondary btn-sm" onClick={() => setSalaryModalOpen(false)}>
                 ✕
               </button>
             </div>
+
+            {/* 3-Mode Segmented Selector Clearly Separating Salary Advance from Standard Payout */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '0.35rem',
+                padding: '0.3rem',
+                background: '#f1f5f9',
+                borderRadius: '8px',
+                marginBottom: '0.9rem'
+              }}
+            >
+              {[
+                { id: 'advance' as const, label: '⚡ Salary Advance', activeBg: '#d97706' },
+                { id: 'payment' as const, label: '💸 Salary Payout', activeBg: '#059669' },
+                { id: 'earning' as const, label: '➕ Allowance', activeBg: '#2563eb' }
+              ].map((opt) => {
+                const isSelected = salaryRecordType === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => switchSalaryModalType(opt.id)}
+                    style={{
+                      padding: '0.45rem 0.5rem',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: isSelected ? opt.activeBg : 'transparent',
+                      color: isSelected ? '#ffffff' : '#475569',
+                      fontWeight: 700,
+                      fontSize: '0.78rem',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {salaryRecordType === 'advance' && (
+              <div
+                style={{
+                  background: '#fffbeb',
+                  border: '1px solid #fde68a',
+                  borderRadius: '8px',
+                  padding: '0.6rem 0.8rem',
+                  marginBottom: '0.9rem',
+                  fontSize: '0.8rem',
+                  color: '#92400e',
+                  lineHeight: 1.45
+                }}
+              >
+                <strong>Salary Advance Mode:</strong> Recorded separately from standard monthly/shift salary payouts on
+                all statements and PDF salary slips, and automatically deducted from net payable balance.
+              </div>
+            )}
 
             <form onSubmit={handleSubmitSalary}>
               <div className="form-group">
@@ -2309,7 +2714,7 @@ export default function StaffPage() {
                   <option value="">Select staff...</option>
                   {state.staff.map((st) => (
                     <option key={st.id} value={st.id}>
-                      {st.name} ({st.role_title || 'Crew'} — {st.phone})
+                      {st.name} ({st.role_title || 'Crew'} — {formatStaffSalaryRate(st)})
                     </option>
                   ))}
                 </select>
@@ -2325,18 +2730,22 @@ export default function StaffPage() {
                       borderRadius: '8px',
                       padding: '0.65rem 0.85rem',
                       marginBottom: '0.9rem',
-                      fontSize: '0.82rem',
+                      fontSize: '0.8rem',
                       display: 'flex',
                       justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '0.4rem',
                       fontVariantNumeric: 'tabular-nums'
                     }}
                   >
                     <span>
                       Earned: <strong>₹{sum.totalEarned.toLocaleString('en-IN')}</strong> · Paid:{' '}
-                      <strong style={{ color: '#059669' }}>₹{sum.totalPaid.toLocaleString('en-IN')}</strong>
+                      <strong style={{ color: '#059669' }}>₹{sum.totalRegularPaid.toLocaleString('en-IN')}</strong> ·
+                      Advance:{' '}
+                      <strong style={{ color: '#d97706' }}>₹{sum.totalAdvancePaid.toLocaleString('en-IN')}</strong>
                     </span>
                     <span style={{ fontWeight: 800, color: sum.balancePayable > 0 ? '#dc2626' : '#059669' }}>
-                      Due: ₹{sum.balancePayable.toLocaleString('en-IN')}
+                      Net Due: ₹{sum.balancePayable.toLocaleString('en-IN')}
                     </span>
                   </div>
                 );
@@ -2344,7 +2753,13 @@ export default function StaffPage() {
 
               <div className="grid-2">
                 <div className="form-group">
-                  <label className="form-label">Amount (₹) *</label>
+                  <label className="form-label">
+                    {salaryRecordType === 'advance'
+                      ? 'Advance Amount (₹) *'
+                      : salaryRecordType === 'payment'
+                      ? 'Salary Payout Amount (₹) *'
+                      : 'Allowance Amount (₹) *'}
+                  </label>
                   <input
                     type="number"
                     min={1}
@@ -2373,19 +2788,9 @@ export default function StaffPage() {
               <div className="grid-2">
                 <div className="form-group">
                   <label className="form-label">
-                    {salaryRecordType === 'payment' ? 'Payment Method' : 'Allowance Type'}
+                    {salaryRecordType === 'earning' ? 'Allowance Type' : 'Payment Method'}
                   </label>
-                  {salaryRecordType === 'payment' ? (
-                    <select
-                      className="form-control"
-                      value={salaryForm.method}
-                      onChange={(e) => setSalaryForm({ ...salaryForm, method: e.target.value })}
-                    >
-                      <option value="UPI / GPay">UPI / GPay / PhonePe</option>
-                      <option value="Cash">Cash</option>
-                      <option value="Bank Transfer">Bank Transfer</option>
-                    </select>
-                  ) : (
+                  {salaryRecordType === 'earning' ? (
                     <select
                       className="form-control"
                       value={salaryForm.method}
@@ -2394,6 +2799,16 @@ export default function StaffPage() {
                       <option value="Duty Allowance">Duty Allowance</option>
                       <option value="Travel / Night Batta">Travel / Night Batta</option>
                       <option value="Festival / Event Bonus">Festival / Event Bonus</option>
+                    </select>
+                  ) : (
+                    <select
+                      className="form-control"
+                      value={salaryForm.method}
+                      onChange={(e) => setSalaryForm({ ...salaryForm, method: e.target.value })}
+                    >
+                      <option value="UPI / GPay">UPI / GPay / PhonePe</option>
+                      <option value="Cash">Cash</option>
+                      <option value="Bank Transfer">Bank Transfer</option>
                     </select>
                   )}
                 </div>
@@ -2422,7 +2837,11 @@ export default function StaffPage() {
                 <input
                   type="text"
                   className="form-control"
-                  placeholder="e.g. GPay ref, advance settlement..."
+                  placeholder={
+                    salaryRecordType === 'advance'
+                      ? 'e.g. Mid-month salary advance, emergency advance...'
+                      : 'e.g. GPay ref, monthly settlement...'
+                  }
                   value={salaryForm.note}
                   onChange={(e) => setSalaryForm({ ...salaryForm, note: e.target.value })}
                 />
@@ -2432,8 +2851,30 @@ export default function StaffPage() {
                 <button type="button" className="btn btn-secondary" onClick={() => setSalaryModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" style={{ fontWeight: 700 }}>
-                  {salaryRecordType === 'payment' ? '💸 Save Salary Payment' : '➕ Save Allowance'}
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{
+                    fontWeight: 700,
+                    background:
+                      salaryRecordType === 'advance'
+                        ? '#d97706'
+                        : salaryRecordType === 'payment'
+                        ? '#059669'
+                        : undefined,
+                    borderColor:
+                      salaryRecordType === 'advance'
+                        ? '#d97706'
+                        : salaryRecordType === 'payment'
+                        ? '#059669'
+                        : undefined
+                  }}
+                >
+                  {salaryRecordType === 'advance'
+                    ? '⚡ Save Salary Advance'
+                    : salaryRecordType === 'payment'
+                    ? '💸 Save Salary Payout'
+                    : '➕ Save Allowance'}
                 </button>
               </div>
             </form>
@@ -2442,31 +2883,50 @@ export default function StaffPage() {
       )}
 
       {/* ===================================================================== */}
-      {/* MODAL: ADD / EDIT STAFF MEMBER                                        */}
+      {/* MODAL: ADD / EDIT STAFF MEMBER (DECIDE SALARY STRUCTURE UPFRONT)      */}
       {/* ===================================================================== */}
       {isModalOpen && (
         <div className="modal-overlay" onClick={() => setIsModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px' }}>
             <div className="modal-header">
-              <h2 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0 }}>
-                {editingStaff ? 'Edit Staff Member' : 'Register New Staff Member'}
-              </h2>
+              <div>
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0 }}>
+                  {editingStaff ? 'Edit Staff & Salary Structure' : 'Register New Staff Member'}
+                </h2>
+                <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '0.2rem 0 0 0' }}>
+                  Configure personal details and choose Per Hour, Per Event, or Monthly salary.
+                </p>
+              </div>
               <button className="btn btn-secondary btn-sm" onClick={() => setIsModalOpen(false)}>
                 ✕
               </button>
             </div>
 
             <form onSubmit={handleSubmitStaff}>
-              <div className="form-group">
-                <label className="form-label">Full Name *</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. Rafeeq K"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  required
-                />
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Full Name *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Rafeeq K"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Role / Designation *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Master Chef, Buffet Server"
+                    value={formData.role_title}
+                    onChange={(e) => setFormData({ ...formData, role_title: e.target.value })}
+                    required
+                  />
+                </div>
               </div>
 
               <div className="grid-2">
@@ -2494,23 +2954,68 @@ export default function StaffPage() {
                 </div>
               </div>
 
-              <div className="grid-2">
-                <div className="form-group">
-                  <label className="form-label">Role / Designation *</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. Master Chef, Buffet Server"
-                    value={formData.role_title}
-                    onChange={(e) => setFormData({ ...formData, role_title: e.target.value })}
-                    required
-                  />
+              {/* Salary Structure Selector */}
+              <div className="form-group">
+                <label className="form-label">Salary Structure *</label>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: '0.45rem'
+                  }}
+                >
+                  {[
+                    {
+                      id: 'hourly' as StaffSalaryType,
+                      title: '⏱ Per Hour',
+                      sub: 'Paid per shift hour'
+                    },
+                    {
+                      id: 'per_event' as StaffSalaryType,
+                      title: '🎪 Per Event',
+                      sub: 'Fixed rate per event'
+                    },
+                    {
+                      id: 'monthly' as StaffSalaryType,
+                      title: '📅 Monthly',
+                      sub: 'Fixed monthly salary'
+                    }
+                  ].map((opt) => {
+                    const active = formData.salary_type === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, salary_type: opt.id })}
+                        style={{
+                          padding: '0.6rem 0.55rem',
+                          borderRadius: '8px',
+                          border: `1.5px solid ${active ? '#2563eb' : '#cbd5e1'}`,
+                          background: active ? '#eff6ff' : '#ffffff',
+                          color: '#0f172a',
+                          textAlign: 'left',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <div style={{ fontWeight: 800, fontSize: '0.84rem', color: active ? '#1d4ed8' : '#0f172a' }}>
+                          {opt.title}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.1rem' }}>
+                          {opt.sub}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
 
+              {formData.salary_type === 'hourly' && (
                 <div className="form-group">
-                  <label className="form-label">Hourly Wage Rate (INR ₹) *</label>
+                  <label className="form-label">Per Hour Salary Rate (INR ₹ / hr) *</label>
                   <input
                     type="number"
+                    min={0}
+                    step="1"
                     className="form-control"
                     value={formData.hourly_rate}
                     onChange={(e) =>
@@ -2518,8 +3023,60 @@ export default function StaffPage() {
                     }
                     required
                   />
+                  <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '0.28rem' }}>
+                    Automatically multiplies attended shift hours by ₹{formData.hourly_rate || 0}/hr.
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {formData.salary_type === 'per_event' && (
+                <div className="form-group">
+                  <label className="form-label">Per Event Salary Rate (INR ₹ / event) *</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="1"
+                    className="form-control"
+                    value={formData.event_rate}
+                    onChange={(e) =>
+                      setFormData({ ...formData, event_rate: parseFloat(e.target.value) || 0 })
+                    }
+                    required
+                  />
+                  <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '0.28rem' }}>
+                    Credits ₹{(formData.event_rate || 0).toLocaleString('en-IN')} flat for each event shift marked Present.
+                  </div>
+                </div>
+              )}
+
+              {formData.salary_type === 'monthly' && (
+                <div className="grid-2">
+                  <div className="form-group">
+                    <label className="form-label">Monthly Fixed Salary (INR ₹ / month) *</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="1"
+                      className="form-control"
+                      value={formData.monthly_salary}
+                      onChange={(e) =>
+                        setFormData({ ...formData, monthly_salary: parseFloat(e.target.value) || 0 })
+                      }
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Salary Effective From *</label>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={formData.salary_start_date}
+                      onChange={(e) => setFormData({ ...formData, salary_start_date: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <input
@@ -2529,7 +3086,7 @@ export default function StaffPage() {
                   onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
                 />
                 <label htmlFor="staffActive" style={{ fontSize: '0.85rem', cursor: 'pointer' }}>
-                  Available for scheduling
+                  Available for event scheduling
                 </label>
               </div>
 

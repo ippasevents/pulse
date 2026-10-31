@@ -221,26 +221,26 @@ export default function SettingsPage() {
         </div>
 
         <div>
-          {/* Malayalam 4-Role PDF User Manuals Card */}
+          {/* 4-Role English PDF User Manuals Card */}
           <div className="card" style={{ marginBottom: '1.25rem' }}>
-            <h2 className="card-title">📘 മലയാളം യൂസർ മാനുവലുകൾ (4 PDF Guides)</h2>
+            <h2 className="card-title">📘 Role-Based User Manuals (4 PDF Guides)</h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: 1.6 }}>
-              ഓണർ, മാനേജർ, അക്കൗണ്ടന്റ്, സ്റ്റാഫ് എന്നീ 4 വിഭാഗം ഉപയോക്താക്കൾക്കുമുള്ള പ്രത്യേകം മലയാളം യൂസർ മാനുവലുകൾ വായിക്കാനും ഓരോന്നും വെവ്വേറെ A4 PDF ആയി ഡൗൺലോഡ് ചെയ്യാനും ഇവിടെ ക്ലിക്ക് ചെയ്യുക.
+              Download detailed, step-by-step A4 PDF user manuals tailored separately for each team role — Owner, Manager, Accountant, and Staff.
             </p>
             <Link
               href="/manuals"
               className="btn btn-primary"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontWeight: 700 }}
             >
-              📘 മലയാളം യൂസർ മാനുവൽ PDF പേജ് തുറക്കുക &rarr;
+              📘 Open User Manuals PDF Hub &rarr;
             </Link>
           </div>
 
-          {/* Owner-Only Full Database Download (Excel / CSV) */}
+          {/* Owner-Only Full Database Backup & Restore */}
           <OwnerDatabaseExportCard role={role} />
 
           {/* Online-Only Supabase Cloud Database & Realtime Sync Card */}
-          <div className="card" style={{ marginBottom: '1.25rem', borderLeft: '4px solid #10b981' }}>
+          <div className="card" style={{ marginBottom: '1.25rem', borderTop: '3px solid #10b981' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span
@@ -322,7 +322,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Account Security & Password */}
-          <div className="card" style={{ borderLeft: '4px solid #0f172a' }}>
+          <div className="card" style={{ borderTop: '3px solid #0f172a' }}>
             <h2 className="card-title">🔐 Account Password &amp; Security</h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
               Change the login password for your currently signed-in account. All users can independently update their own passwords.
@@ -338,7 +338,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Progressive Web App Installation */}
-          <div className="card" style={{ borderLeft: '4px solid #e11d48' }}>
+          <div className="card" style={{ borderTop: '3px solid #e11d48' }}>
             <h2 className="card-title">📱 App Installation</h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
               Install IPPAS Pulse as a standalone application on your Android phone, iPhone / iPad, or Windows / Mac laptop for instant full-screen access, fast loading, and app-like experience.
@@ -349,7 +349,7 @@ export default function SettingsPage() {
           </div>
 
           {/* WhatsApp & Client Invoice PDF Sharing Card */}
-          <div className="card" style={{ borderLeft: '4px solid #16a34a' }}>
+          <div className="card" style={{ borderTop: '3px solid #16a34a' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span style={{ fontSize: '1.25rem' }}>💬</span>

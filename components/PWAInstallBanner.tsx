@@ -49,7 +49,7 @@ export default function PWAInstallBanner() {
               Install IPPAS Pulse on Your Phone / Desktop
             </div>
             <div style={{ fontSize: '0.78rem', color: '#475569' }}>
-              മറ്റ് ആപ്പുകളുടെ കൂടെ App Drawer-ലും Home Screen-ലും ഒറ്റ ടാപ്പിൽ ആഡ് ചെയ്യാം • പെർമിഷൻ ആവശ്യമില്ല
+              Adds icon to your App Drawer &amp; Home Screen in 1 tap &middot; Zero extra permissions needed
             </div>
           </div>
         </div>

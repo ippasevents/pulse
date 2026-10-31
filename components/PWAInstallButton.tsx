@@ -236,7 +236,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
             {isInstallable ? (
               <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
                 <p style={{ fontSize: '0.88rem', color: '#334155', marginBottom: '1rem', lineHeight: 1.6 }}>
-                  ഒറ്റ ടാപ്പിൽ <strong>IPPAS Pulse</strong> നിങ്ങളുടെ ഫോണിലെ മറ്റ് ആപ്പുകളുടെ കൂടെയും ഹോം സ്ക്രീനിലും ഇൻസ്റ്റാൾ ചെയ്യാം. യാതൊരു അധിക പെർമിഷനും ആവശ്യമില്ല.
+                  Install <strong>IPPAS Pulse</strong> alongside your phone&apos;s other apps and on your Home Screen in a single tap. No special permissions are required.
                 </p>
                 <button
                   type="button"
@@ -261,17 +261,17 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                   }}
                 >
                   <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.4rem' }}>
-                    iPhone / iPad ഹോം സ്ക്രീനിൽ ആഡ് ചെയ്യാൻ (2 Steps):
+                    Add to iPhone / iPad Home Screen (2 Steps):
                   </div>
                   <div>
-                    <strong>1.</strong> Safari താഴെയുള്ള <strong>Share (⬆️)</strong> ബട്ടൺ അമർത്തുക.
+                    <strong>1.</strong> Tap the <strong>Share (⬆️)</strong> button at the bottom of Safari.
                   </div>
                   <div style={{ marginTop: '0.25rem' }}>
-                    <strong>2.</strong> <strong>&ldquo;Add to Home Screen&rdquo;</strong> തിരഞ്ഞെടുത്ത് <strong>Add</strong> അമർത്തുക.
+                    <strong>2.</strong> Select <strong>&ldquo;Add to Home Screen&rdquo;</strong> and tap <strong>Add</strong>.
                   </div>
                 </div>
                 <div style={{ fontSize: '0.76rem', color: '#64748b' }}>
-                  മറ്റ് ആപ്പുകളുടെ കൂടെ IPPAS Pulse ഐക്കൺ ഉടൻ ഹോം സ്ക്രീനിൽ വരും — പ്രത്യേക പെർമിഷനുകൾ ഒന്നും ആവശ്യമില്ല.
+                  The IPPAS Pulse app icon will appear immediately on your Home Screen — no extra permissions needed.
                 </div>
               </div>
             ) : isAndroid ? (
@@ -288,17 +288,17 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                   }}
                 >
                   <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.4rem' }}>
-                    സ്മാർട്ട്ഫോണിൽ ഇൻസ്റ്റാൾ ചെയ്യാൻ (2 Steps):
+                    Install on Android Smartphone (2 Steps):
                   </div>
                   <div>
-                    <strong>1.</strong> Chrome മുകളിലെ വലതുവശത്തുള്ള <strong>⋮ (Menu)</strong> അമർത്തുക.
+                    <strong>1.</strong> Tap the <strong>⋮ (Menu)</strong> icon at the top right of Chrome.
                   </div>
                   <div style={{ marginTop: '0.25rem' }}>
-                    <strong>2.</strong> <strong>&ldquo;Install app&rdquo;</strong> (അല്ലെങ്കിൽ <em>Add to Home screen</em>) തിരഞ്ഞെടുത്ത് <strong>Install</strong> അമർത്തുക.
+                    <strong>2.</strong> Select <strong>&ldquo;Install app&rdquo;</strong> (or <em>Add to Home screen</em>) and tap <strong>Install</strong>.
                   </div>
                 </div>
                 <div style={{ fontSize: '0.76rem', color: '#64748b' }}>
-                  ഫോണിലെ മറ്റ് ആപ്പുകളുടെ കൂടെ App List-ലും Home Screen-ലും IPPAS Pulse ഐക്കൺ തനിയെ ചേർക്കപ്പെടും. മറ്റ് പെർമിഷനുകൾ ഒന്നും ആവശ്യമില്ല.
+                  IPPAS Pulse will automatically appear in your App Drawer and Home Screen — zero extra permissions needed.
                 </div>
               </div>
             ) : (
