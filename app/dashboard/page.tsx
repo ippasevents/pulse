@@ -496,6 +496,10 @@ export default function DashboardPage() {
                     </span>
                     <span>·</span>
                     <span>👥 {nextAssignment.event?.guest_count || 0} Pax</span>
+                    <span>·</span>
+                    <span style={{ fontWeight: 700, color: '#5b21b6' }}>
+                      Assigned Rate: {nextAssignment.rateLabel}
+                    </span>
                   </div>
 
                   {nextAssignment.shift.duty_note && (
@@ -570,7 +574,10 @@ export default function DashboardPage() {
                               </div>
                             </td>
                             <td style={{ fontWeight: 600, color: '#6d28d9', fontSize: '0.82rem' }}>
-                              {item.shift.role_label || currentUser?.role_title || 'Service Crew'}
+                              <div>{item.shift.role_label || currentUser?.role_title || 'Service Crew'}</div>
+                              <div style={{ fontSize: '0.73rem', color: '#475569', fontVariantNumeric: 'tabular-nums' }}>
+                                Rate: {item.rateLabel}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -678,7 +685,9 @@ export default function DashboardPage() {
                         </td>
                         <td style={{ fontSize: '0.82rem', fontVariantNumeric: 'tabular-nums' }}>
                           <div style={{ fontWeight: 600 }}>{si.shift.role_label || currentUser?.role_title || 'Crew'}</div>
-                          <div style={{ fontSize: '0.74rem', color: '#64748b' }}>{si.hours} hrs</div>
+                          <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                            {si.hours} hrs · {si.rateLabel}
+                          </div>
                         </td>
                         <td style={{ fontSize: '0.78rem', fontWeight: 700 }}>
                           {si.isAttended ? (

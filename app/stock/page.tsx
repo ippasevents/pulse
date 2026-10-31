@@ -1499,6 +1499,26 @@ export default function StockPage() {
                 </div>
               </div>
 
+              {editingIng && Number(ingFormData.cost_per_unit) !== Number(editingIng.cost_per_unit) && (
+                <div
+                  style={{
+                    background: '#eff6ff',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: '8px',
+                    padding: '0.6rem 0.8rem',
+                    marginBottom: '0.85rem',
+                    fontSize: '0.78rem',
+                    color: '#1e3a8a',
+                    lineHeight: 1.45
+                  }}
+                >
+                  <strong>Historical Price Lock Active:</strong> Updating unit cost from{' '}
+                  <strong>₹{editingIng.cost_per_unit}</strong> to{' '}
+                  <strong>₹{ingFormData.cost_per_unit}</strong> applies only to future events and newly added quotes.
+                  Previous events, quotations, stock sheets, and invoices retain ₹{editingIng.cost_per_unit}/{editingIng.unit}.
+                </div>
+              )}
+
               <div className="grid-2">
                 <div className="form-group">
                   <label className="form-label">Initial Stock Quantity *</label>
@@ -1895,6 +1915,22 @@ export default function StockPage() {
               <button className="btn btn-secondary btn-sm" onClick={() => setIsPurchaseModalOpen(false)}>
                 ✕
               </button>
+            </div>
+
+            <div
+              style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '0.55rem 0.8rem',
+                marginBottom: '0.85rem',
+                fontSize: '0.77rem',
+                color: '#475569',
+                lineHeight: 1.45
+              }}
+            >
+              <strong>Forward-Only Stock Pricing:</strong> New purchase unit rates apply to future events and quotes
+              going forward—all previously created events, quotations, and invoices retain their locked historical rates.
             </div>
 
             <form onSubmit={handleCreatePurchase}>

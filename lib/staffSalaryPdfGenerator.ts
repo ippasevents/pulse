@@ -2,7 +2,7 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import {
   AppState,
-  calculateMonthlySalaryMonthsCount,
+  calculateMonthlySalaryDetails,
   formatStaffSalaryRate,
   formatStaffSalaryTypeLabel,
   getStaffSalaryType,
@@ -152,8 +152,6 @@ export function computeStaffPeriodReport(
   const rows: StaffPeriodReportRow[] = targetStaffList.map((staff) => {
     const salaryType = getStaffSalaryType(staff);
     const rateDisplay = formatStaffSalaryRate(staff);
-    const hourlyRate = Number(staff.hourly_rate || 0);
-    const eventRate = Number(staff.event_rate ?? staff.hourly_rate ?? 0);
     const overallSummary = store.getStaffSalarySummary(staff.id);
 
     const allShiftsInRange: StaffPeriodShiftEntry[] = state.shifts
@@ -163,33 +161,22 @@ export function computeStaffPeriodReport(
         const date = event?.event_date
           ? event.event_date.slice(0, 10)
           : (sh.starts_at || '').slice(0, 10);
-        const hours = store.calculateShiftHours(sh.starts_at, sh.ends_at);
+        const eff = store.getShiftEffectiveRateInfo(sh, staff);
         const attendanceStatus: ShiftAttendanceStatus =
           sh.attendance_status === 'present' || sh.attendance_status === 'absent'
             ? sh.attendance_status
             : 'pending';
         const isAttended = attendanceStatus === 'present' && event?.status !== 'cancelled';
-
-        let earnedAmount = 0;
-        let rateLabel = `₹${hourlyRate.toLocaleString('en-IN')}/hr`;
-        if (salaryType === 'per_event') {
-          earnedAmount = isAttended ? Math.round(eventRate) : 0;
-          rateLabel = `₹${eventRate.toLocaleString('en-IN')}/event`;
-        } else if (salaryType === 'monthly') {
-          earnedAmount = 0;
-          rateLabel = 'Monthly Fixed';
-        } else {
-          earnedAmount = isAttended ? Math.round(hours * hourlyRate) : 0;
-        }
+        const earnedAmount = isAttended ? eff.payrollShiftAmount : 0;
 
         return {
           shift: sh,
           event,
           date,
-          hours,
-          hourlyRate,
-          salaryType,
-          rateLabel,
+          hours: eff.hours,
+          hourlyRate: eff.hourlyRate,
+          salaryType: eff.salaryType,
+          rateLabel: eff.rateLabel,
           attendanceStatus,
           isAttended,
           earnedAmount
@@ -212,20 +199,15 @@ export function computeStaffPeriodReport(
     );
     const shiftEarnings = attendedShifts.reduce((sum, s) => sum + s.earnedAmount, 0);
 
-    const monthlyMonthsCount =
-      salaryType === 'monthly'
-        ? calculateMonthlySalaryMonthsCount(
-            staff,
-            state.shifts,
-            state.staffSalaryRecords || [],
-            effectiveStart,
-            effectiveEnd
-          )
-        : 0;
-    const monthlyBaseEarnings =
-      salaryType === 'monthly'
-        ? Math.round(monthlyMonthsCount * Number(staff.monthly_salary ?? staff.hourly_rate ?? 0))
-        : 0;
+    const monthlyDetails = calculateMonthlySalaryDetails(
+      staff,
+      state.shifts,
+      state.staffSalaryRecords || [],
+      effectiveStart,
+      effectiveEnd
+    );
+    const monthlyMonthsCount = monthlyDetails.monthsCount;
+    const monthlyBaseEarnings = monthlyDetails.totalAmount;
 
     const recordsInRange = (state.staffSalaryRecords || []).filter(
       (rec) =>

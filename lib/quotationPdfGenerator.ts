@@ -1,7 +1,7 @@
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { EventRecord } from '@/lib/types';
-import { store, AppState } from '@/lib/store';
+import { EventExtra, EventRecord } from '@/lib/types';
+import { store, AppState, isAutoLabourChargeExtra } from '@/lib/store';
 import { sharePdfWithCaptionToWhatsApp } from '@/lib/whatsappDeviceShare';
 
 function escapeHtml(val?: string | number | null): string {
@@ -20,8 +20,69 @@ function normalizeWhatsAppPhone(raw?: string): string {
 }
 
 /**
+ * Ensures every Quotation includes the mandatory 'Labour Charges' line item based on
+ * assigned staff shifts without mutating finalized/completed historical events.
+ */
+export function resolveQuotationExtrasWithMandatoryLabour(
+  liveEvent: EventRecord,
+  state: AppState
+): {
+  displayExtras: EventExtra[];
+  menuTotal: number;
+  extrasTotal: number;
+  grandTotal: number;
+} {
+  const baseTotals = store.getEventTotal(liveEvent.id);
+  const rawExtras = state.eventExtras.filter((x) => x.event_id === liveEvent.id);
+  const hasLabourExtra = rawExtras.some((ex) => isAutoLabourChargeExtra(ex.description));
+
+  if (hasLabourExtra) {
+    // Place Labour Charges first among service/extra charges for clear visibility
+    const sorted = [...rawExtras].sort((a, b) => {
+      const aLab = isAutoLabourChargeExtra(a.description) ? 0 : 1;
+      const bLab = isAutoLabourChargeExtra(b.description) ? 0 : 1;
+      return aLab - bLab;
+    });
+    return {
+      displayExtras: sorted,
+      menuTotal: baseTotals.menuTotal,
+      extrasTotal: baseTotals.extrasTotal,
+      grandTotal: baseTotals.grandTotal
+    };
+  }
+
+  // Fallback for legacy events created before automatic Labour Charges row initialization:
+  const hasLockedInvoice = state.invoices.some(
+    (inv) => inv.event_id === liveEvent.id && (inv.status === 'paid' || inv.kind === 'final')
+  );
+  const isHistoricalLocked = liveEvent.status === 'completed' || hasLockedInvoice;
+  const labourSummary = store.getEventAssignedLabourSummary(liveEvent.id);
+  const computedLabourAmount = isHistoricalLocked ? 0 : labourSummary.totalLabourAmount;
+  const syntheticLabourRow: EventExtra = {
+    id: `auto-labour-${liveEvent.id}`,
+    event_id: liveEvent.id,
+    description: isHistoricalLocked
+      ? 'Labour Charges'
+      : labourSummary.label,
+    amount: computedLabourAmount
+  };
+
+  const displayExtras = [syntheticLabourRow, ...rawExtras];
+  const extrasTotal = baseTotals.extrasTotal + computedLabourAmount;
+  const grandTotal = baseTotals.menuTotal + extrasTotal;
+
+  return {
+    displayExtras,
+    menuTotal: baseTotals.menuTotal,
+    extrasTotal,
+    grandTotal
+  };
+}
+
+/**
  * Generates an off-screen A4 portrait representation of the Event Quotation
- * (Menu Items + Logistics, Transport & Extra Charges) and compiles it into a sharp PDF.
+ * (Menu Items + Mandatory Labour Charges + Logistics, Transport & Extra Charges)
+ * and compiles it into a sharp PDF.
  */
 export async function generateQuotationPdfBlob(
   event: EventRecord,
@@ -32,9 +93,9 @@ export async function generateQuotationPdfBlob(
   const liveEvent = state.events.find((e) => e.id === event.id) || event;
   const client = state.clients.find((c) => c.id === liveEvent.client_id);
   const quoteNumber = store.getQuotationNumber(liveEvent);
-  const { menuTotal, extrasTotal, grandTotal } = store.getEventTotal(liveEvent.id);
   const evtItems = state.eventItems.filter((i) => i.event_id === liveEvent.id);
-  const evtExtras = state.eventExtras.filter((x) => x.event_id === liveEvent.id);
+  const { displayExtras, menuTotal, extrasTotal, grandTotal } =
+    resolveQuotationExtrasWithMandatoryLabour(liveEvent, state);
 
   const showBankDetails = liveEvent.show_bank_details !== false;
   const showPaymentDetails = liveEvent.show_payment_details !== false;
@@ -107,7 +168,7 @@ export async function generateQuotationPdfBlob(
         </div>
       </div>
 
-      <!-- Menu & Logistics/Transport/Extras Table -->
+      <!-- Menu & Mandatory Labour Charges / Logistics Table -->
       <div style="margin-bottom: 20px;">
         <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
           <thead>
@@ -123,6 +184,8 @@ export async function generateQuotationPdfBlob(
             ${evtItems
               .map((item) => {
                 const dish = state.menuItems.find((m) => m.id === item.menu_item_id);
+                const dishName = item.dish_name || dish?.name || 'Menu Dish';
+                const dishCategory = item.dish_category || dish?.category || '';
                 const isKg = item.pricing_type === 'per_kg';
                 const rate = item.price_per_unit || item.price_per_guest || 0;
                 const qty = isKg
@@ -137,8 +200,8 @@ export async function generateQuotationPdfBlob(
                 return `
                   <tr style="border-bottom: 1px solid #e2e8f0;">
                     <td style="padding: 8px 8px;">
-                      <div style="font-weight: 600; color: #0f172a;">${escapeHtml(dish?.name || 'Menu Dish')}</div>
-                      ${dish?.category ? `<div style="font-size: 0.72rem; color: #64748b;">${escapeHtml(dish.category)}</div>` : ''}
+                      <div style="font-weight: 600; color: #0f172a;">${escapeHtml(dishName)}</div>
+                      ${dishCategory ? `<div style="font-size: 0.72rem; color: #64748b;">${escapeHtml(dishCategory)}</div>` : ''}
                     </td>
                     <td style="text-align: center; padding: 8px 8px; font-size: 0.78rem; color: #334155;">
                       ${isKg ? 'Per Kg' : 'Per Guest'}
@@ -157,16 +220,19 @@ export async function generateQuotationPdfBlob(
               })
               .join('')}
 
-            ${evtExtras
-              .map(
-                (ex) => `
-                  <tr style="border-bottom: 1px solid #e2e8f0; background: #fcfcfd;">
+            ${displayExtras
+              .map((ex) => {
+                const isLabour = isAutoLabourChargeExtra(ex.description);
+                return `
+                  <tr style="border-bottom: 1px solid #e2e8f0; background: ${isLabour ? '#f8fafc' : '#fcfcfd'};">
                     <td style="padding: 8px 8px;">
-                      <div style="font-weight: 600; color: #0f172a;">${escapeHtml(ex.description)}</div>
-                      <div style="font-size: 0.72rem; color: #64748b;">Logistics, Transport &amp; Additional Services</div>
+                      <div style="font-weight: ${isLabour ? '700' : '600'}; color: #0f172a;">${escapeHtml(ex.description)}</div>
+                      <div style="font-size: 0.72rem; color: #64748b;">
+                        ${isLabour ? 'Assigned Event Crew & Service Staff Charges' : 'Logistics, Transport &amp; Additional Services'}
+                      </div>
                     </td>
                     <td style="text-align: center; padding: 8px 8px; font-size: 0.78rem; color: #475569;">
-                      Logistics / Extra
+                      ${isLabour ? 'Labour Charges' : 'Logistics / Extra'}
                     </td>
                     <td style="text-align: center; padding: 8px 8px; color: #334155;">1 Lot</td>
                     <td style="text-align: right; padding: 8px 8px; color: #334155;">₹${ex.amount.toLocaleString('en-IN')}</td>
@@ -174,42 +240,24 @@ export async function generateQuotationPdfBlob(
                       ₹${ex.amount.toLocaleString('en-IN')}
                     </td>
                   </tr>
-                `
-              )
+                `;
+              })
               .join('')}
-
-            ${
-              evtItems.length === 0 && evtExtras.length === 0
-                ? `
-                  <tr>
-                    <td colspan="5" style="padding: 16px; text-align: center; color: #64748b;">
-                      Quotation items pending selection.
-                    </td>
-                  </tr>
-                `
-                : ''
-            }
           </tbody>
         </table>
       </div>
 
       <!-- Totals -->
       <div style="display: flex; justify-content: flex-end; margin-bottom: 24px;">
-        <div style="width: 310px; font-size: 0.86rem;">
+        <div style="width: 320px; font-size: 0.86rem;">
           <div style="display: flex; justify-content: space-between; padding: 4px 6px;">
             <span style="color: #475569;">Menu Items Total:</span>
             <strong>₹${menuTotal.toLocaleString('en-IN')}</strong>
           </div>
-          ${
-            evtExtras.length > 0
-              ? `
-                <div style="display: flex; justify-content: space-between; padding: 4px 6px;">
-                  <span style="color: #475569;">Logistics, Transport &amp; Extras:</span>
-                  <strong>₹${extrasTotal.toLocaleString('en-IN')}</strong>
-                </div>
-              `
-              : ''
-          }
+          <div style="display: flex; justify-content: space-between; padding: 4px 6px;">
+            <span style="color: #475569;">Labour, Logistics &amp; Extras:</span>
+            <strong>₹${extrasTotal.toLocaleString('en-IN')}</strong>
+          </div>
           <div style="display: flex; justify-content: space-between; padding: 8px 10px; background: #0f172a; color: #ffffff; border-radius: 4px; margin-top: 6px;">
             <span style="font-weight: 700; font-size: 0.96rem;">Total Estimate:</span>
             <span style="font-weight: 800; font-size: 1.12rem;">₹${grandTotal.toLocaleString('en-IN')}</span>
@@ -314,7 +362,7 @@ export async function generateQuotationPdfBlob(
 }
 
 /**
- * Formats WhatsApp text message for Client Quotation.
+ * Formats WhatsApp text message for Client Quotation (always including locked dish names and Labour Charges).
  */
 export function formatWhatsAppQuotationMessage(
   event: EventRecord,
@@ -323,9 +371,9 @@ export function formatWhatsAppQuotationMessage(
   const liveEvent = state.events.find((e) => e.id === event.id) || event;
   const client = state.clients.find((c) => c.id === liveEvent.client_id);
   const quoteNumber = store.getQuotationNumber(liveEvent);
-  const { menuTotal, extrasTotal, grandTotal } = store.getEventTotal(liveEvent.id);
   const evtItems = state.eventItems.filter((i) => i.event_id === liveEvent.id);
-  const evtExtras = state.eventExtras.filter((x) => x.event_id === liveEvent.id);
+  const { displayExtras, menuTotal, extrasTotal, grandTotal } =
+    resolveQuotationExtrasWithMandatoryLabour(liveEvent, state);
   const businessName = state.settings.name || 'IPPAS FOOD SERVICE & EVENTS';
 
   const showBankDetails = liveEvent.show_bank_details !== false;
@@ -351,9 +399,10 @@ export function formatWhatsAppQuotationMessage(
     lines.push(``, `🍛 *Selected Menu (${evtItems.length} items):*`);
     evtItems.slice(0, 12).forEach((it) => {
       const dish = state.menuItems.find((m) => m.id === it.menu_item_id);
+      const dishName = it.dish_name || dish?.name || 'Dish';
       const isKg = it.pricing_type === 'per_kg';
       const qty = isKg ? (it.quantity ?? 1) : (it.quantity ?? liveEvent.guest_count);
-      lines.push(`• ${dish?.name || 'Dish'} (${qty} ${isKg ? 'kg' : 'pax'})`);
+      lines.push(`• ${dishName} (${qty} ${isKg ? 'kg' : 'pax'})`);
     });
     if (evtItems.length > 12) {
       lines.push(`• +${evtItems.length - 12} more items (see attached PDF)`);
@@ -361,12 +410,12 @@ export function formatWhatsAppQuotationMessage(
     lines.push(`   Menu Subtotal: ₹${menuTotal.toLocaleString('en-IN')}`);
   }
 
-  if (evtExtras.length > 0) {
-    lines.push(``, `🚚 *Logistics, Transport & Extra Charges:*`);
-    evtExtras.forEach((ex) => {
+  if (displayExtras.length > 0) {
+    lines.push(``, `🚚 *Labour Charges, Logistics & Extra Services:*`);
+    displayExtras.forEach((ex) => {
       lines.push(`• ${ex.description}: ₹${ex.amount.toLocaleString('en-IN')}`);
     });
-    lines.push(`   Extras Subtotal: ₹${extrasTotal.toLocaleString('en-IN')}`);
+    lines.push(`   Labour & Extras Subtotal: ₹${extrasTotal.toLocaleString('en-IN')}`);
   }
 
   lines.push(``, `💰 *Total Quotation Estimate: ₹${grandTotal.toLocaleString('en-IN')}*`);

@@ -13,6 +13,7 @@ import {
   EventRecord,
   Shift,
   ShiftAttendanceStatus,
+  ShiftRateUpdateMode,
   StaffMember,
   StaffSalaryRecordType,
   StaffSalaryType
@@ -55,6 +56,7 @@ export default function StaffPage() {
   // Add / Edit Staff Modal (with 3 Salary Structures decided on registration)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+  const [shiftRateUpdateMode, setShiftRateUpdateMode] = useState<ShiftRateUpdateMode>('keep_existing');
   const [formData, setFormData] = useState<{
     name: string;
     phone: string;
@@ -276,14 +278,23 @@ export default function StaffPage() {
     };
 
     if (editingStaff) {
-      store.updateStaff(editingStaff.id, payload);
-      showNotice(`✓ Updated staff profile for ${payload.name} (${formatStaffSalaryRate(payload)}).`);
+      store.updateStaff(editingStaff.id, payload, shiftRateUpdateMode);
+      const policyNote =
+        shiftRateUpdateMode === 'update_upcoming'
+          ? ' · Switched upcoming shifts to new rate'
+          : shiftRateUpdateMode === 'update_all_unsettled'
+          ? ' · Switched unsettled shifts to new rate'
+          : ' · Existing shifts kept at assigned historical rate';
+      showNotice(
+        `✓ Updated staff profile for ${payload.name} (${formatStaffSalaryRate(payload)})${policyNote}.`
+      );
     } else {
       store.addStaff(payload);
       showNotice(`✓ Registered ${payload.name} on ${formatStaffSalaryTypeLabel(payload.salary_type)} plan (${formatStaffSalaryRate(payload)}).`);
     }
     setIsModalOpen(false);
     setEditingStaff(null);
+    setShiftRateUpdateMode('keep_existing');
     setFormData(resetStaffForm());
   };
 
@@ -1172,6 +1183,7 @@ export default function StaffPage() {
                             onClick={() => {
                               const stType = getStaffSalaryType(staff);
                               setEditingStaff(staff);
+                              setShiftRateUpdateMode('keep_existing');
                               setFormData({
                                 name: staff.name,
                                 phone: staff.phone || '',
@@ -1348,13 +1360,9 @@ export default function StaffPage() {
                 ) : (
                   allShiftRows.map(({ shift, staffMember, event, shiftCalc, isUpcoming }) => {
                     const att = shift.attendance_status || 'pending';
-                    const sType = getStaffSalaryType(staffMember);
-                    const estShiftPay =
-                      sType === 'per_event'
-                        ? Math.round(Number(staffMember?.event_rate ?? staffMember?.hourly_rate ?? 0))
-                        : sType === 'monthly'
-                        ? 0
-                        : Math.round((shiftCalc?.hours || 0) * (staffMember?.hourly_rate || 0));
+                    const eff = store.getShiftEffectiveRateInfo(shift, staffMember);
+                    const sType = eff.salaryType;
+                    const estShiftPay = eff.payrollShiftAmount;
 
                     return (
                       <tr key={shift.id}>
@@ -1374,8 +1382,48 @@ export default function StaffPage() {
                         <td>
                           <div style={{ fontWeight: 700, color: '#0f172a' }}>{staffMember!.name}</div>
                           <div style={{ fontSize: '0.75rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
-                            📱 {staffMember!.phone || '—'} · {formatStaffSalaryRate(staffMember)}
+                            📱 {staffMember!.phone || '—'} · Assigned: <strong>{eff.rateLabel}</strong>
                           </div>
+                          {eff.differsFromCurrentProfile && (
+                            <div style={{ marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                              <span
+                                style={{
+                                  fontSize: '0.68rem',
+                                  background: '#eff6ff',
+                                  color: '#1d4ed8',
+                                  border: '1px solid #bfdbfe',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  fontWeight: 700
+                                }}
+                              >
+                                Locked Rate (Current: {eff.currentProfileRateLabel})
+                              </span>
+                              {canEditStaff && event!.status !== 'completed' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    store.applyCurrentStaffRateToShift(shift.id);
+                                    showNotice(
+                                      `↻ Switched ${staffMember!.name}'s shift on ${event!.title} to ${eff.currentProfileRateLabel}.`
+                                    );
+                                  }}
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    background: '#ffffff',
+                                    color: '#0f172a',
+                                    border: '1px solid #cbd5e1',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  ↻ Switch to {eff.currentProfileRateLabel}
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td style={{ fontVariantNumeric: 'tabular-nums' }}>
                           <div style={{ fontWeight: 600, color: '#334155' }}>
@@ -1383,7 +1431,7 @@ export default function StaffPage() {
                           </div>
                           <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
                             {(shift.starts_at || '').slice(11, 16) || '—'} – {(shift.ends_at || '').slice(11, 16) || '—'} (
-                            {shiftCalc?.hours || 0} hrs)
+                            {shiftCalc?.hours ?? eff.hours} hrs)
                           </div>
                         </td>
                         <td
@@ -1400,7 +1448,7 @@ export default function StaffPage() {
                             <span>₹{estShiftPay.toLocaleString('en-IN')}</span>
                           )}
                           <div style={{ fontSize: '0.7rem', fontWeight: 600 }}>
-                            {att === 'present' ? 'Credited' : att === 'absent' ? 'Absent (₹0)' : 'Pending'}
+                            {att === 'present' ? 'Credited' : att === 'absent' ? 'Absent (₹0)' : `Rate: ${eff.rateLabel}`}
                           </div>
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -2143,29 +2191,54 @@ export default function StaffPage() {
                           <tr>
                             <th>Date</th>
                             <th>Event &amp; Venue</th>
-                            <th>Role &amp; Timing</th>
+                            <th>Role, Timing &amp; Assigned Rate</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {upcomingItems.map((si) => (
-                            <tr key={si.shift.id}>
-                              <td style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', fontWeight: 700 }}>
-                                {formatDisplayDate(si.event!.event_date)}
-                              </td>
-                              <td>
-                                <div style={{ fontWeight: 700, color: '#0f172a' }}>{si.event?.title}</div>
-                                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📍 {si.event?.venue || 'Venue TBD'}</div>
-                              </td>
-                              <td style={{ fontSize: '0.82rem', fontVariantNumeric: 'tabular-nums' }}>
-                                <div style={{ fontWeight: 600, color: '#6d28d9' }}>
-                                  {si.shift.role_label || statementStaff.role_title || 'Crew'}
-                                </div>
-                                <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
-                                  {(si.shift.starts_at || '').slice(11, 16) || '—'} – {(si.shift.ends_at || '').slice(11, 16) || '—'}
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                          {upcomingItems.map((si) => {
+                            const eff = store.getShiftEffectiveRateInfo(si.shift, statementStaff);
+                            return (
+                              <tr key={si.shift.id}>
+                                <td style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', fontWeight: 700 }}>
+                                  {formatDisplayDate(si.event!.event_date)}
+                                </td>
+                                <td>
+                                  <div style={{ fontWeight: 700, color: '#0f172a' }}>{si.event?.title}</div>
+                                  <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📍 {si.event?.venue || 'Venue TBD'}</div>
+                                </td>
+                                <td style={{ fontSize: '0.82rem', fontVariantNumeric: 'tabular-nums' }}>
+                                  <div style={{ fontWeight: 600, color: '#6d28d9' }}>
+                                    {si.shift.role_label || statementStaff.role_title || 'Crew'} · {eff.rateLabel}
+                                  </div>
+                                  <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                                    {(si.shift.starts_at || '').slice(11, 16) || '—'} – {(si.shift.ends_at || '').slice(11, 16) || '—'}
+                                  </div>
+                                  {eff.differsFromCurrentProfile && canEditStaff && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        store.applyCurrentStaffRateToShift(si.shift.id);
+                                        showNotice(`↻ Switched shift rate to ${eff.currentProfileRateLabel}.`);
+                                      }}
+                                      style={{
+                                        marginTop: '0.25rem',
+                                        fontSize: '0.7rem',
+                                        background: '#eff6ff',
+                                        color: '#1d4ed8',
+                                        border: '1px solid #bfdbfe',
+                                        padding: '2px 7px',
+                                        borderRadius: '4px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      ↻ Switch to {eff.currentProfileRateLabel}
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2186,39 +2259,43 @@ export default function StaffPage() {
                           <tr>
                             <th>Date</th>
                             <th>Event &amp; Venue</th>
-                            <th>Hours</th>
+                            <th>Hours &amp; Assigned Rate</th>
                             <th style={{ textAlign: 'right' }}>Earned (₹)</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {attendedItems.map((si) => (
-                            <tr key={si.shift.id}>
-                              <td style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', fontWeight: 700 }}>
-                                {formatDisplayDate(si.event?.event_date || '')}
-                              </td>
-                              <td>
-                                <div style={{ fontWeight: 700, color: '#0f172a' }}>{si.event?.title || 'Event'}</div>
-                                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📍 {si.event?.venue || '—'}</div>
-                              </td>
-                              <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
-                                {si.hours} hrs
-                              </td>
-                              <td
-                                style={{
-                                  textAlign: 'right',
-                                  fontWeight: 700,
-                                  fontVariantNumeric: 'tabular-nums',
-                                  color: si.isAttended ? '#059669' : '#64748b'
-                                }}
-                              >
-                                {si.isAttended
-                                  ? summary.salaryType === 'monthly'
-                                    ? 'Monthly Fixed'
-                                    : `₹${si.earnedAmount.toLocaleString('en-IN')}`
-                                  : 'Pending Attendance'}
-                              </td>
-                            </tr>
-                          ))}
+                          {attendedItems.map((si) => {
+                            const eff = store.getShiftEffectiveRateInfo(si.shift, statementStaff);
+                            return (
+                              <tr key={si.shift.id}>
+                                <td style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', fontWeight: 700 }}>
+                                  {formatDisplayDate(si.event?.event_date || '')}
+                                </td>
+                                <td>
+                                  <div style={{ fontWeight: 700, color: '#0f172a' }}>{si.event?.title || 'Event'}</div>
+                                  <div style={{ fontSize: '0.75rem', color: '#64748b' }}>📍 {si.event?.venue || '—'}</div>
+                                </td>
+                                <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+                                  <div>{si.hours} hrs</div>
+                                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Rate: {eff.rateLabel}</div>
+                                </td>
+                                <td
+                                  style={{
+                                    textAlign: 'right',
+                                    fontWeight: 700,
+                                    fontVariantNumeric: 'tabular-nums',
+                                    color: si.isAttended ? '#059669' : '#64748b'
+                                  }}
+                                >
+                                  {si.isAttended
+                                    ? eff.salaryType === 'monthly'
+                                      ? 'Monthly Fixed'
+                                      : `₹${si.earnedAmount.toLocaleString('en-IN')}`
+                                    : 'Pending Attendance'}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -3077,6 +3154,95 @@ export default function StaffPage() {
                   </div>
                 </div>
               )}
+
+              {editingStaff && (() => {
+                const prevType = getStaffSalaryType(editingStaff);
+                const prevHourly = Number(editingStaff.hourly_rate || 0);
+                const prevEventRate = Number(editingStaff.event_rate ?? editingStaff.hourly_rate ?? 0);
+                const prevMonthly = Number(editingStaff.monthly_salary ?? editingStaff.hourly_rate ?? 0);
+                const rateChanged =
+                  formData.salary_type !== prevType ||
+                  (formData.salary_type === 'hourly' && Number(formData.hourly_rate) !== prevHourly) ||
+                  (formData.salary_type === 'per_event' && Number(formData.event_rate) !== prevEventRate) ||
+                  (formData.salary_type === 'monthly' && Number(formData.monthly_salary) !== prevMonthly);
+                const existingShiftsCount = state.shifts.filter(
+                  (sh) => sh.staff_member_id === editingStaff.id
+                ).length;
+
+                if (!rateChanged) return null;
+
+                return (
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '8px',
+                      padding: '0.75rem 0.85rem',
+                      marginBottom: '0.9rem'
+                    }}
+                  >
+                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#0f172a', marginBottom: '0.2rem' }}>
+                      Existing Event Shifts Rate Policy ({existingShiftsCount} Assigned Shift{existingShiftsCount === 1 ? '' : 's'})
+                    </div>
+                    <div style={{ fontSize: '0.74rem', color: '#475569', marginBottom: '0.55rem', lineHeight: 1.45 }}>
+                      Previous rate was <strong>{formatStaffSalaryRate(editingStaff)}</strong>. Choose how existing assigned
+                      event shifts should handle this new pricing:
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                      {[
+                        {
+                          id: 'keep_existing' as ShiftRateUpdateMode,
+                          title: 'Keep existing assigned shifts at their original rate (Recommended)',
+                          sub: 'Applies new rate only to shifts assigned from now on; past & current quotes remain unchanged.'
+                        },
+                        {
+                          id: 'update_upcoming' as ShiftRateUpdateMode,
+                          title: 'Switch upcoming (uncompleted) event shifts to this new rate',
+                          sub: 'Updates scheduled upcoming shifts & recalculates their quotation Labour Charges; completed events stay locked.'
+                        },
+                        {
+                          id: 'update_all_unsettled' as ShiftRateUpdateMode,
+                          title: 'Switch all non-settled shifts to this new rate',
+                          sub: 'Updates shifts on events without a settled/final invoice.'
+                        }
+                      ].map((opt) => {
+                        const selected = shiftRateUpdateMode === opt.id;
+                        return (
+                          <label
+                            key={opt.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '0.5rem',
+                              padding: '0.45rem 0.6rem',
+                              borderRadius: '6px',
+                              border: `1px solid ${selected ? '#2563eb' : '#e2e8f0'}`,
+                              background: selected ? '#eff6ff' : '#ffffff',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <input
+                              type="radio"
+                              name="shiftRateUpdateMode"
+                              checked={selected}
+                              onChange={() => setShiftRateUpdateMode(opt.id)}
+                              style={{ marginTop: '0.2rem' }}
+                            />
+                            <div>
+                              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#0f172a' }}>
+                                {opt.title}
+                              </div>
+                              <div style={{ fontSize: '0.71rem', color: '#64748b', lineHeight: 1.4 }}>
+                                {opt.sub}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <input

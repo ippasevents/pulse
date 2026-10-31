@@ -542,6 +542,30 @@ export default function MenuPage() {
                   }
                   required
                 />
+                {editingItem &&
+                  Number(formData.price_per_unit) !==
+                    Number(editingItem.price_per_unit ?? editingItem.price_per_guest ?? 0) && (
+                    <div
+                      style={{
+                        marginTop: '0.45rem',
+                        background: '#eff6ff',
+                        border: '1px solid #bfdbfe',
+                        borderRadius: '8px',
+                        padding: '0.55rem 0.75rem',
+                        fontSize: '0.77rem',
+                        color: '#1e3a8a',
+                        lineHeight: 1.45
+                      }}
+                    >
+                      <strong>Historical Rate Lock Active:</strong> New rate{' '}
+                      <strong>₹{formData.price_per_unit}</strong> applies only to newly created or newly added quotation
+                      items going forward. Previous events, quotations, and invoices remain locked at{' '}
+                      <strong>
+                        ₹{Number(editingItem.price_per_unit ?? editingItem.price_per_guest ?? 0)}
+                      </strong>
+                      .
+                    </div>
+                  )}
               </div>
 
               <div className="form-group">

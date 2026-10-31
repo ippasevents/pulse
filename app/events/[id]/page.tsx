@@ -3,7 +3,14 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { store, StockEstimationItem, EVENT_EXPENSE_CATEGORY_LABELS } from '@/lib/store';
+import {
+  store,
+  StockEstimationItem,
+  EVENT_EXPENSE_CATEGORY_LABELS,
+  isAutoLabourChargeExtra,
+  formatStaffSalaryRate
+} from '@/lib/store';
+import { resolveQuotationExtrasWithMandatoryLabour } from '@/lib/quotationPdfGenerator';
 import {
   EventRecord,
   EventStatus,
@@ -265,16 +272,30 @@ export default function EventDetailPage() {
   const eventItems = state.eventItems.filter((ei) => ei.event_id === event.id);
   const selectedMenuItemIds = new Set(eventItems.map((ei) => ei.menu_item_id));
 
-  // Event extras
+  // Event extras & Mandatory Quotation Labour Charges
   const extras = state.eventExtras.filter((x) => x.event_id === event.id);
+  const {
+    displayExtras: quoteDisplayExtras,
+    menuTotal: quoteMenuTotal,
+    extrasTotal: quoteExtrasTotal,
+    grandTotal: quoteGrandTotal
+  } = resolveQuotationExtrasWithMandatoryLabour(event, state);
+  const labourSummary = store.getEventAssignedLabourSummary(event.id);
 
   // Shifts for this event
   const shifts = state.shifts.filter((s) => s.event_id === event.id);
+  const shiftsWithNewerProfileRateCount = shifts.filter((sh) => {
+    const st = state.staff.find((m) => m.id === sh.staff_member_id);
+    return store.getShiftEffectiveRateInfo(sh, st).differsFromCurrentProfile;
+  }).length;
 
   // Invoices & Distinct Quotation Number for this event
   const quoteNumber = store.getQuotationNumber(event);
   const invoices = state.invoices.filter((i) => i.event_id === event.id);
   const masterInvoice = invoices.find((i) => i.status !== 'void') || invoices[0] || null;
+  const hasFinalOrPaidInvoice = invoices.some(
+    (inv) => inv.status === 'paid' || inv.kind === 'final'
+  );
 
   // Total Invoiced & Payments across this event
   const totalInvoicedForEvent = invoices.reduce((s, inv) => s + inv.amount, 0);
@@ -286,17 +307,15 @@ export default function EventDetailPage() {
   // Automatic Stock Estimation for this event
   const stockEst = store.getEventStockEstimation(event.id);
 
-  // Confirmed Staff Pay — strictly counted ONLY for staff marked 'present'
+  // Confirmed Staff Pay — strictly counted ONLY for staff marked 'present' using locked shift rates
   let attendedStaffCost = 0;
   let attendedStaffCount = 0;
   shifts.forEach((sh) => {
     if (sh.attendance_status === 'present' && event.status !== 'cancelled') {
       attendedStaffCount += 1;
       const staffMember = state.staff.find((st) => st.id === sh.staff_member_id);
-      if (staffMember) {
-        const hrs = store.calculateShiftHours(sh.starts_at, sh.ends_at);
-        attendedStaffCost += Math.round(hrs * Number(staffMember.hourly_rate || 0));
-      }
+      const eff = store.getShiftEffectiveRateInfo(sh, staffMember);
+      attendedStaffCost += eff.payrollShiftAmount;
     }
   });
 
@@ -1231,8 +1250,14 @@ export default function EventDetailPage() {
                     <tbody>
                       {eventItems.map((item) => {
                         const dish = state.menuItems.find((m) => m.id === item.menu_item_id);
+                        const dishName = item.dish_name || dish?.name || 'Custom Item';
+                        const dishCategory = item.dish_category || dish?.category || '';
                         const isKg = item.pricing_type === 'per_kg';
                         const rate = item.price_per_unit || item.price_per_guest || 0;
+                        const currentCatalogRate = dish
+                          ? Number(dish.price_per_unit ?? dish.price_per_guest ?? 0)
+                          : rate;
+                        const isHistoricalRateLocked = Boolean(dish && currentCatalogRate !== rate);
                         const qty = isKg
                           ? (item.quantity !== undefined ? item.quantity : 1)
                           : (item.quantity !== undefined ? item.quantity : event.guest_count);
@@ -1241,10 +1266,27 @@ export default function EventDetailPage() {
                         return (
                           <tr key={item.id}>
                             <td>
-                              <div style={{ fontWeight: 600 }}>{dish?.name || 'Custom Item'}</div>
+                              <div style={{ fontWeight: 600 }}>{dishName}</div>
                               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                {dish?.category}
+                                {dishCategory}
                               </div>
+                              {isHistoricalRateLocked && (
+                                <span
+                                  style={{
+                                    display: 'inline-block',
+                                    marginTop: '0.2rem',
+                                    fontSize: '0.68rem',
+                                    background: '#eff6ff',
+                                    color: '#1d4ed8',
+                                    border: '1px solid #bfdbfe',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    fontWeight: 700
+                                  }}
+                                >
+                                  Locked Quote Rate (Catalog: ₹{currentCatalogRate})
+                                </span>
+                              )}
                               {role === 'owner' && (
                                 <OwnerAuditBadge
                                   role={role}
@@ -1307,38 +1349,79 @@ export default function EventDetailPage() {
                 </div>
               )}
 
-              {/* Logistics, Transport & Extra Charges */}
+              {/* Mandatory Labour Charges + Logistics, Transport & Extra Charges */}
               <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.5rem' }}>
-                  <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0 }}>
-                    🚚 Logistics, Transport &amp; Extra Charges
-                  </h3>
-                  {extras.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.55rem' }}>
+                  <div>
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0 }}>
+                      👷 Labour Charges, Logistics &amp; Extra Services
+                    </h3>
+                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.12rem' }}>
+                      <strong>Labour Charges</strong> are mandatorily included in every quotation from assigned event staff salaries ({labourSummary.staffCount} crew assigned).
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                    {canEditOps && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ fontSize: '0.74rem', padding: '0.22rem 0.55rem', fontWeight: 700 }}
+                        onClick={() => setActiveTab('shifts')}
+                      >
+                        👷 Manage Crew ({shifts.length})
+                      </button>
+                    )}
+                    {canEditQuote && event.status !== 'completed' && !hasFinalOrPaidInvoice && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ fontSize: '0.74rem', padding: '0.22rem 0.55rem', fontWeight: 700 }}
+                        onClick={() => {
+                          store.syncEventQuotationLabourCharges(event.id, { force: true });
+                          setStatusBanner({
+                            type: 'success',
+                            message: `✓ Synced Quotation Labour Charges (₹${labourSummary.totalLabourAmount.toLocaleString('en-IN')}) from ${labourSummary.staffCount} assigned staff shift(s).`
+                          });
+                        }}
+                      >
+                        ↻ Sync Labour Charges
+                      </button>
+                    )}
                     <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary)' }}>
-                      Extras Subtotal: ₹{extrasTotal.toLocaleString('en-IN')}
+                      Labour &amp; Extras Subtotal: ₹{quoteExtrasTotal.toLocaleString('en-IN')}
                     </span>
-                  )}
+                  </div>
                 </div>
-                {extras.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                    No logistics, transport, or extra charges added yet. Use quick presets or type below:
-                  </p>
-                ) : (
-                  <div className="data-table-container">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Logistics / Transport / Extra Description</th>
-                          <th style={{ textAlign: 'right' }}>Amount</th>
-                          {canEditQuote && <th style={{ textAlign: 'center' }}>Remove</th>}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {extras.map((ex) => (
-                          <tr key={ex.id}>
+
+                <div className="data-table-container">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Labour / Logistics / Extra Description</th>
+                        <th style={{ textAlign: 'right' }}>Amount</th>
+                        {canEditQuote && <th style={{ textAlign: 'center' }}>Action</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {quoteDisplayExtras.map((ex) => {
+                        const isMandatoryLabour = isAutoLabourChargeExtra(ex.description);
+                        return (
+                          <tr
+                            key={ex.id}
+                            style={{
+                              background: isMandatoryLabour ? '#f8fafc' : undefined
+                            }}
+                          >
                             <td>
-                              <div style={{ fontWeight: 500 }}>{ex.description}</div>
-                              {role === 'owner' && (
+                              <div style={{ fontWeight: isMandatoryLabour ? 700 : 500, color: '#0f172a' }}>
+                                {ex.description}
+                              </div>
+                              {isMandatoryLabour && (
+                                <div style={{ fontSize: '0.72rem', color: '#475569' }}>
+                                  Mandatory Quotation Item · Auto-calculated from assigned event crew salaries
+                                </div>
+                              )}
+                              {role === 'owner' && !ex.id.startsWith('auto-labour-') && (
                                 <OwnerAuditBadge
                                   role={role}
                                   entry={store.getEntityAudit(ex.id, ['quotation'])}
@@ -1346,25 +1429,42 @@ export default function EventDetailPage() {
                                 />
                               )}
                             </td>
-                            <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                            <td style={{ textAlign: 'right', fontWeight: 700 }}>
                               ₹{ex.amount.toLocaleString('en-IN')}
                             </td>
                             {canEditQuote && (
                               <td style={{ textAlign: 'center' }}>
-                                <button
-                                  className="btn btn-danger btn-sm"
-                                  onClick={() => store.removeEventExtra(ex.id)}
-                                >
-                                  ✕
-                                </button>
+                                {isMandatoryLabour ? (
+                                  <span
+                                    style={{
+                                      fontSize: '0.7rem',
+                                      fontWeight: 700,
+                                      color: '#1d4ed8',
+                                      background: '#eff6ff',
+                                      border: '1px solid #bfdbfe',
+                                      padding: '2px 7px',
+                                      borderRadius: '4px',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                  >
+                                    Auto (Crew)
+                                  </span>
+                                ) : (
+                                  <button
+                                    className="btn btn-danger btn-sm"
+                                    onClick={() => store.removeEventExtra(ex.id)}
+                                  >
+                                    ✕
+                                  </button>
+                                )}
                               </td>
                             )}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
 
                 {/* Quick Presets + Add Extra Charge Form */}
                 {canEditQuote && (
@@ -1804,13 +1904,35 @@ export default function EventDetailPage() {
               <div>
                 <h2 className="card-title" style={{ margin: 0 }}>Event Staff Attendance Register</h2>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                  Shift pay is displayed &amp; counted ONLY when staff is marked <strong>Present</strong>.
+                  Assigned staff rates are locked per shift &amp; automatically populate Quotation{' '}
+                  <strong>Labour Charges (₹{labourSummary.totalLabourAmount.toLocaleString('en-IN')})</strong>.
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#059669' }}>
                   Attended Pay ({attendedStaffCount}/{shifts.length}): ₹{attendedStaffCost.toLocaleString('en-IN')}
                 </div>
+                {canEditOps && shiftsWithNewerProfileRateCount > 0 && event.status !== 'completed' && !hasFinalOrPaidInvoice && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{
+                      fontWeight: 700,
+                      background: '#eff6ff',
+                      color: '#1d4ed8',
+                      borderColor: '#bfdbfe'
+                    }}
+                    onClick={() => {
+                      const updatedCount = store.applyCurrentStaffRateToEventShifts(event.id);
+                      setStatusBanner({
+                        type: 'success',
+                        message: `↻ Switched ${updatedCount} shift(s) on this event to current staff profile pricing and updated Quotation Labour Charges.`
+                      });
+                    }}
+                  >
+                    ↻ Switch {shiftsWithNewerProfileRateCount} Shift{shiftsWithNewerProfileRateCount === 1 ? '' : 's'} to New Staff Pricing
+                  </button>
+                )}
                 {(canEditOps || isFinance) && shifts.length > 0 && (
                   <>
                     <button
@@ -1848,39 +1970,81 @@ export default function EventDetailPage() {
 
             {shifts.length === 0 ? (
               <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                No staff shifts assigned yet. Add shifts using the form on the right.
+                No staff shifts assigned yet. Add shifts using the form on the right to calculate Quotation Labour Charges automatically.
               </p>
             ) : (
               <div className="data-table-container">
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Staff Member</th>
+                      <th>Staff Member &amp; Assigned Rate</th>
                       <th>Role &amp; Times</th>
                       <th style={{ textAlign: 'center' }}>WhatsApp Duty Alert</th>
                       <th style={{ textAlign: 'center' }}>Attendance</th>
-                      <th style={{ textAlign: 'right' }}>Shift Pay</th>
+                      <th style={{ textAlign: 'right' }}>Shift / Quote Pay</th>
                       {canEditOps && <th style={{ textAlign: 'center' }}>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {shifts.map((sh) => {
                       const staffMember = state.staff.find((st) => st.id === sh.staff_member_id);
-                      const hrs = store.calculateShiftHours(sh.starts_at, sh.ends_at);
+                      const eff = store.getShiftEffectiveRateInfo(sh, staffMember);
+                      const hrs = eff.hours;
                       const attStatus: ShiftAttendanceStatus =
                         sh.attendance_status === 'present' || sh.attendance_status === 'absent'
                           ? sh.attendance_status
                           : 'pending';
                       const isPresent = attStatus === 'present' && event.status !== 'cancelled';
-                      const earnedWage = isPresent ? Math.round(hrs * Number(staffMember?.hourly_rate || 0)) : 0;
+                      const earnedWage = isPresent ? eff.payrollShiftAmount : 0;
 
                       return (
                         <tr key={sh.id}>
                           <td>
                             <div style={{ fontWeight: 600 }}>{staffMember?.name || 'Unknown'}</div>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                              {staffMember?.phone}
+                              {staffMember?.phone} · Assigned: <strong>{eff.rateLabel}</strong>
                             </div>
+                            {eff.differsFromCurrentProfile && (
+                              <div style={{ marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+                                <span
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    background: '#eff6ff',
+                                    color: '#1d4ed8',
+                                    border: '1px solid #bfdbfe',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    fontWeight: 700
+                                  }}
+                                >
+                                  Locked (Profile: {eff.currentProfileRateLabel})
+                                </span>
+                                {canEditOps && event.status !== 'completed' && !hasFinalOrPaidInvoice && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      store.applyCurrentStaffRateToShift(sh.id);
+                                      setStatusBanner({
+                                        type: 'success',
+                                        message: `↻ Switched ${staffMember?.name || 'Staff'} shift to ${eff.currentProfileRateLabel} and synced Quotation Labour Charges.`
+                                      });
+                                    }}
+                                    style={{
+                                      fontSize: '0.68rem',
+                                      background: '#ffffff',
+                                      color: '#0f172a',
+                                      border: '1px solid #cbd5e1',
+                                      padding: '1px 6px',
+                                      borderRadius: '4px',
+                                      fontWeight: 700,
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    ↻ Use {eff.currentProfileRateLabel}
+                                  </button>
+                                )}
+                              </div>
+                            )}
                             {(role === 'owner' || role === 'super_admin') && (
                               <OwnerAuditBadge
                                 role={role}
@@ -1981,10 +2145,17 @@ export default function EventDetailPage() {
                           <td style={{ textAlign: 'right' }}>
                             {isPresent ? (
                               <span style={{ fontWeight: 800, color: '#059669' }}>
-                                ₹{earnedWage.toLocaleString('en-IN')}
+                                {eff.salaryType === 'monthly'
+                                  ? 'Monthly Fixed'
+                                  : `₹${earnedWage.toLocaleString('en-IN')}`}
                               </span>
                             ) : (
                               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>
+                            )}
+                            {attStatus !== 'absent' && (
+                              <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                                Quote: ₹{eff.quotationLabourAllocation.toLocaleString('en-IN')}
+                              </div>
                             )}
                           </td>
                           {canEditOps && (
@@ -2029,7 +2200,7 @@ export default function EventDetailPage() {
                     <option value="">Choose staff...</option>
                     {state.staff.map((st) => (
                       <option key={st.id} value={st.id}>
-                        {st.name} ({st.role_title} - ₹{st.hourly_rate}/hr)
+                        {st.name} ({st.role_title} - {formatStaffSalaryRate(st)})
                       </option>
                     ))}
                   </select>
@@ -3532,6 +3703,8 @@ export default function EventDetailPage() {
                   <tbody>
                     {eventItems.map((item) => {
                       const dish = state.menuItems.find((m) => m.id === item.menu_item_id);
+                      const dishName = item.dish_name || dish?.name || 'Menu Dish';
+                      const dishCategory = item.dish_category || dish?.category || '';
                       const isKg = item.pricing_type === 'per_kg';
                       const rate = item.price_per_unit || item.price_per_guest || 0;
                       const qty = isKg
@@ -3542,8 +3715,8 @@ export default function EventDetailPage() {
                       return (
                         <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                           <td style={{ padding: '8px 10px' }}>
-                            <div style={{ fontWeight: 600 }}>{dish?.name || 'Menu Dish'}</div>
-                            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{dish?.category}</div>
+                            <div style={{ fontWeight: 600 }}>{dishName}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{dishCategory}</div>
                           </td>
                           <td style={{ textAlign: 'center', padding: '8px 10px', fontSize: '0.75rem' }}>
                             {isKg ? 'Per Kg' : 'Per Guest'}
@@ -3561,38 +3734,52 @@ export default function EventDetailPage() {
                       );
                     })}
 
-                    {extras.map((ex) => (
-                      <tr key={ex.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '8px 10px' }} colSpan={2}>
-                          <div style={{ fontWeight: 600 }}>{ex.description}</div>
-                          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Logistics, Transport &amp; Extra Charges</div>
-                        </td>
-                        <td style={{ textAlign: 'center', padding: '8px 10px' }}>1 Lot</td>
-                        <td style={{ textAlign: 'right', padding: '8px 10px' }}>₹{ex.amount.toLocaleString('en-IN')}</td>
-                        <td style={{ textAlign: 'right', padding: '8px 10px', fontWeight: 700 }}>
-                          ₹{ex.amount.toLocaleString('en-IN')}
-                        </td>
-                      </tr>
-                    ))}
+                    {quoteDisplayExtras.map((ex) => {
+                      const isLabour = isAutoLabourChargeExtra(ex.description);
+                      return (
+                        <tr
+                          key={ex.id}
+                          style={{
+                            borderBottom: '1px solid #e2e8f0',
+                            background: isLabour ? '#f8fafc' : 'transparent'
+                          }}
+                        >
+                          <td style={{ padding: '8px 10px' }}>
+                            <div style={{ fontWeight: isLabour ? 700 : 600 }}>{ex.description}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                              {isLabour
+                                ? 'Assigned Event Crew & Service Staff Charges'
+                                : 'Logistics, Transport & Extra Charges'}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'center', padding: '8px 10px', fontSize: '0.75rem' }}>
+                            {isLabour ? 'Labour Charges' : 'Logistics / Extra'}
+                          </td>
+                          <td style={{ textAlign: 'center', padding: '8px 10px' }}>1 Lot</td>
+                          <td style={{ textAlign: 'right', padding: '8px 10px' }}>₹{ex.amount.toLocaleString('en-IN')}</td>
+                          <td style={{ textAlign: 'right', padding: '8px 10px', fontWeight: 700 }}>
+                            ₹{ex.amount.toLocaleString('en-IN')}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
 
                 {/* Subtotal & Grand Total */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-                  <div style={{ width: '280px', fontSize: '0.85rem' }}>
+                  <div style={{ width: '300px', fontSize: '0.85rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
                       <span>Food &amp; Beverage Total:</span>
-                      <strong>₹{menuTotal.toLocaleString('en-IN')}</strong>
+                      <strong>₹{quoteMenuTotal.toLocaleString('en-IN')}</strong>
                     </div>
-                    {extras.length > 0 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
-                        <span>Logistics, Transport &amp; Extras:</span>
-                        <strong>₹{extrasTotal.toLocaleString('en-IN')}</strong>
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
+                      <span>Labour, Logistics &amp; Extras:</span>
+                      <strong>₹{quoteExtrasTotal.toLocaleString('en-IN')}</strong>
+                    </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid #0f172a', paddingTop: '6px', marginTop: '6px', fontSize: '1.1rem', fontWeight: 800 }}>
                       <span>Total Estimate:</span>
-                      <span style={{ color: 'var(--primary)' }}>₹{displayTotal.toLocaleString('en-IN')}</span>
+                      <span style={{ color: 'var(--primary)' }}>₹{quoteGrandTotal.toLocaleString('en-IN')}</span>
                     </div>
                   </div>
                 </div>
@@ -3995,7 +4182,29 @@ export default function EventDetailPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {eventItems.length === 0 && extras.length === 0 ? (
+                      {Array.isArray(liveInv.locked_items_snapshot) && liveInv.locked_items_snapshot.length > 0 ? (
+                        liveInv.locked_items_snapshot.map((snap) => (
+                          <tr
+                            key={snap.id}
+                            style={{
+                              borderBottom: '1px solid #e2e8f0',
+                              background: snap.is_extra ? '#fcfcfd' : 'transparent'
+                            }}
+                          >
+                            <td style={{ padding: '8px 10px' }}>
+                              <div style={{ fontWeight: 600 }}>{snap.description}</div>
+                              {snap.category && (
+                                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{snap.category}</div>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'center', padding: '8px 10px' }}>{snap.qty_label}</td>
+                            <td style={{ textAlign: 'right', padding: '8px 10px' }}>{snap.rate_label}</td>
+                            <td style={{ textAlign: 'right', padding: '8px 10px', fontWeight: 700 }}>
+                              ₹{Number(snap.line_total || 0).toLocaleString('en-IN')}
+                            </td>
+                          </tr>
+                        ))
+                      ) : eventItems.length === 0 && extras.length === 0 ? (
                         <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
                           <td style={{ padding: '10px 10px' }}>
                             <div style={{ fontWeight: 700 }}>
@@ -4015,6 +4224,8 @@ export default function EventDetailPage() {
                         <>
                           {eventItems.map((item) => {
                             const dish = state.menuItems.find((m) => m.id === item.menu_item_id);
+                            const dishName = item.dish_name || dish?.name || 'Menu Dish';
+                            const dishCategory = item.dish_category || dish?.category || '';
                             const isKg = item.pricing_type === 'per_kg';
                             const rate = item.price_per_unit || item.price_per_guest || 0;
                             const qty = isKg
@@ -4024,8 +4235,8 @@ export default function EventDetailPage() {
                             return (
                               <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                                 <td style={{ padding: '8px 10px' }}>
-                                  <div style={{ fontWeight: 600 }}>{dish?.name || 'Menu Dish'}</div>
-                                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{dish?.category}</div>
+                                  <div style={{ fontWeight: 600 }}>{dishName}</div>
+                                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{dishCategory}</div>
                                 </td>
                                 <td style={{ textAlign: 'center', padding: '8px 10px' }}>
                                   {qty} {isKg ? 'kg' : 'pax'}
@@ -4043,7 +4254,7 @@ export default function EventDetailPage() {
                             <tr key={ex.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                               <td style={{ padding: '8px 10px' }}>
                                 <div style={{ fontWeight: 600 }}>{ex.description}</div>
-                                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Logistics, Transport &amp; Extra Charges</div>
+                                <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Service, Labour &amp; Extra Charges</div>
                               </td>
                               <td style={{ textAlign: 'center', padding: '8px 10px' }}>1 Lot</td>
                               <td style={{ textAlign: 'right', padding: '8px 10px' }}>₹{ex.amount.toLocaleString('en-IN')}</td>

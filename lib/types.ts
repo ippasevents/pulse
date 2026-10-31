@@ -4,6 +4,7 @@ export type InvoiceStatus = 'draft' | 'sent' | 'partially_paid' | 'paid' | 'void
 export type PricingType = 'per_guest' | 'per_kg';
 export type StaffSalaryType = 'hourly' | 'per_event' | 'monthly';
 export type StaffSalaryRecordType = 'payment' | 'advance' | 'earning';
+export type ShiftRateUpdateMode = 'keep_existing' | 'update_upcoming' | 'update_all_unsettled';
 
 export interface Profile {
   id: string;
@@ -42,6 +43,7 @@ export interface EventRecord {
   show_bank_details?: boolean;
   show_payment_details?: boolean;
   stock_deducted?: boolean;
+  locked_ingredient_costs?: Record<string, number>;
   created_at: string;
 }
 
@@ -118,6 +120,8 @@ export interface EventItem {
   price_per_unit: number;
   quantity?: number;
   price_per_guest: number;
+  dish_name?: string;
+  dish_category?: string;
 }
 
 export interface EventExtra {
@@ -125,6 +129,14 @@ export interface EventExtra {
   event_id: string;
   description: string;
   amount: number;
+}
+
+export interface StaffSalaryRatePeriod {
+  salary_type: StaffSalaryType;
+  hourly_rate: number;
+  event_rate: number;
+  monthly_salary: number;
+  effective_from: string;
 }
 
 export interface StaffMember {
@@ -138,6 +150,7 @@ export interface StaffMember {
   event_rate?: number;
   monthly_salary?: number;
   salary_start_date?: string;
+  salary_history?: StaffSalaryRatePeriod[];
   active: boolean;
 }
 
@@ -155,6 +168,11 @@ export interface Shift {
   whatsapp_notified_at?: string;
   attendance_status?: ShiftAttendanceStatus;
   attendance_marked_at?: string;
+  locked_salary_type?: StaffSalaryType;
+  locked_hourly_rate?: number;
+  locked_event_rate?: number;
+  locked_monthly_salary?: number;
+  rate_locked_at?: string;
 }
 
 export interface StaffSalaryRecord {
@@ -166,6 +184,17 @@ export interface StaffSalaryRecord {
   recorded_at: string;
   method: string;
   note?: string;
+}
+
+export interface InvoiceLineSnapshot {
+  id: string;
+  description: string;
+  category?: string;
+  pricing_type?: PricingType | 'extra';
+  qty_label: string;
+  rate_label: string;
+  line_total: number;
+  is_extra?: boolean;
 }
 
 export interface Invoice {
@@ -182,6 +211,7 @@ export interface Invoice {
   status: InvoiceStatus;
   show_bank_details?: boolean;
   show_payment_details?: boolean;
+  locked_items_snapshot?: InvoiceLineSnapshot[];
   created_at: string;
   notes?: string;
 }

@@ -764,10 +764,38 @@ export default function InvoicesPage() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {evtItems.length > 0 || evtExtras.length > 0 ? (
+                                {Array.isArray(inv.locked_items_snapshot) && inv.locked_items_snapshot.length > 0 ? (
+                                  inv.locked_items_snapshot.map((snap) => (
+                                    <tr
+                                      key={snap.id}
+                                      style={{
+                                        borderBottom: '1px solid #e2e8f0',
+                                        background: snap.is_extra ? '#fcfcfd' : '#ffffff'
+                                      }}
+                                    >
+                                      <td style={{ padding: '0.55rem 0.5rem' }}>
+                                        <div style={{ fontWeight: 600, color: '#0f172a' }}>{snap.description}</div>
+                                        {snap.category && (
+                                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{snap.category}</div>
+                                        )}
+                                      </td>
+                                      <td style={{ textAlign: 'center', padding: '0.55rem 0.5rem', color: '#334155' }}>
+                                        {snap.qty_label}
+                                      </td>
+                                      <td style={{ textAlign: 'right', padding: '0.55rem 0.5rem', color: '#334155' }}>
+                                        {snap.rate_label}
+                                      </td>
+                                      <td style={{ textAlign: 'right', padding: '0.55rem 0.5rem', fontWeight: 600, color: '#0f172a' }}>
+                                        ₹{Number(snap.line_total || 0).toLocaleString('en-IN')}
+                                      </td>
+                                    </tr>
+                                  ))
+                                ) : evtItems.length > 0 || evtExtras.length > 0 ? (
                                   <>
                                     {evtItems.map((item) => {
                                       const mi = state.menuItems.find((m) => m.id === item.menu_item_id);
+                                      const dishName = item.dish_name || mi?.name || 'Menu Item';
+                                      const dishCategory = item.dish_category || mi?.category || '';
                                       const isPerKg = item.pricing_type === 'per_kg';
                                       const qty = item.quantity !== undefined ? item.quantity : (isPerKg ? 1 : (evt?.guest_count || 1));
                                       const rate = item.price_per_unit || item.price_per_guest || 0;
@@ -776,8 +804,8 @@ export default function InvoicesPage() {
                                       return (
                                         <tr key={item.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                                           <td style={{ padding: '0.55rem 0.5rem' }}>
-                                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{mi?.name || 'Menu Item'}</div>
-                                            {mi?.category && <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{mi.category}</div>}
+                                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{dishName}</div>
+                                            {dishCategory && <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{dishCategory}</div>}
                                           </td>
                                           <td style={{ textAlign: 'center', padding: '0.55rem 0.5rem', color: '#334155' }}>
                                             {qty} {isPerKg ? 'Kg' : 'Pax'}
@@ -795,7 +823,7 @@ export default function InvoicesPage() {
                                       <tr key={ex.id} style={{ borderBottom: '1px solid #e2e8f0', background: '#fcfcfd' }}>
                                         <td style={{ padding: '0.55rem 0.5rem' }}>
                                           <div style={{ fontWeight: 600, color: '#0f172a' }}>{ex.description}</div>
-                                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Logistics, Transport &amp; Additional Charges</div>
+                                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Service, Labour &amp; Additional Charges</div>
                                         </td>
                                         <td style={{ textAlign: 'center', padding: '0.55rem 0.5rem', color: '#334155' }}>
                                           1 Lot

@@ -21,11 +21,14 @@ import {
   EventExpenseCategory,
   StaffMember,
   StaffSalaryType,
+  StaffSalaryRatePeriod,
+  ShiftRateUpdateMode,
   Shift,
   ShiftAttendanceStatus,
   StaffSalaryRecord,
   StaffSalaryRecordType,
   Invoice,
+  InvoiceLineSnapshot,
   Payment,
   PaymentChannel,
   BusinessSettings,
@@ -77,9 +80,15 @@ export const EVENT_EXPENSE_CATEGORY_LABELS: Record<
 };
 
 const STAFF_SALARY_STRUCTURES_CACHE_KEY = 'ippas_staff_salary_structures_v1';
+const HISTORICAL_PRICING_LOCKS_CACHE_KEY = 'ippas_historical_pricing_locks_v1';
 const LAST_BACKUP_STORAGE_KEY = 'ippas_last_backup_downloaded_at';
 export const BACKUP_REMINDER_INTERVAL_DAYS = 15;
 const BACKUP_REMINDER_INTERVAL_MS = BACKUP_REMINDER_INTERVAL_DAYS * 24 * 60 * 60 * 1000;
+
+export function isAutoLabourChargeExtra(description?: string | null): boolean {
+  if (!description) return false;
+  return /^labour\s+charges\b/i.test(description.trim());
+}
 
 export function getStaffSalaryType(staff?: Partial<StaffMember> | null): StaffSalaryType {
   if (!staff) return 'hourly';
@@ -127,20 +136,29 @@ export function isSalaryAdvanceRecord(rec?: Partial<StaffSalaryRecord> | null): 
   return /^\[ADVANCE\]/i.test(methodStr) || /^salary\s+advance\b/i.test(methodStr);
 }
 
-export function calculateMonthlySalaryMonthsCount(
+export function calculateMonthlySalaryDetails(
   staff: StaffMember,
   allShifts: Shift[],
   allSalaryRecords: StaffSalaryRecord[],
   startDate?: string,
   endDate?: string
-): number {
-  if (getStaffSalaryType(staff) !== 'monthly') return 0;
+): { monthsCount: number; totalAmount: number } {
+  if (getStaffSalaryType(staff) !== 'monthly') return { monthsCount: 0, totalAmount: 0 };
 
   const now = new Date();
   const currentYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   // Determine earliest active YYYY-MM for this monthly staff member
   let effectiveStartYm = staff.salary_start_date ? staff.salary_start_date.slice(0, 7) : '';
+  if (Array.isArray(staff.salary_history) && staff.salary_history.length > 0) {
+    const earliestHist = [...staff.salary_history]
+      .map((h) => (h.effective_from || '').slice(0, 7))
+      .filter((ym) => /^\d{4}-\d{2}$/.test(ym))
+      .sort()[0];
+    if (earliestHist && (!effectiveStartYm || earliestHist < effectiveStartYm)) {
+      effectiveStartYm = earliestHist;
+    }
+  }
   if (!/^\d{4}-\d{2}$/.test(effectiveStartYm)) {
     const candidateYms: string[] = [];
     for (const sh of allShifts) {
@@ -168,21 +186,68 @@ export function calculateMonthlySalaryMonthsCount(
 
   const toYm =
     endDate && /^\d{4}-\d{2}/.test(endDate)
-      ? endDate.slice(0, 7) < currentYm
-        ? endDate.slice(0, 7)
-        : endDate.slice(0, 7)
+      ? endDate.slice(0, 7)
       : currentYm;
 
+  const fallbackCurrentRate = Number(staff.monthly_salary ?? staff.hourly_rate ?? 0);
+
   if (fromYm > toYm) {
-    return !startDate && !endDate && staff.active ? 1 : 0;
+    const fallbackMonths = !startDate && !endDate && staff.active ? 1 : 0;
+    return {
+      monthsCount: fallbackMonths,
+      totalAmount: Math.round(fallbackMonths * fallbackCurrentRate)
+    };
   }
 
   const [sY, sM] = fromYm.split('-').map(Number);
   const [eY, eM] = toYm.split('-').map(Number);
-  if (isNaN(sY) || isNaN(sM) || isNaN(eY) || isNaN(eM)) return staff.active ? 1 : 0;
+  if (isNaN(sY) || isNaN(sM) || isNaN(eY) || isNaN(eM)) {
+    const mCount = staff.active ? 1 : 0;
+    return { monthsCount: mCount, totalAmount: Math.round(mCount * fallbackCurrentRate) };
+  }
 
-  const months = (eY - sY) * 12 + (eM - sM) + 1;
-  return Math.max(0, months);
+  const sortedHistory = Array.isArray(staff.salary_history)
+    ? [...staff.salary_history]
+        .filter((h) => h.salary_type === 'monthly' && /^\d{4}-\d{2}/.test(h.effective_from || ''))
+        .sort((a, b) => a.effective_from.localeCompare(b.effective_from))
+    : [];
+
+  let monthsCount = 0;
+  let totalAmount = 0;
+  let curY = sY;
+  let curM = sM;
+  while (curY < eY || (curY === eY && curM <= eM)) {
+    const ym = `${curY}-${String(curM).padStart(2, '0')}`;
+    monthsCount += 1;
+    let monthRate = fallbackCurrentRate;
+    if (sortedHistory.length > 0) {
+      let matched = sortedHistory[0];
+      for (const h of sortedHistory) {
+        if (h.effective_from.slice(0, 7) <= ym) {
+          matched = h;
+        }
+      }
+      monthRate = Number(matched.monthly_salary || fallbackCurrentRate);
+    }
+    totalAmount += Math.round(monthRate);
+    curM += 1;
+    if (curM > 12) {
+      curM = 1;
+      curY += 1;
+    }
+  }
+
+  return { monthsCount, totalAmount };
+}
+
+export function calculateMonthlySalaryMonthsCount(
+  staff: StaffMember,
+  allShifts: Shift[],
+  allSalaryRecords: StaffSalaryRecord[],
+  startDate?: string,
+  endDate?: string
+): number {
+  return calculateMonthlySalaryDetails(staff, allShifts, allSalaryRecords, startDate, endDate).monthsCount;
 }
 
 export interface BackupReminderStatus {
@@ -237,6 +302,20 @@ export interface EventFinancialSummary {
   attendedShiftCount: number;
 }
 
+export interface ShiftEffectiveRateInfo {
+  hours: number;
+  salaryType: StaffSalaryType;
+  hourlyRate: number;
+  eventRate: number;
+  monthlySalary: number;
+  rateLabel: string;
+  payrollShiftAmount: number;
+  quotationLabourAllocation: number;
+  isLockedHistoricalRate: boolean;
+  differsFromCurrentProfile: boolean;
+  currentProfileRateLabel: string;
+}
+
 export interface StaffShiftEarningItem {
   shift: Shift;
   event?: EventRecord;
@@ -247,6 +326,8 @@ export interface StaffShiftEarningItem {
   attendanceStatus: ShiftAttendanceStatus;
   isAttended: boolean;
   earnedAmount: number;
+  differsFromCurrentProfile?: boolean;
+  currentProfileRateLabel?: string;
 }
 
 export interface StaffSalarySummary {
@@ -1584,6 +1665,7 @@ class DataStore {
       event_rate?: number;
       monthly_salary?: number;
       salary_start_date?: string;
+      salary_history?: StaffSalaryRatePeriod[];
     }
   > {
     if (typeof window === 'undefined') return {};
@@ -1606,12 +1688,209 @@ class DataStore {
         hourly_rate: Number(s.hourly_rate || 0),
         event_rate: s.event_rate !== undefined ? Number(s.event_rate || 0) : undefined,
         monthly_salary: s.monthly_salary !== undefined ? Number(s.monthly_salary || 0) : undefined,
-        salary_start_date: s.salary_start_date || undefined
+        salary_start_date: s.salary_start_date || undefined,
+        salary_history: Array.isArray(s.salary_history) ? s.salary_history : undefined
       };
       localStorage.setItem(STAFF_SALARY_STRUCTURES_CACHE_KEY, JSON.stringify(current));
     } catch {
       // ignore storage errors
     }
+  }
+
+  private readPricingLocksCache(): {
+    eventStockLocks: Record<string, Record<string, number>>;
+    eventItemMetaLocks: Record<string, { dish_name?: string; dish_category?: string }>;
+    shiftRateLocks: Record<
+      string,
+      {
+        locked_salary_type: StaffSalaryType;
+        locked_hourly_rate: number;
+        locked_event_rate: number;
+        locked_monthly_salary: number;
+        rate_locked_at?: string;
+      }
+    >;
+    invoiceItemLocks: Record<string, InvoiceLineSnapshot[]>;
+  } {
+    const empty = {
+      eventStockLocks: {},
+      eventItemMetaLocks: {},
+      shiftRateLocks: {},
+      invoiceItemLocks: {}
+    };
+    if (typeof window === 'undefined') return empty;
+    try {
+      const raw = localStorage.getItem(HISTORICAL_PRICING_LOCKS_CACHE_KEY);
+      if (!raw) return empty;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return empty;
+      return {
+        eventStockLocks:
+          parsed.eventStockLocks && typeof parsed.eventStockLocks === 'object'
+            ? parsed.eventStockLocks
+            : {},
+        eventItemMetaLocks:
+          parsed.eventItemMetaLocks && typeof parsed.eventItemMetaLocks === 'object'
+            ? parsed.eventItemMetaLocks
+            : {},
+        shiftRateLocks:
+          parsed.shiftRateLocks && typeof parsed.shiftRateLocks === 'object'
+            ? parsed.shiftRateLocks
+            : {},
+        invoiceItemLocks:
+          parsed.invoiceItemLocks && typeof parsed.invoiceItemLocks === 'object'
+            ? parsed.invoiceItemLocks
+            : {}
+      };
+    } catch {
+      return empty;
+    }
+  }
+
+  private writePricingLocksCache(updater: (current: ReturnType<DataStore['readPricingLocksCache']>) => void) {
+    if (typeof window === 'undefined') return;
+    try {
+      const current = this.readPricingLocksCache();
+      updater(current);
+      localStorage.setItem(HISTORICAL_PRICING_LOCKS_CACHE_KEY, JSON.stringify(current));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  private extractPricingLocksFromLogs(rawLogs: any[]) {
+    const merged = this.readPricingLocksCache();
+    const ascLogs = [...(rawLogs || [])].sort((a, b) =>
+      String(a.created_at || '').localeCompare(String(b.created_at || ''))
+    );
+    for (const al of ascLogs) {
+      if (!al?.details) continue;
+      const det = String(al.details);
+      const regex = /PriceLockJSON:(\{[\s\S]*?\})(?=@@ENDMETA@@|\s•|$)/g;
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(det)) !== null) {
+        try {
+          const parsed = JSON.parse(match[1]);
+          if (parsed && typeof parsed === 'object') {
+            if (parsed.eventStockLock && parsed.eventId && typeof parsed.costs === 'object') {
+              merged.eventStockLocks[parsed.eventId] = {
+                ...(merged.eventStockLocks[parsed.eventId] || {}),
+                ...parsed.costs
+              };
+            }
+            if (parsed.eventItemMeta && parsed.itemId) {
+              merged.eventItemMetaLocks[parsed.itemId] = {
+                dish_name: parsed.dish_name,
+                dish_category: parsed.dish_category
+              };
+            }
+            if (parsed.shiftRateLock && parsed.shiftId) {
+              merged.shiftRateLocks[parsed.shiftId] = {
+                locked_salary_type: parsed.locked_salary_type || 'hourly',
+                locked_hourly_rate: Number(parsed.locked_hourly_rate || 0),
+                locked_event_rate: Number(parsed.locked_event_rate || 0),
+                locked_monthly_salary: Number(parsed.locked_monthly_salary || 0),
+                rate_locked_at: parsed.rate_locked_at
+              };
+            }
+          }
+        } catch {
+          // ignore malformed JSON
+        }
+      }
+    }
+    return merged;
+  }
+
+  public buildInvoiceItemsSnapshot(eventId: string): InvoiceLineSnapshot[] {
+    const evt = this.state.events.find((e) => e.id === eventId);
+    if (!evt) return [];
+    const items = this.state.eventItems.filter((ei) => ei.event_id === eventId);
+    const extras = this.state.eventExtras.filter((ex) => ex.event_id === eventId);
+    const lines: InvoiceLineSnapshot[] = [];
+
+    for (const item of items) {
+      const dish = this.state.menuItems.find((m) => m.id === item.menu_item_id);
+      const isKg = item.pricing_type === 'per_kg';
+      const rate = Number(item.price_per_unit || item.price_per_guest || 0);
+      const qty = isKg
+        ? item.quantity !== undefined
+          ? Number(item.quantity)
+          : 1
+        : item.quantity !== undefined
+        ? Number(item.quantity)
+        : Number(evt.guest_count || 1);
+      lines.push({
+        id: item.id,
+        description: item.dish_name || dish?.name || 'Menu Dish',
+        category: item.dish_category || dish?.category || 'Catering Item',
+        pricing_type: item.pricing_type,
+        qty_label: `${qty} ${isKg ? 'kg' : 'pax'}`,
+        rate_label: `₹${rate.toLocaleString('en-IN')}${isKg ? '/kg' : '/pax'}`,
+        line_total: Math.round(rate * qty),
+        is_extra: false
+      });
+    }
+
+    for (const ex of extras) {
+      const amt = Number(ex.amount || 0);
+      lines.push({
+        id: ex.id,
+        description: ex.description,
+        category: isAutoLabourChargeExtra(ex.description)
+          ? 'Assigned Event Crew Salary'
+          : 'Logistics, Transport & Extra Charges',
+        pricing_type: 'extra',
+        qty_label: '1 Lot',
+        rate_label: `₹${amt.toLocaleString('en-IN')}`,
+        line_total: Math.round(amt),
+        is_extra: true
+      });
+    }
+
+    return lines;
+  }
+
+  private lockIngredientCostOnExistingEvents(ingredientId: string, oldCost: number): string[] {
+    const affectedEventIds: string[] = [];
+    const dishIdsUsingIng = new Set(
+      this.state.recipes
+        .filter((r) => r.ingredient_id === ingredientId)
+        .map((r) => r.menu_item_id)
+    );
+
+    this.state.events = this.state.events.map((evt) => {
+      const usesIng = this.state.eventItems.some(
+        (ei) => ei.event_id === evt.id && dishIdsUsingIng.has(ei.menu_item_id)
+      );
+      const shouldLock = usesIng || evt.status === 'confirmed' || evt.status === 'completed';
+      if (!shouldLock) return evt;
+      if (evt.locked_ingredient_costs && evt.locked_ingredient_costs[ingredientId] !== undefined) {
+        return evt;
+      }
+      const nextCosts = {
+        ...(evt.locked_ingredient_costs || {}),
+        [ingredientId]: Number(oldCost || 0)
+      };
+      affectedEventIds.push(evt.id);
+      return {
+        ...evt,
+        locked_ingredient_costs: nextCosts
+      };
+    });
+
+    if (affectedEventIds.length > 0) {
+      this.writePricingLocksCache((cache) => {
+        for (const evtId of affectedEventIds) {
+          cache.eventStockLocks[evtId] = {
+            ...(cache.eventStockLocks[evtId] || {}),
+            [ingredientId]: Number(oldCost || 0)
+          };
+        }
+      });
+    }
+
+    return affectedEventIds;
   }
 
   private buildStaffStructureAuditTag(s: StaffMember): string {
@@ -1620,7 +1899,8 @@ class DataStore {
       hourly_rate: Number(s.hourly_rate || 0),
       event_rate: Number(s.event_rate ?? 0),
       monthly_salary: Number(s.monthly_salary ?? 0),
-      salary_start_date: s.salary_start_date || null
+      salary_start_date: s.salary_start_date || null,
+      salary_history: Array.isArray(s.salary_history) ? s.salary_history : undefined
     })}`;
   }
 
@@ -1633,6 +1913,7 @@ class DataStore {
     event_rate?: number;
     monthly_salary?: number;
     salary_start_date?: string;
+    salary_history?: StaffSalaryRatePeriod[];
   } | null {
     for (const al of rawLogs) {
       if (String(al.entity_id || '') === String(staffId) && al.details) {
@@ -1655,7 +1936,8 @@ class DataStore {
                   parsed.event_rate !== undefined ? Number(parsed.event_rate || 0) : undefined,
                 monthly_salary:
                   parsed.monthly_salary !== undefined ? Number(parsed.monthly_salary || 0) : undefined,
-                salary_start_date: parsed.salary_start_date ? String(parsed.salary_start_date) : undefined
+                salary_start_date: parsed.salary_start_date ? String(parsed.salary_start_date) : undefined,
+                salary_history: Array.isArray(parsed.salary_history) ? parsed.salary_history : undefined
               };
             }
           } catch {
@@ -1705,7 +1987,10 @@ class DataStore {
         quotation_number: inv.quotation_number || null,
         discount_note: inv.discount_note || null,
         show_bank_details: inv.show_bank_details !== false,
-        show_payment_details: inv.show_payment_details !== false
+        show_payment_details: inv.show_payment_details !== false,
+        locked_items_snapshot: Array.isArray(inv.locked_items_snapshot)
+          ? inv.locked_items_snapshot
+          : undefined
       },
       created_at: inv.created_at || new Date().toISOString()
     };
@@ -2517,6 +2802,7 @@ class DataStore {
         ? ((activityLogsRes?.data || []) as any[])
         : [];
       const staffCache = this.readStaffStructureCache();
+      const pricingLocks = this.extractPricingLocksFromLogs(rawActivityLogsForSync);
 
       const loadedStaff: StaffMember[] = (staffRes?.data || []).map((s: any) => {
         const existingLocal = this.state.staff.find((old) => old.id === s.id);
@@ -2579,6 +2865,12 @@ class DataStore {
           existingLocal?.salary_start_date ||
           undefined;
 
+        const resolvedSalaryHistory =
+          fromLogs?.salary_history ||
+          fromCache?.salary_history ||
+          existingLocal?.salary_history ||
+          undefined;
+
         return {
           id: s.id,
           name: s.name,
@@ -2590,6 +2882,7 @@ class DataStore {
           event_rate: resolvedEventRate,
           monthly_salary: resolvedMonthly,
           salary_start_date: resolvedStartDate,
+          salary_history: resolvedSalaryHistory,
           active: s.active !== false
         };
       });
@@ -2747,11 +3040,17 @@ class DataStore {
                   : payFromLogs !== undefined
                   ? payFromLogs
                   : existingLocal?.show_payment_details !== false,
+              locked_ingredient_costs: {
+                ...(existingLocal?.locked_ingredient_costs || {}),
+                ...(pricingLocks.eventStockLocks[e.id] || {})
+              },
               created_at: e.created_at || new Date().toISOString()
             };
           });
         })(),
         eventItems: (eventItemsRes?.data || []).map((ei: any) => {
+          const existingLocal = this.state.eventItems.find((old) => old.id === ei.id);
+          const metaLock = pricingLocks.eventItemMetaLocks[ei.id];
           const unitPrice = Number(ei.price_per_unit ?? ei.price_per_guest ?? 0);
           return {
             id: ei.id,
@@ -2760,7 +3059,9 @@ class DataStore {
             pricing_type: (ei.pricing_type as PricingType) || 'per_guest',
             price_per_unit: unitPrice,
             price_per_guest: Number(ei.price_per_guest ?? unitPrice),
-            quantity: ei.quantity != null ? Number(ei.quantity) : undefined
+            quantity: ei.quantity != null ? Number(ei.quantity) : undefined,
+            dish_name: metaLock?.dish_name || existingLocal?.dish_name || undefined,
+            dish_category: metaLock?.dish_category || existingLocal?.dish_category || undefined
           };
         }),
         eventExtras: (eventExtrasRes?.data || []).map((x: any) => ({
@@ -2853,6 +3154,7 @@ class DataStore {
           .filter((sh: any) => sh.staff_member_id || sh.staff_id)
           .map((sh: any) => {
             const existingLocal = this.state.shifts.find((old) => old.id === sh.id);
+            const rateLock = pricingLocks.shiftRateLocks[sh.id];
             return {
               id: sh.id,
               event_id: sh.event_id,
@@ -2867,7 +3169,16 @@ class DataStore {
                 sh.attendance_status === 'present' || sh.attendance_status === 'absent'
                   ? sh.attendance_status
                   : 'pending',
-              attendance_marked_at: sh.attendance_marked_at || undefined
+              attendance_marked_at: sh.attendance_marked_at || undefined,
+              locked_salary_type:
+                rateLock?.locked_salary_type || existingLocal?.locked_salary_type || undefined,
+              locked_hourly_rate:
+                rateLock?.locked_hourly_rate ?? existingLocal?.locked_hourly_rate ?? undefined,
+              locked_event_rate:
+                rateLock?.locked_event_rate ?? existingLocal?.locked_event_rate ?? undefined,
+              locked_monthly_salary:
+                rateLock?.locked_monthly_salary ?? existingLocal?.locked_monthly_salary ?? undefined,
+              rate_locked_at: rateLock?.rate_locked_at || existingLocal?.rate_locked_at || undefined
             };
           }),
         staffSalaryRecords: !salaryRecordsRes?.error
@@ -2990,6 +3301,9 @@ class DataStore {
                 : payFromLogs !== undefined
                 ? payFromLogs
                 : existingLocal?.show_payment_details !== false,
+            locked_items_snapshot: Array.isArray(snap.locked_items_snapshot)
+              ? snap.locked_items_snapshot
+              : pricingLocks.invoiceItemLocks[inv.id] || existingLocal?.locked_items_snapshot || undefined,
             created_at: inv.created_at || new Date().toISOString(),
             notes: inv.notes || ''
           };
@@ -3068,6 +3382,62 @@ class DataStore {
           }
         }
       }
+
+      // Seed baseline local historical locks for existing shifts & confirmed/completed events if not yet cached
+      this.writePricingLocksCache((cache) => {
+        for (const sh of this.state.shifts) {
+          if (!sh.locked_salary_type) {
+            const st = this.state.staff.find((s) => s.id === sh.staff_member_id);
+            if (st) {
+              const sType = getStaffSalaryType(st);
+              sh.locked_salary_type = sType;
+              sh.locked_hourly_rate = Number(st.hourly_rate || 0);
+              sh.locked_event_rate = Number(st.event_rate ?? (sType === 'per_event' ? st.hourly_rate : 0));
+              sh.locked_monthly_salary = Number(st.monthly_salary ?? (sType === 'monthly' ? st.hourly_rate : 0));
+              cache.shiftRateLocks[sh.id] = {
+                locked_salary_type: sh.locked_salary_type,
+                locked_hourly_rate: sh.locked_hourly_rate,
+                locked_event_rate: sh.locked_event_rate,
+                locked_monthly_salary: sh.locked_monthly_salary
+              };
+            }
+          }
+        }
+        for (const ei of this.state.eventItems) {
+          if (!ei.dish_name) {
+            const mi = this.state.menuItems.find((m) => m.id === ei.menu_item_id);
+            if (mi) {
+              ei.dish_name = mi.name;
+              ei.dish_category = mi.category;
+              cache.eventItemMetaLocks[ei.id] = {
+                dish_name: mi.name,
+                dish_category: mi.category
+              };
+            }
+          }
+        }
+        for (const evt of this.state.events) {
+          const evtItems = this.state.eventItems.filter((ei) => ei.event_id === evt.id);
+          if (evtItems.length > 0 || evt.status === 'confirmed' || evt.status === 'completed') {
+            const lockedMap = { ...(evt.locked_ingredient_costs || {}) };
+            for (const ei of evtItems) {
+              const recs = this.state.recipes.filter((r) => r.menu_item_id === ei.menu_item_id);
+              for (const r of recs) {
+                if (lockedMap[r.ingredient_id] === undefined) {
+                  const ing = this.state.ingredients.find((i) => i.id === r.ingredient_id);
+                  if (ing) {
+                    lockedMap[r.ingredient_id] = Number(ing.cost_per_unit || 0);
+                  }
+                }
+              }
+            }
+            if (Object.keys(lockedMap).length > 0) {
+              evt.locked_ingredient_costs = lockedMap;
+              cache.eventStockLocks[evt.id] = lockedMap;
+            }
+          }
+        }
+      });
 
       this.hasInitialRemoteLoaded = true;
       this.isInternetConnected = true;
@@ -4158,10 +4528,45 @@ class DataStore {
         isAuthenticated: true
       };
 
-      // Cache staff salary structures locally as well
+      // Cache staff salary structures and historical pricing locks locally as well
       for (const st of restoredStaff) {
         this.writeStaffStructureCacheEntry(st);
       }
+      this.writePricingLocksCache((cache) => {
+        cache.eventStockLocks = {};
+        cache.eventItemMetaLocks = {};
+        cache.shiftRateLocks = {};
+        cache.invoiceItemLocks = {};
+        for (const ev of restoredEvents) {
+          if (ev.locked_ingredient_costs && Object.keys(ev.locked_ingredient_costs).length > 0) {
+            cache.eventStockLocks[ev.id] = { ...ev.locked_ingredient_costs };
+          }
+        }
+        for (const ei of restoredEventItems) {
+          if (ei.dish_name || ei.dish_category) {
+            cache.eventItemMetaLocks[ei.id] = {
+              dish_name: ei.dish_name,
+              dish_category: ei.dish_category
+            };
+          }
+        }
+        for (const sh of restoredShifts) {
+          if (sh.locked_salary_type) {
+            cache.shiftRateLocks[sh.id] = {
+              locked_salary_type: sh.locked_salary_type,
+              locked_hourly_rate: Number(sh.locked_hourly_rate || 0),
+              locked_event_rate: Number(sh.locked_event_rate || 0),
+              locked_monthly_salary: Number(sh.locked_monthly_salary || 0),
+              rate_locked_at: sh.rate_locked_at
+            };
+          }
+        }
+        for (const inv of restoredInvoices) {
+          if (Array.isArray(inv.locked_items_snapshot) && inv.locked_items_snapshot.length > 0) {
+            cache.invoiceItemLocks[inv.id] = inv.locked_items_snapshot;
+          }
+        }
+      });
 
       const ops: SqlOperation[] = [
         // 1. Clear existing child-to-parent tables cleanly so restored snapshot is exact
@@ -4637,9 +5042,20 @@ class DataStore {
       quotation_number,
       show_bank_details: eventData.show_bank_details !== false,
       show_payment_details: eventData.show_payment_details !== false,
+      locked_ingredient_costs: eventData.locked_ingredient_costs || {},
       created_at: new Date().toISOString()
     };
     this.state.events.unshift(newEvent);
+
+    // Every event quotation mandatorily starts with a 'Labour Charges' line item (auto-updated as staff are assigned)
+    const initialLabourExtra: EventExtra = {
+      id: generateUUID(),
+      event_id: newEvent.id,
+      description: 'Labour Charges (0 Staff Assigned)',
+      amount: 0
+    };
+    this.state.eventExtras.push(initialLabourExtra);
+
     this.logMutation({
       entity_type: 'event',
       entity_id: newEvent.id,
@@ -4653,11 +5069,147 @@ class DataStore {
     if (isValidUUID(newEvent.client_id)) {
       this.enqueueSqlOperations('Create Event', [
         ...this.ensureClientParentOps(newEvent.client_id),
-        { type: 'upsert', table: 'events', values: this.toEventSqlRow(newEvent), onConflict: 'id' }
+        { type: 'upsert', table: 'events', values: this.toEventSqlRow(newEvent), onConflict: 'id' },
+        {
+          type: 'upsert',
+          table: 'event_extras',
+          values: {
+            id: initialLabourExtra.id,
+            event_id: initialLabourExtra.event_id,
+            description: initialLabourExtra.description,
+            amount: initialLabourExtra.amount
+          },
+          onConflict: 'id'
+        }
       ]);
     }
 
     return newEvent;
+  }
+
+  public getEventAssignedLabourSummary(eventId: string): {
+    staffCount: number;
+    totalLabourAmount: number;
+    label: string;
+    hasDifferentProfileRates: boolean;
+    breakdown: Array<{
+      shiftId: string;
+      staffId: string;
+      staffName: string;
+      roleLabel: string;
+      rateLabel: string;
+      amount: number;
+      differsFromCurrentProfile: boolean;
+      currentProfileRateLabel: string;
+    }>;
+  } {
+    const activeShifts = this.state.shifts.filter(
+      (sh) => sh.event_id === eventId && sh.attendance_status !== 'absent'
+    );
+    let totalLabourAmount = 0;
+    let hasDifferentProfileRates = false;
+    const breakdown = activeShifts.map((sh) => {
+      const st = this.state.staff.find((s) => s.id === sh.staff_member_id);
+      const info = this.getShiftEffectiveRateInfo(sh, st);
+      totalLabourAmount += info.quotationLabourAllocation;
+      if (info.differsFromCurrentProfile) {
+        hasDifferentProfileRates = true;
+      }
+      return {
+        shiftId: sh.id,
+        staffId: sh.staff_member_id,
+        staffName: st?.name || 'Crew Member',
+        roleLabel: sh.role_label || st?.role_title || 'Service Crew',
+        rateLabel: info.rateLabel,
+        amount: info.quotationLabourAllocation,
+        differsFromCurrentProfile: info.differsFromCurrentProfile,
+        currentProfileRateLabel: info.currentProfileRateLabel
+      };
+    });
+
+    const staffCount = activeShifts.length;
+    const label = `Labour Charges (${staffCount} Staff Assigned)`;
+
+    return {
+      staffCount,
+      totalLabourAmount: Math.round(totalLabourAmount),
+      label,
+      hasDifferentProfileRates,
+      breakdown
+    };
+  }
+
+  public syncEventQuotationLabourCharges(
+    eventId: string,
+    options?: { force?: boolean; skipSave?: boolean }
+  ): EventExtra | null {
+    const evt = this.state.events.find((e) => e.id === eventId);
+    if (!evt || evt.status === 'cancelled') return null;
+
+    const hasLockedPaidInvoice = this.state.invoices.some(
+      (inv) =>
+        inv.event_id === eventId &&
+        inv.status !== 'void' &&
+        (inv.status === 'paid' || inv.kind === 'final')
+    );
+
+    if (!options?.force && (evt.status === 'completed' || hasLockedPaidInvoice)) {
+      return (
+        this.state.eventExtras.find(
+          (ex) => ex.event_id === eventId && isAutoLabourChargeExtra(ex.description)
+        ) || null
+      );
+    }
+
+    const { totalLabourAmount, label } = this.getEventAssignedLabourSummary(eventId);
+    const existingIdx = this.state.eventExtras.findIndex(
+      (ex) => ex.event_id === eventId && isAutoLabourChargeExtra(ex.description)
+    );
+
+    let targetExtra: EventExtra;
+    if (existingIdx >= 0) {
+      const prev = this.state.eventExtras[existingIdx];
+      if (prev.description === label && Number(prev.amount) === totalLabourAmount) {
+        return prev;
+      }
+      targetExtra = {
+        ...prev,
+        description: label,
+        amount: totalLabourAmount
+      };
+      this.state.eventExtras[existingIdx] = targetExtra;
+    } else {
+      targetExtra = {
+        id: generateUUID(),
+        event_id: eventId,
+        description: label,
+        amount: totalLabourAmount
+      };
+      this.state.eventExtras.push(targetExtra);
+    }
+
+    if (isValidUUID(eventId)) {
+      this.enqueueSqlOperations('Sync Quotation Labour Charges', [
+        ...this.ensureEventParentOps(eventId),
+        {
+          type: 'upsert',
+          table: 'event_extras',
+          values: {
+            id: targetExtra.id,
+            event_id: targetExtra.event_id,
+            description: targetExtra.description,
+            amount: targetExtra.amount
+          },
+          onConflict: 'id'
+        }
+      ]);
+    }
+
+    if (!options?.skipSave) {
+      this.save();
+    }
+
+    return targetExtra;
   }
 
   public ensureEventInvoice(
@@ -4666,25 +5218,37 @@ class DataStore {
     discountNote: string = ''
   ): Invoice {
     const evt = this.state.events.find((e) => e.id === eventId);
+    // Ensure Labour Charges on quotation are calculated before generating a brand-new invoice
+    const existing = this.state.invoices.find((i) => i.event_id === eventId && i.status !== 'void');
+    if (!existing) {
+      this.syncEventQuotationLabourCharges(eventId, { skipSave: true });
+    }
+
     const quoteNo = evt ? this.getQuotationNumber(evt) : undefined;
     const totals = this.getEventTotal(eventId);
     const subtotal = totals.grandTotal > 0 ? totals.grandTotal : 0;
 
-    const existing = this.state.invoices.find((i) => i.event_id === eventId && i.status !== 'void');
     if (existing) {
+      // Never mutate an already paid/finalized invoice automatically
+      if (existing.status === 'paid' || existing.kind === 'final') {
+        return existing;
+      }
       const nextDiscount = discount > 0 && existing.discount === 0 ? discount : existing.discount || 0;
       const nextDiscountNote = discountNote.trim() || existing.discount_note || '';
       const nextSubtotal = subtotal > 0 ? subtotal : existing.subtotal || existing.amount;
+      const itemsSnap = this.buildInvoiceItemsSnapshot(eventId);
       this.updateInvoice(existing.id, {
         quotation_number: existing.quotation_number || quoteNo,
         subtotal: nextSubtotal,
         discount: nextDiscount,
-        discount_note: nextDiscountNote
+        discount_note: nextDiscountNote,
+        locked_items_snapshot: itemsSnap.length > 0 ? itemsSnap : existing.locked_items_snapshot
       });
       return this.state.invoices.find((i) => i.id === existing.id) || existing;
     }
 
     const netAmount = Math.max(0, subtotal - discount);
+    const itemsSnap = this.buildInvoiceItemsSnapshot(eventId);
 
     const newInv = this.addInvoice({
       event_id: eventId,
@@ -4698,6 +5262,7 @@ class DataStore {
       status: netAmount === 0 && subtotal > 0 ? 'paid' : 'sent',
       show_bank_details: evt?.show_bank_details !== false,
       show_payment_details: evt?.show_payment_details !== false,
+      locked_items_snapshot: itemsSnap,
       notes:
         evt?.payment_terms ||
         this.state.settings.payment_terms ||
@@ -4707,20 +5272,26 @@ class DataStore {
     return newInv;
   }
 
-  public syncInvoiceWithEventTotal(eventId: string): Invoice | null {
+  public syncInvoiceWithEventTotal(eventId: string, force: boolean = false): Invoice | null {
     const existing = this.state.invoices.find((i) => i.event_id === eventId && i.status !== 'void');
     if (!existing) return null;
+    // Protect finalized/paid invoices from silent retroactive mutation
+    if (!force && (existing.status === 'paid' || existing.kind === 'final')) {
+      return existing;
+    }
 
     const totals = this.getEventTotal(eventId);
     const subtotal = totals.grandTotal;
     const discount = existing.discount || 0;
     const netAmount = Math.max(0, subtotal - discount);
+    const itemsSnap = this.buildInvoiceItemsSnapshot(eventId);
 
     this.updateInvoice(existing.id, {
       quotation_number: existing.quotation_number || this.getQuotationNumber(eventId),
       subtotal,
       discount,
-      amount: netAmount
+      amount: netAmount,
+      locked_items_snapshot: itemsSnap
     });
 
     return this.state.invoices.find((i) => i.id === existing.id) || existing;
@@ -4877,7 +5448,7 @@ class DataStore {
     }
   }
 
-  // Event Items (Support per_guest and per_kg)
+  // Event Items (Support per_guest and per_kg with historical dish & stock price locking)
   public setEventItem(
     eventId: string,
     menuItemId: string,
@@ -4898,6 +5469,12 @@ class DataStore {
       this.state.eventItems[existingIndex].price_per_unit = pricePerUnit;
       this.state.eventItems[existingIndex].price_per_guest = pricePerUnit;
       this.state.eventItems[existingIndex].pricing_type = pricingType;
+      if (!this.state.eventItems[existingIndex].dish_name && dish?.name) {
+        this.state.eventItems[existingIndex].dish_name = dish.name;
+      }
+      if (!this.state.eventItems[existingIndex].dish_category && dish?.category) {
+        this.state.eventItems[existingIndex].dish_category = dish.category;
+      }
       if (quantity !== undefined) {
         this.state.eventItems[existingIndex].quantity = quantity;
       }
@@ -4910,9 +5487,58 @@ class DataStore {
         pricing_type: pricingType,
         price_per_unit: pricePerUnit,
         price_per_guest: pricePerUnit,
-        quantity: quantity !== undefined ? quantity : pricingType === 'per_kg' ? 10 : undefined
+        quantity: quantity !== undefined ? quantity : pricingType === 'per_kg' ? 10 : undefined,
+        dish_name: dish?.name,
+        dish_category: dish?.category
       };
       this.state.eventItems.push(targetItem);
+    }
+
+    // Lock current ingredient costs for this dish onto the event so future stock price updates never alter this event
+    const newlyLockedStockCosts: Record<string, number> = {};
+    if (evt) {
+      const currentLocked = { ...(evt.locked_ingredient_costs || {}) };
+      const dishRecipes = this.state.recipes.filter((r) => r.menu_item_id === menuItemId);
+      for (const r of dishRecipes) {
+        if (currentLocked[r.ingredient_id] === undefined) {
+          const ing = this.state.ingredients.find((i) => i.id === r.ingredient_id);
+          if (ing) {
+            currentLocked[r.ingredient_id] = Number(ing.cost_per_unit || 0);
+            newlyLockedStockCosts[r.ingredient_id] = Number(ing.cost_per_unit || 0);
+          }
+        }
+      }
+      evt.locked_ingredient_costs = currentLocked;
+    }
+
+    this.writePricingLocksCache((cache) => {
+      if (targetItem.dish_name || targetItem.dish_category) {
+        cache.eventItemMetaLocks[targetItem.id] = {
+          dish_name: targetItem.dish_name,
+          dish_category: targetItem.dish_category
+        };
+      }
+      if (evt && Object.keys(evt.locked_ingredient_costs || {}).length > 0) {
+        cache.eventStockLocks[evt.id] = { ...(evt.locked_ingredient_costs || {}) };
+      }
+    });
+
+    const metaLocksParts: string[] = [
+      `PriceLockJSON:${JSON.stringify({
+        eventItemMeta: true,
+        itemId: targetItem.id,
+        dish_name: targetItem.dish_name,
+        dish_category: targetItem.dish_category
+      })}`
+    ];
+    if (evt && Object.keys(newlyLockedStockCosts).length > 0) {
+      metaLocksParts.push(
+        `PriceLockJSON:${JSON.stringify({
+          eventStockLock: true,
+          eventId: evt.id,
+          costs: newlyLockedStockCosts
+        })}`
+      );
     }
 
     const diffs = isUpdate
@@ -4928,10 +5554,14 @@ class DataStore {
       entity_id: targetItem.id,
       parent_event_id: eventId,
       action: isUpdate ? 'update' : 'create',
-      summary: `${isUpdate ? 'Updated' : 'Added'} dish "${dish?.name || 'Item'}" in quotation for "${evt?.title || 'Event'}"`,
-      details: isUpdate
-        ? encodeAuditDetails({ changes: diffs })
-        : `Rate: ₹${pricePerUnit}/${pricingType === 'per_kg' ? 'kg' : 'guest'}${targetItem.quantity ? ` • Qty: ${targetItem.quantity}` : ''}`
+      summary: `${isUpdate ? 'Updated' : 'Added'} dish "${targetItem.dish_name || dish?.name || 'Item'}" in quotation for "${evt?.title || 'Event'}"`,
+      details: encodeAuditDetails({
+        changes: diffs,
+        note: !isUpdate
+          ? `Rate: ₹${pricePerUnit}/${pricingType === 'per_kg' ? 'kg' : 'guest'}${targetItem.quantity ? ` • Qty: ${targetItem.quantity}` : ''}`
+          : undefined,
+        meta: metaLocksParts.join(' • ')
+      })
     });
     this.save();
 
@@ -5159,6 +5789,42 @@ class DataStore {
   public updateMenuItem(id: string, updates: Partial<MenuItem>) {
     const prevDish = this.state.menuItems.find((m) => m.id === id);
     const prevSnapshot = prevDish ? { ...prevDish } : undefined;
+
+    // Historical immutability: lock previous dish name/category onto all existing eventItems BEFORE updating catalog
+    const lockedItemMetaTags: string[] = [];
+    if (prevDish) {
+      this.state.eventItems = this.state.eventItems.map((ei) => {
+        if (ei.menu_item_id !== id) return ei;
+        const lockedName = ei.dish_name || prevDish.name;
+        const lockedCat = ei.dish_category || prevDish.category;
+        if (ei.dish_name !== lockedName || ei.dish_category !== lockedCat) {
+          lockedItemMetaTags.push(
+            `PriceLockJSON:${JSON.stringify({
+              eventItemMeta: true,
+              itemId: ei.id,
+              dish_name: lockedName,
+              dish_category: lockedCat
+            })}`
+          );
+        }
+        return {
+          ...ei,
+          dish_name: lockedName,
+          dish_category: lockedCat
+        };
+      });
+      this.writePricingLocksCache((cache) => {
+        for (const ei of this.state.eventItems) {
+          if (ei.menu_item_id === id && ei.dish_name) {
+            cache.eventItemMetaLocks[ei.id] = {
+              dish_name: ei.dish_name,
+              dish_category: ei.dish_category
+            };
+          }
+        }
+      });
+    }
+
     let updatedItem: MenuItem | undefined;
     this.state.menuItems = this.state.menuItems.map((m) => {
       if (m.id !== id) return m;
@@ -5189,8 +5855,11 @@ class DataStore {
         entity_type: 'menu',
         entity_id: id,
         action: 'update',
-        summary: `Updated menu dish "${updatedItem.name}"`,
-        details: encodeAuditDetails({ changes: diffs })
+        summary: `Updated menu dish "${updatedItem.name}" (applies to future quotes only)`,
+        details: encodeAuditDetails({
+          changes: diffs,
+          meta: lockedItemMetaTags.length > 0 ? lockedItemMetaTags.slice(0, 40).join(' • ') : undefined
+        })
       });
     }
     this.save();
@@ -5326,6 +5995,25 @@ class DataStore {
   public updateIngredient(id: string, updates: Partial<Ingredient>) {
     const prevIng = this.state.ingredients.find((i) => i.id === id);
     const prevSnapshot = prevIng ? { ...prevIng } : undefined;
+
+    // Historical immutability: if cost_per_unit is changing, lock old cost onto all existing events BEFORE updating
+    let lockedEventMetaTags: string[] = [];
+    if (
+      prevIng &&
+      updates.cost_per_unit !== undefined &&
+      Number(updates.cost_per_unit) !== Number(prevIng.cost_per_unit)
+    ) {
+      const affectedEventIds = this.lockIngredientCostOnExistingEvents(id, Number(prevIng.cost_per_unit));
+      lockedEventMetaTags = affectedEventIds.slice(0, 40).map(
+        (evtId) =>
+          `PriceLockJSON:${JSON.stringify({
+            eventStockLock: true,
+            eventId: evtId,
+            costs: { [id]: Number(prevIng.cost_per_unit) }
+          })}`
+      );
+    }
+
     let updatedIng: Ingredient | undefined;
     this.state.ingredients = this.state.ingredients.map((i) => {
       if (i.id !== id) return i;
@@ -5344,6 +6032,7 @@ class DataStore {
         { key: 'low_stock_level', label: 'Low Stock Alert', format: (v, rec) => `${v ?? 0} ${rec.unit}` },
         { key: 'expiry_date', label: 'Expiry Date', format: (v) => (v ? String(v) : 'None') }
       ]);
+      const metaParts = [`Expiry: ${updatedIng.expiry_date || 'None'}`, ...lockedEventMetaTags];
       this.logMutation({
         entity_type: 'stock',
         entity_id: id,
@@ -5351,7 +6040,7 @@ class DataStore {
         summary: `Updated stock item "${updatedIng.name}"`,
         details: encodeAuditDetails({
           changes: diffs,
-          meta: `Expiry: ${updatedIng.expiry_date || 'None'}`
+          meta: metaParts.join(' • ')
         })
       });
     }
@@ -5548,6 +6237,7 @@ class DataStore {
     }
 
     const updatedIngredients: Ingredient[] = [];
+    const purchaseLockMetaTags: string[] = [];
     if (updateWarehouseStock) {
       purchaseItems.forEach((pi) => {
         let ing: Ingredient | undefined;
@@ -5560,6 +6250,19 @@ class DataStore {
         }
 
         if (ing) {
+          if (pi.unit_price > 0 && Number(pi.unit_price) !== Number(ing.cost_per_unit)) {
+            const oldCost = Number(ing.cost_per_unit || 0);
+            const affectedEvtIds = this.lockIngredientCostOnExistingEvents(ing.id, oldCost);
+            for (const evtId of affectedEvtIds.slice(0, 25)) {
+              purchaseLockMetaTags.push(
+                `PriceLockJSON:${JSON.stringify({
+                  eventStockLock: true,
+                  eventId: evtId,
+                  costs: { [ing.id]: oldCost }
+                })}`
+              );
+            }
+          }
           ing.stock_qty = Number((ing.stock_qty + pi.quantity).toFixed(2));
           if (pi.unit_price > 0) {
             ing.cost_per_unit = pi.unit_price;
@@ -5587,7 +6290,10 @@ class DataStore {
       entity_id: newPurchase.id,
       action: 'create',
       summary: `Recorded stock purchase from "${newPurchase.vendor_name}" (₹${newPurchase.total_amount.toLocaleString('en-IN')})`,
-      details: `Paid: ₹${newPurchase.paid_amount.toLocaleString('en-IN')} • Balance: ₹${newPurchase.balance_amount.toLocaleString('en-IN')}`
+      details: encodeAuditDetails({
+        note: `Paid: ₹${newPurchase.paid_amount.toLocaleString('en-IN')} • Balance: ₹${newPurchase.balance_amount.toLocaleString('en-IN')}`,
+        meta: purchaseLockMetaTags.length > 0 ? purchaseLockMetaTags.join(' • ') : undefined
+      })
     });
     this.save();
 
@@ -5837,19 +6543,112 @@ class DataStore {
     }
   }
 
-  // Staff & Shifts
+  // Staff & Shifts (with Historical Rate Immutability + Explicit Shift Rate Switch Options)
+  public getShiftEffectiveRateInfo(shift: Shift, staffOverride?: StaffMember): ShiftEffectiveRateInfo {
+    const staffMember =
+      staffOverride || this.state.staff.find((s) => s.id === shift.staff_member_id);
+    const hours = this.calculateShiftHours(shift.starts_at, shift.ends_at);
+
+    const profileType = getStaffSalaryType(staffMember);
+    const profileHourly = Number(staffMember?.hourly_rate || 0);
+    const profileEvent = Number(
+      staffMember?.event_rate ?? (profileType === 'per_event' ? profileHourly : 0)
+    );
+    const profileMonthly = Number(
+      staffMember?.monthly_salary ?? (profileType === 'monthly' ? profileHourly : 0)
+    );
+    const currentProfileRateLabel = formatStaffSalaryRate(staffMember);
+
+    const hasLockedRate = Boolean(shift.locked_salary_type);
+    const salaryType: StaffSalaryType = shift.locked_salary_type || profileType;
+    const hourlyRate =
+      shift.locked_hourly_rate !== undefined ? Number(shift.locked_hourly_rate) : profileHourly;
+    const eventRate =
+      shift.locked_event_rate !== undefined ? Number(shift.locked_event_rate) : profileEvent;
+    const monthlySalary =
+      shift.locked_monthly_salary !== undefined
+        ? Number(shift.locked_monthly_salary)
+        : profileMonthly;
+
+    let rateLabel = `₹${hourlyRate.toLocaleString('en-IN')}/hr`;
+    let payrollShiftAmount = Math.round(hours * hourlyRate);
+    let quotationLabourAllocation = Math.round(hours * hourlyRate);
+
+    if (salaryType === 'per_event') {
+      rateLabel = `₹${eventRate.toLocaleString('en-IN')}/event`;
+      payrollShiftAmount = Math.round(eventRate);
+      quotationLabourAllocation = Math.round(eventRate);
+    } else if (salaryType === 'monthly') {
+      rateLabel =
+        monthlySalary > 0
+          ? `Monthly Fixed (₹${monthlySalary.toLocaleString('en-IN')}/mo)`
+          : 'Monthly Fixed';
+      payrollShiftAmount = 0;
+      quotationLabourAllocation =
+        eventRate > 0 ? Math.round(eventRate) : Math.round(monthlySalary / 30);
+    }
+
+    const effectivePrimary =
+      salaryType === 'per_event'
+        ? eventRate
+        : salaryType === 'monthly'
+        ? monthlySalary
+        : hourlyRate;
+    const profilePrimary =
+      profileType === 'per_event'
+        ? profileEvent
+        : profileType === 'monthly'
+        ? profileMonthly
+        : profileHourly;
+
+    const differsFromCurrentProfile =
+      Boolean(staffMember) &&
+      (salaryType !== profileType || Math.round(effectivePrimary) !== Math.round(profilePrimary));
+
+    return {
+      hours,
+      salaryType,
+      hourlyRate,
+      eventRate,
+      monthlySalary,
+      rateLabel,
+      payrollShiftAmount,
+      quotationLabourAllocation,
+      isLockedHistoricalRate: hasLockedRate,
+      differsFromCurrentProfile,
+      currentProfileRateLabel
+    };
+  }
+
   public addStaff(staff: Omit<StaffMember, 'id'>) {
     const sType = getStaffSalaryType(staff);
+    const startDate =
+      staff.salary_start_date ||
+      (sType === 'monthly' ? new Date().toISOString().slice(0, 10) : undefined);
+    const hourlyVal = Number(staff.hourly_rate || 0);
+    const eventVal = Number(staff.event_rate || 0);
+    const monthlyVal = Number(staff.monthly_salary || 0);
+
     const newStaff: StaffMember = {
       ...staff,
       id: generateUUID(),
       salary_type: sType,
-      hourly_rate: Number(staff.hourly_rate || 0),
-      event_rate: Number(staff.event_rate || 0),
-      monthly_salary: Number(staff.monthly_salary || 0),
-      salary_start_date:
-        staff.salary_start_date ||
-        (sType === 'monthly' ? new Date().toISOString().slice(0, 10) : undefined)
+      hourly_rate: hourlyVal,
+      event_rate: eventVal,
+      monthly_salary: monthlyVal,
+      salary_start_date: startDate,
+      salary_history:
+        sType === 'monthly' && startDate
+          ? [
+              {
+                salary_type: sType,
+                hourly_rate: hourlyVal,
+                event_rate: eventVal,
+                monthly_salary: monthlyVal,
+                effective_from: startDate
+              }
+            ]
+          : undefined
     };
     this.state.staff.push(newStaff);
     this.writeStaffStructureCacheEntry(newStaff);
@@ -5869,23 +6668,177 @@ class DataStore {
     return newStaff;
   }
 
-  public updateStaff(id: string, updates: Partial<StaffMember>) {
+  public updateStaff(
+    id: string,
+    updates: Partial<StaffMember>,
+    shiftRateUpdateMode: ShiftRateUpdateMode = 'keep_existing'
+  ) {
     const prevStaff = this.state.staff.find((s) => s.id === id);
     const prevSnapshot = prevStaff ? { ...prevStaff } : undefined;
+    const shiftLockMetaTags: string[] = [];
+
+    // 1. Before mutating staff profile rate, lock the previous rate onto all existing shifts that lack an explicit lock
+    if (prevStaff) {
+      const prevType = getStaffSalaryType(prevStaff);
+      const prevHourly = Number(prevStaff.hourly_rate || 0);
+      const prevEvent = Number(
+        prevStaff.event_rate ?? (prevType === 'per_event' ? prevHourly : 0)
+      );
+      const prevMonthly = Number(
+        prevStaff.monthly_salary ?? (prevType === 'monthly' ? prevHourly : 0)
+      );
+
+      this.state.shifts = this.state.shifts.map((sh) => {
+        if (sh.staff_member_id !== id) return sh;
+        if (sh.locked_salary_type) return sh;
+        const locked: Shift = {
+          ...sh,
+          locked_salary_type: prevType,
+          locked_hourly_rate: prevHourly,
+          locked_event_rate: prevEvent,
+          locked_monthly_salary: prevMonthly,
+          rate_locked_at: new Date().toISOString()
+        };
+        shiftLockMetaTags.push(
+          `PriceLockJSON:${JSON.stringify({
+            shiftRateLock: true,
+            shiftId: locked.id,
+            locked_salary_type: locked.locked_salary_type,
+            locked_hourly_rate: locked.locked_hourly_rate,
+            locked_event_rate: locked.locked_event_rate,
+            locked_monthly_salary: locked.locked_monthly_salary,
+            rate_locked_at: locked.rate_locked_at
+          })}`
+        );
+        return locked;
+      });
+    }
+
     let updatedStaff: StaffMember | undefined;
+    const todayYmd = new Date().toISOString().slice(0, 10);
+
     this.state.staff = this.state.staff.map((s) => {
       if (s.id !== id) return s;
       const merged = { ...s, ...updates };
       const nextType = getStaffSalaryType(merged);
+      const nextStartDate =
+        merged.salary_start_date ||
+        (nextType === 'monthly' ? todayYmd : undefined);
+
+      // Maintain monthly salary history so past months retain their historical monthly salary
+      let nextHistory = Array.isArray(s.salary_history) ? [...s.salary_history] : [];
+      const prevType = getStaffSalaryType(s);
+      const prevMonthly = Number(s.monthly_salary ?? 0);
+      const nextMonthly = Number(merged.monthly_salary ?? 0);
+      if (prevType === 'monthly' && prevMonthly > 0 && nextHistory.length === 0) {
+        nextHistory.push({
+          salary_type: 'monthly',
+          hourly_rate: Number(s.hourly_rate || 0),
+          event_rate: Number(s.event_rate || 0),
+          monthly_salary: prevMonthly,
+          effective_from: s.salary_start_date || '2020-01-01'
+        });
+      }
+      if (nextType === 'monthly' && nextMonthly > 0 && (prevType !== 'monthly' || prevMonthly !== nextMonthly)) {
+        const effDate =
+          updates.salary_start_date && updates.salary_start_date !== s.salary_start_date
+            ? updates.salary_start_date
+            : todayYmd;
+        nextHistory = nextHistory.filter((h) => h.effective_from.slice(0, 7) !== effDate.slice(0, 7));
+        nextHistory.push({
+          salary_type: 'monthly',
+          hourly_rate: Number(merged.hourly_rate || 0),
+          event_rate: Number(merged.event_rate || 0),
+          monthly_salary: nextMonthly,
+          effective_from: effDate
+        });
+      }
+
       updatedStaff = {
         ...merged,
         salary_type: nextType,
-        salary_start_date:
-          merged.salary_start_date ||
-          (nextType === 'monthly' ? new Date().toISOString().slice(0, 10) : undefined)
+        salary_start_date: nextStartDate,
+        salary_history: nextHistory.length > 0 ? nextHistory : undefined
       };
       return updatedStaff;
     });
+
+    // 2. Optionally switch existing shifts to the new staff pricing if requested by user
+    const eventsToSyncLabour = new Set<string>();
+    let switchedShiftsCount = 0;
+    if (updatedStaff && shiftRateUpdateMode !== 'keep_existing') {
+      const nextType = getStaffSalaryType(updatedStaff);
+      const nextHourly = Number(updatedStaff.hourly_rate || 0);
+      const nextEvent = Number(
+        updatedStaff.event_rate ?? (nextType === 'per_event' ? nextHourly : 0)
+      );
+      const nextMonthly = Number(
+        updatedStaff.monthly_salary ?? (nextType === 'monthly' ? nextHourly : 0)
+      );
+
+      this.state.shifts = this.state.shifts.map((sh) => {
+        if (sh.staff_member_id !== id) return sh;
+        const evt = this.state.events.find((e) => e.id === sh.event_id);
+        if (!evt || evt.status === 'cancelled') return sh;
+
+        const hasPaidInv = this.state.invoices.some(
+          (inv) =>
+            inv.event_id === evt.id &&
+            inv.status !== 'void' &&
+            (inv.status === 'paid' || inv.kind === 'final')
+        );
+
+        const shouldSwitch =
+          shiftRateUpdateMode === 'update_upcoming'
+            ? evt.status !== 'completed' && !hasPaidInv && (evt.event_date >= todayYmd || sh.attendance_status === 'pending')
+            : !hasPaidInv && evt.status !== 'completed';
+
+        if (!shouldSwitch) return sh;
+
+        switchedShiftsCount += 1;
+        eventsToSyncLabour.add(evt.id);
+        const switched: Shift = {
+          ...sh,
+          locked_salary_type: nextType,
+          locked_hourly_rate: nextHourly,
+          locked_event_rate: nextEvent,
+          locked_monthly_salary: nextMonthly,
+          rate_locked_at: new Date().toISOString()
+        };
+        shiftLockMetaTags.push(
+          `PriceLockJSON:${JSON.stringify({
+            shiftRateLock: true,
+            shiftId: switched.id,
+            locked_salary_type: switched.locked_salary_type,
+            locked_hourly_rate: switched.locked_hourly_rate,
+            locked_event_rate: switched.locked_event_rate,
+            locked_monthly_salary: switched.locked_monthly_salary,
+            rate_locked_at: switched.rate_locked_at
+          })}`
+        );
+        return switched;
+      });
+    }
+
+    // Persist all shift rate locks to local cache
+    this.writePricingLocksCache((cache) => {
+      for (const sh of this.state.shifts) {
+        if (sh.staff_member_id === id && sh.locked_salary_type) {
+          cache.shiftRateLocks[sh.id] = {
+            locked_salary_type: sh.locked_salary_type,
+            locked_hourly_rate: Number(sh.locked_hourly_rate || 0),
+            locked_event_rate: Number(sh.locked_event_rate || 0),
+            locked_monthly_salary: Number(sh.locked_monthly_salary || 0),
+            rate_locked_at: sh.rate_locked_at
+          };
+        }
+      }
+    });
+
+    for (const evtId of eventsToSyncLabour) {
+      this.syncEventQuotationLabourCharges(evtId, { skipSave: true });
+    }
+
     if (updatedStaff) {
       this.writeStaffStructureCacheEntry(updatedStaff);
       const diffs = buildRecordDiffs(prevSnapshot, updatedStaff, [
@@ -5904,13 +6857,18 @@ class DataStore {
       ]);
       const encodedDiffs = encodeAuditDetails({
         changes: diffs,
-        note: this.buildStaffStructureAuditTag(updatedStaff)
+        note: this.buildStaffStructureAuditTag(updatedStaff),
+        meta: shiftLockMetaTags.length > 0 ? shiftLockMetaTags.slice(0, 40).join(' • ') : undefined
       });
+      const policySuffix =
+        switchedShiftsCount > 0
+          ? ` — Switched ${switchedShiftsCount} shift(s) to new rate`
+          : ' — Existing shifts kept at assigned rates';
       this.logMutation({
         entity_type: 'staff',
         entity_id: id,
         action: 'update',
-        summary: `Updated staff profile "${updatedStaff.name}" (${formatStaffSalaryRate(updatedStaff)})`,
+        summary: `Updated staff profile "${updatedStaff.name}" (${formatStaffSalaryRate(updatedStaff)})${policySuffix}`,
         details: encodedDiffs
       });
     }
@@ -5923,8 +6881,105 @@ class DataStore {
     }
   }
 
+  public applyCurrentStaffRateToShift(shiftId: string): Shift | null {
+    const existing = this.state.shifts.find((sh) => sh.id === shiftId);
+    if (!existing) return null;
+    const staffMember = this.state.staff.find((s) => s.id === existing.staff_member_id);
+    if (!staffMember) return null;
+
+    const prevInfo = this.getShiftEffectiveRateInfo(existing, staffMember);
+    const nextType = getStaffSalaryType(staffMember);
+    const nextHourly = Number(staffMember.hourly_rate || 0);
+    const nextEvent = Number(
+      staffMember.event_rate ?? (nextType === 'per_event' ? nextHourly : 0)
+    );
+    const nextMonthly = Number(
+      staffMember.monthly_salary ?? (nextType === 'monthly' ? nextHourly : 0)
+    );
+    const nowIso = new Date().toISOString();
+
+    let updatedShift: Shift | null = null;
+    this.state.shifts = this.state.shifts.map((sh) => {
+      if (sh.id !== shiftId) return sh;
+      updatedShift = {
+        ...sh,
+        locked_salary_type: nextType,
+        locked_hourly_rate: nextHourly,
+        locked_event_rate: nextEvent,
+        locked_monthly_salary: nextMonthly,
+        rate_locked_at: nowIso
+      };
+      return updatedShift;
+    });
+
+    if (!updatedShift) return null;
+    const finalShift: Shift = updatedShift;
+
+    this.writePricingLocksCache((cache) => {
+      cache.shiftRateLocks[finalShift.id] = {
+        locked_salary_type: nextType,
+        locked_hourly_rate: nextHourly,
+        locked_event_rate: nextEvent,
+        locked_monthly_salary: nextMonthly,
+        rate_locked_at: nowIso
+      };
+    });
+
+    this.syncEventQuotationLabourCharges(finalShift.event_id, { skipSave: true });
+
+    const evt = this.state.events.find((e) => e.id === finalShift.event_id);
+    const nextInfo = this.getShiftEffectiveRateInfo(finalShift, staffMember);
+
+    this.logMutation({
+      entity_type: 'shift',
+      entity_id: finalShift.id,
+      parent_event_id: finalShift.event_id,
+      action: 'update',
+      summary: `Switched shift rate for "${staffMember.name}" on "${evt?.title || 'Event'}" (${prevInfo.rateLabel} → ${nextInfo.rateLabel})`,
+      details: encodeAuditDetails({
+        changes: [
+          {
+            field: 'Assigned Shift Rate',
+            before: prevInfo.rateLabel,
+            after: nextInfo.rateLabel
+          }
+        ],
+        meta: `PriceLockJSON:${JSON.stringify({
+          shiftRateLock: true,
+          shiftId: finalShift.id,
+          locked_salary_type: nextType,
+          locked_hourly_rate: nextHourly,
+          locked_event_rate: nextEvent,
+          locked_monthly_salary: nextMonthly,
+          rate_locked_at: nowIso
+        })}`
+      })
+    });
+    this.save();
+
+    return finalShift;
+  }
+
+  public applyCurrentStaffRateToEventShifts(eventId: string): number {
+    const targetShifts = this.state.shifts.filter((sh) => {
+      if (sh.event_id !== eventId) return false;
+      const st = this.state.staff.find((s) => s.id === sh.staff_member_id);
+      return this.getShiftEffectiveRateInfo(sh, st).differsFromCurrentProfile;
+    });
+    let count = 0;
+    for (const sh of targetShifts) {
+      if (this.applyCurrentStaffRateToShift(sh.id)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
   public deleteStaff(id: string) {
     const existing = this.state.staff.find((s) => s.id === id);
+    const affectedEventIds = Array.from(
+      new Set(this.state.shifts.filter((sh) => sh.staff_member_id === id).map((sh) => sh.event_id))
+    );
     const removedShiftsCount = this.state.shifts.filter((sh) => sh.staff_member_id === id).length;
     const removedSalaryCount = Array.isArray(this.state.staffSalaryRecords)
       ? this.state.staffSalaryRecords.filter((sr) => sr.staff_member_id === id).length
@@ -5936,6 +6991,10 @@ class DataStore {
       this.state.staffSalaryRecords = this.state.staffSalaryRecords.filter(
         (sr) => sr.staff_member_id !== id
       );
+    }
+
+    for (const evtId of affectedEventIds) {
+      this.syncEventQuotationLabourCharges(evtId, { skipSave: true });
     }
 
     // If the removed staff member happened to hold the active staff session, sign out cleanly
@@ -5979,24 +7038,72 @@ class DataStore {
       shift.attendance_status === 'present' || shift.attendance_status === 'absent'
         ? shift.attendance_status
         : 'pending';
+
+    const sType = shift.locked_salary_type || getStaffSalaryType(staffMember);
+    const lockedHourly =
+      shift.locked_hourly_rate !== undefined
+        ? Number(shift.locked_hourly_rate)
+        : Number(staffMember?.hourly_rate || 0);
+    const lockedEvent =
+      shift.locked_event_rate !== undefined
+        ? Number(shift.locked_event_rate)
+        : Number(staffMember?.event_rate ?? (sType === 'per_event' ? lockedHourly : 0));
+    const lockedMonthly =
+      shift.locked_monthly_salary !== undefined
+        ? Number(shift.locked_monthly_salary)
+        : Number(staffMember?.monthly_salary ?? (sType === 'monthly' ? lockedHourly : 0));
+    const lockedAt = new Date().toISOString();
+
     const newShift: Shift = {
       ...shift,
       ends_at: endsAt,
       attendance_status: attendanceStatus,
       attendance_marked_at:
         attendanceStatus !== 'pending'
-          ? shift.attendance_marked_at || new Date().toISOString()
+          ? shift.attendance_marked_at || lockedAt
           : undefined,
+      locked_salary_type: sType,
+      locked_hourly_rate: lockedHourly,
+      locked_event_rate: lockedEvent,
+      locked_monthly_salary: lockedMonthly,
+      rate_locked_at: lockedAt,
       id: generateUUID()
     };
     this.state.shifts.push(newShift);
+
+    this.writePricingLocksCache((cache) => {
+      cache.shiftRateLocks[newShift.id] = {
+        locked_salary_type: sType,
+        locked_hourly_rate: lockedHourly,
+        locked_event_rate: lockedEvent,
+        locked_monthly_salary: lockedMonthly,
+        rate_locked_at: lockedAt
+      };
+    });
+
+    // Automatically recalculate and include 'Labour Charges' on the event's Quotation!
+    this.syncEventQuotationLabourCharges(newShift.event_id, { skipSave: true });
+
+    const shiftInfo = this.getShiftEffectiveRateInfo(newShift, staffMember);
+
     this.logMutation({
       entity_type: 'shift',
       entity_id: newShift.id,
       parent_event_id: newShift.event_id,
       action: 'create',
-      summary: `Assigned "${staffMember?.name || 'Staff'}" to "${evt?.title || 'Event'}"`,
-      details: `Role: ${newShift.role_label || 'Crew'} • ${newShift.starts_at.slice(11, 16)} - ${newShift.ends_at.slice(11, 16)} • Attendance: ${attendanceStatus.toUpperCase()}`
+      summary: `Assigned "${staffMember?.name || 'Staff'}" to "${evt?.title || 'Event'}" (${shiftInfo.rateLabel})`,
+      details: encodeAuditDetails({
+        note: `Role: ${newShift.role_label || 'Crew'} • ${newShift.starts_at.slice(11, 16)} - ${newShift.ends_at.slice(11, 16)} • Locked Rate: ${shiftInfo.rateLabel} • Attendance: ${attendanceStatus.toUpperCase()}`,
+        meta: `PriceLockJSON:${JSON.stringify({
+          shiftRateLock: true,
+          shiftId: newShift.id,
+          locked_salary_type: sType,
+          locked_hourly_rate: lockedHourly,
+          locked_event_rate: lockedEvent,
+          locked_monthly_salary: lockedMonthly,
+          rate_locked_at: lockedAt
+        })}`
+      })
     });
     this.save();
 
@@ -6103,6 +7210,8 @@ class DataStore {
 
     if (!updatedShift) return;
 
+    this.syncEventQuotationLabourCharges(updatedShift.event_id, { skipSave: true });
+
     const staffMember = this.state.staff.find((s) => s.id === updatedShift!.staff_member_id);
     const evt = this.state.events.find((e) => e.id === updatedShift!.event_id);
     const statusLabel =
@@ -6170,6 +7279,8 @@ class DataStore {
 
     if (updatedShifts.length === 0) return;
 
+    this.syncEventQuotationLabourCharges(eventId, { skipSave: true });
+
     const evt = this.state.events.find((e) => e.id === eventId);
     this.logMutation({
       entity_type: 'shift',
@@ -6214,6 +7325,9 @@ class DataStore {
       : undefined;
 
     this.state.shifts = this.state.shifts.filter((sh) => sh.id !== id);
+    if (existingShift?.event_id) {
+      this.syncEventQuotationLabourCharges(existingShift.event_id, { skipSave: true });
+    }
     this.logMutation({
       entity_type: 'shift',
       entity_id: id,
@@ -6258,46 +7372,31 @@ class DataStore {
     const salaryType = getStaffSalaryType(staffMember);
     const primaryRate = getStaffPrimaryRate(staffMember);
     const rateDisplay = formatStaffSalaryRate(staffMember);
-    const hourlyRate = Number(staffMember?.hourly_rate || 0);
-    const eventRate = Number(staffMember?.event_rate ?? staffMember?.hourly_rate ?? 0);
 
     const shiftItems: StaffShiftEarningItem[] = this.state.shifts
       .filter((sh) => sh.staff_member_id === staffId)
       .map((sh) => {
         const event = this.state.events.find((e) => e.id === sh.event_id);
-        const hours = this.calculateShiftHours(sh.starts_at, sh.ends_at);
+        const eff = this.getShiftEffectiveRateInfo(sh, staffMember);
         const attendanceStatus: ShiftAttendanceStatus =
           sh.attendance_status === 'present' || sh.attendance_status === 'absent'
             ? sh.attendance_status
             : 'pending';
         const isAttended = attendanceStatus === 'present' && event?.status !== 'cancelled';
-
-        // Calculate shift-based earnings according to the staff member's selected salary structure:
-        // - 'hourly': hours * hourlyRate (when Present)
-        // - 'per_event': flat eventRate per attended shift (when Present)
-        // - 'monthly': 0 per shift (covered by fixed monthly salary)
-        let earnedAmount = 0;
-        let rateLabel = `₹${hourlyRate.toLocaleString('en-IN')}/hr`;
-        if (salaryType === 'per_event') {
-          earnedAmount = isAttended ? Math.round(eventRate) : 0;
-          rateLabel = `₹${eventRate.toLocaleString('en-IN')}/event`;
-        } else if (salaryType === 'monthly') {
-          earnedAmount = 0;
-          rateLabel = 'Monthly Fixed';
-        } else {
-          earnedAmount = isAttended ? Math.round(hours * hourlyRate) : 0;
-        }
+        const earnedAmount = isAttended ? eff.payrollShiftAmount : 0;
 
         return {
           shift: sh,
           event,
-          hours,
-          hourlyRate,
-          salaryType,
-          rateLabel,
+          hours: eff.hours,
+          hourlyRate: eff.hourlyRate,
+          salaryType: eff.salaryType,
+          rateLabel: eff.rateLabel,
           attendanceStatus,
           isAttended,
-          earnedAmount
+          earnedAmount,
+          differsFromCurrentProfile: eff.differsFromCurrentProfile,
+          currentProfileRateLabel: eff.currentProfileRateLabel
         };
       })
       .filter((item) => !item.event || item.event.status !== 'cancelled')
@@ -6319,13 +7418,11 @@ class DataStore {
       (sr) => sr.staff_member_id === staffId
     );
 
-    const monthlyMonthsCount = staffMember
-      ? calculateMonthlySalaryMonthsCount(staffMember, this.state.shifts, this.state.staffSalaryRecords || [])
-      : 0;
-    const monthlyBaseEarnings =
-      salaryType === 'monthly'
-        ? Math.round(monthlyMonthsCount * Number(staffMember?.monthly_salary ?? staffMember?.hourly_rate ?? 0))
-        : 0;
+    const monthlyDetails = staffMember
+      ? calculateMonthlySalaryDetails(staffMember, this.state.shifts, this.state.staffSalaryRecords || [])
+      : { monthsCount: 0, totalAmount: 0 };
+    const monthlyMonthsCount = monthlyDetails.monthsCount;
+    const monthlyBaseEarnings = monthlyDetails.totalAmount;
 
     const earningRecords = allRecords
       .filter((sr) => sr.record_type === 'earning')
@@ -6492,6 +7589,7 @@ class DataStore {
     status?: Invoice['status'];
     show_bank_details?: boolean;
     show_payment_details?: boolean;
+    locked_items_snapshot?: InvoiceLineSnapshot[];
     notes?: string;
   }) {
     const evt = this.state.events.find((e) => e.id === inv.event_id);
@@ -6506,6 +7604,10 @@ class DataStore {
     const subtotal = Number(inv.subtotal || 0);
     const discount = Number(inv.discount || 0);
     const amount = Math.max(0, subtotal - discount);
+    const lockedItems =
+      inv.locked_items_snapshot && inv.locked_items_snapshot.length > 0
+        ? inv.locked_items_snapshot
+        : this.buildInvoiceItemsSnapshot(inv.event_id);
 
     const newInv: Invoice = {
       id: generateUUID(),
@@ -6521,10 +7623,16 @@ class DataStore {
       status: inv.status || 'sent',
       show_bank_details: inv.show_bank_details !== false,
       show_payment_details: inv.show_payment_details !== false,
+      locked_items_snapshot: lockedItems,
       notes: inv.notes || '',
       created_at: new Date().toISOString()
     };
     this.state.invoices.unshift(newInv);
+    this.writePricingLocksCache((cache) => {
+      if (lockedItems.length > 0) {
+        cache.invoiceItemLocks[newInv.id] = lockedItems;
+      }
+    });
     this.logMutation({
       entity_type: 'invoice',
       entity_id: newInv.id,
@@ -7147,7 +8255,7 @@ class DataStore {
       .filter((ex) => ex.category === 'other_expense')
       .reduce((s, ex) => s + Number(ex.amount || 0), 0);
 
-    // Attended shift wages for this event (honoring each staff member's salary structure)
+    // Attended shift wages for this event (honoring each shift's locked historical salary structure)
     let staffShiftWages = 0;
     let attendedShiftCount = 0;
     if (event && event.status !== 'cancelled') {
@@ -7155,18 +8263,8 @@ class DataStore {
       for (const sh of eventShifts) {
         if (sh.attendance_status === 'present') {
           attendedShiftCount += 1;
-          const staffMember = this.state.staff.find((s) => s.id === sh.staff_member_id);
-          const sType = getStaffSalaryType(staffMember);
-          if (sType === 'per_event') {
-            staffShiftWages += Math.round(Number(staffMember?.event_rate ?? staffMember?.hourly_rate ?? 0));
-          } else if (sType === 'monthly') {
-            // Fixed monthly salaried staff do not accrue extra per-shift hourly cost
-            staffShiftWages += 0;
-          } else {
-            const rate = Number(staffMember?.hourly_rate || 0);
-            const hrs = this.calculateShiftHours(sh.starts_at, sh.ends_at);
-            staffShiftWages += Math.round(hrs * rate);
-          }
+          const eff = this.getShiftEffectiveRateInfo(sh);
+          staffShiftWages += eff.payrollShiftAmount;
         }
       }
     }
@@ -7239,7 +8337,7 @@ class DataStore {
     };
   }
 
-  // Automatic Stock Estimation for an Event
+  // Automatic Stock Estimation for an Event (uses locked historical ingredient costs per event when available)
   public getEventStockEstimation(eventId: string): {
     items: StockEstimationItem[];
     totalEstimatedCost: number;
@@ -7262,7 +8360,7 @@ class DataStore {
 
     eventItems.forEach((ei) => {
       const menuItem = this.state.menuItems.find((m) => m.id === ei.menu_item_id);
-      const dishName = menuItem ? menuItem.name : 'Unknown Dish';
+      const dishName = ei.dish_name || (menuItem ? menuItem.name : 'Unknown Dish');
       const recipes = this.state.recipes.filter((r) => r.menu_item_id === ei.menu_item_id);
 
       const multiplier =
@@ -7294,7 +8392,12 @@ class DataStore {
       const qtyNeeded = Number(entry.needed.toFixed(2));
       const shortageQty = Math.max(0, Number((qtyNeeded - currentStock).toFixed(2)));
       const isShortage = shortageQty > 0;
-      const estimatedCost = Math.round(shortageQty * entry.ingredient.cost_per_unit);
+      const effectiveCostPerUnit =
+        event.locked_ingredient_costs &&
+        event.locked_ingredient_costs[entry.ingredient.id] !== undefined
+          ? Number(event.locked_ingredient_costs[entry.ingredient.id])
+          : Number(entry.ingredient.cost_per_unit || 0);
+      const estimatedCost = Math.round(shortageQty * effectiveCostPerUnit);
 
       if (isShortage) {
         totalShortageCount++;
@@ -7305,7 +8408,7 @@ class DataStore {
         ingredientId: entry.ingredient.id,
         ingredientName: entry.ingredient.name,
         unit: entry.ingredient.unit,
-        costPerUnit: entry.ingredient.cost_per_unit,
+        costPerUnit: effectiveCostPerUnit,
         qtyNeeded,
         currentStock,
         shortageQty,

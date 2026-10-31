@@ -266,7 +266,7 @@ function buildDatasetSheets() {
         Event: evt?.title || '',
         'Event Date': evt?.event_date || '',
         'Line Type': 'Dish',
-        Description: dish?.name || '',
+        Description: ei.dish_name || dish?.name || '',
         'Pricing Mode': ei.pricing_type,
         Quantity: qty,
         'Rate (INR)': rate,
@@ -288,36 +288,29 @@ function buildDatasetSheets() {
     })
   ];
 
-  // 7. Staff Attendance Register & Shifts (Strict rule: hide payment if NOT Present!)
+  // 7. Staff Attendance Register & Shifts (Strict rule: hide payment if NOT Present & honor locked shift rates!)
   const staffAttendanceRows = state.shifts.map((sh) => {
     const evt = state.events.find((e) => e.id === sh.event_id);
     const st = state.staff.find((s) => s.id === sh.staff_member_id);
-    const hrs = store.calculateShiftHours(sh.starts_at, sh.ends_at);
+    const eff = store.getShiftEffectiveRateInfo(sh, st);
     const status = sh.attendance_status || 'pending';
     const isPresent = status === 'present' && evt?.status !== 'cancelled';
-    const sType = getStaffSalaryType(st);
-    const shiftEarned = !isPresent
-      ? ''
-      : sType === 'per_event'
-      ? Math.round(Number(st?.event_rate ?? st?.hourly_rate ?? 0))
-      : sType === 'monthly'
-      ? 0
-      : Math.round(hrs * Number(st?.hourly_rate || 0));
     return {
       'Event Date': evt?.event_date || '',
       Event: evt?.title || '',
       'Staff Name': st?.name || '',
       Phone: st?.phone || '',
       'Assigned Role': sh.role_label || st?.role_title || '',
-      'Salary Type': formatStaffSalaryTypeLabel(sType),
+      'Salary Type': formatStaffSalaryTypeLabel(eff.salaryType),
+      'Assigned Shift Rate': eff.rateLabel,
       'Start Time': sh.starts_at ? sh.starts_at.slice(11, 16) : '',
       'End Time': sh.ends_at ? sh.ends_at.slice(11, 16) : '',
-      Hours: hrs,
+      Hours: eff.hours,
       'Attendance Status': status.toUpperCase(),
       'Earned Shift Pay (INR)': isPresent
-        ? sType === 'monthly'
+        ? eff.salaryType === 'monthly'
           ? 'Monthly Fixed'
-          : shiftEarned
+          : eff.payrollShiftAmount
         : '— (Not Attended)'
     };
   });

@@ -153,10 +153,34 @@ export async function generateInvoicePdfBlob(
           </thead>
           <tbody>
             ${
-              evtItems.length > 0 || evtExtras.length > 0
+              Array.isArray(liveInv.locked_items_snapshot) && liveInv.locked_items_snapshot.length > 0
+                ? liveInv.locked_items_snapshot
+                    .map(
+                      (snap) => `
+                        <tr style="border-bottom: 1px solid #e2e8f0; background: ${snap.is_extra ? '#fcfcfd' : '#ffffff'};">
+                          <td style="padding: 7px 6px;">
+                            <div style="font-weight: 600; color: #0f172a;">${escapeHtml(snap.description)}</div>
+                            ${snap.category ? `<div style="font-size: 0.7rem; color: #64748b;">${escapeHtml(snap.category)}</div>` : ''}
+                          </td>
+                          <td style="text-align: center; padding: 7px 6px; color: #334155;">
+                            ${escapeHtml(snap.qty_label)}
+                          </td>
+                          <td style="text-align: right; padding: 7px 6px; color: #334155;">
+                            ${escapeHtml(snap.rate_label)}
+                          </td>
+                          <td style="text-align: right; padding: 7px 6px; font-weight: 600; color: #0f172a;">
+                            ₹${Number(snap.line_total || 0).toLocaleString('en-IN')}
+                          </td>
+                        </tr>
+                      `
+                    )
+                    .join('')
+                : evtItems.length > 0 || evtExtras.length > 0
                 ? [
                     ...evtItems.map((item) => {
                       const mi = state.menuItems.find((m) => m.id === item.menu_item_id);
+                      const dishName = item.dish_name || mi?.name || 'Menu Item';
+                      const dishCategory = item.dish_category || mi?.category || '';
                       const isPerKg = item.pricing_type === 'per_kg';
                       const qty =
                         item.quantity !== undefined
@@ -169,8 +193,8 @@ export async function generateInvoicePdfBlob(
                       return `
                         <tr style="border-bottom: 1px solid #e2e8f0;">
                           <td style="padding: 7px 6px;">
-                            <div style="font-weight: 600; color: #0f172a;">${escapeHtml(mi?.name || 'Menu Item')}</div>
-                            ${mi?.category ? `<div style="font-size: 0.7rem; color: #64748b;">${escapeHtml(mi.category)}</div>` : ''}
+                            <div style="font-weight: 600; color: #0f172a;">${escapeHtml(dishName)}</div>
+                            ${dishCategory ? `<div style="font-size: 0.7rem; color: #64748b;">${escapeHtml(dishCategory)}</div>` : ''}
                           </td>
                           <td style="text-align: center; padding: 7px 6px; color: #334155;">
                             ${qty} ${isPerKg ? 'Kg' : 'Pax'}
@@ -189,7 +213,7 @@ export async function generateInvoicePdfBlob(
                         <tr style="border-bottom: 1px solid #e2e8f0; background: #fcfcfd;">
                           <td style="padding: 7px 6px;">
                             <div style="font-weight: 600; color: #0f172a;">${escapeHtml(ex.description)}</div>
-                            <div style="font-size: 0.7rem; color: #64748b;">Logistics, Transport &amp; Additional Charges</div>
+                            <div style="font-size: 0.7rem; color: #64748b;">Service, Labour &amp; Additional Charges</div>
                           </td>
                           <td style="text-align: center; padding: 7px 6px; color: #334155;">1 Lot</td>
                           <td style="text-align: right; padding: 7px 6px; color: #334155;">₹${ex.amount.toLocaleString('en-IN')}</td>

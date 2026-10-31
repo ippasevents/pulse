@@ -3,8 +3,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { store } from '@/lib/store';
 import {
-  MALAYALAM_USER_MANUALS,
+  ENGLISH_USER_MANUALS,
+  MALAYALAM_EDITION_USER_MANUALS,
+  getUserManualsByLanguage,
   MANUAL_ROLE_ORDER,
+  ManualLanguage,
   ManualRoleKey
 } from '@/lib/userManualsMalayalam';
 import {
@@ -12,7 +15,8 @@ import {
   downloadRoleUserManualPdf
 } from '@/lib/userManualPdfGenerator';
 
-const EN_FONT_FAMILY = `'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif`;
+const UI_FONT_FAMILY = `'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif`;
+const MANUAL_CONTENT_FONT_FAMILY = `'Plus Jakarta Sans', 'Noto Sans Malayalam', -apple-system, BlinkMacSystemFont, sans-serif`;
 
 const ROLE_CARD_SURFACES: Record<
   ManualRoleKey,
@@ -42,7 +46,8 @@ const ROLE_CARD_SURFACES: Record<
 
 export default function UserManualsPage() {
   const [state, setState] = useState(store.getState());
-  const [downloadingKey, setDownloadingKey] = useState<ManualRoleKey | null>(null);
+  const [selectedLanguage, setSelectedLanguage] = useState<ManualLanguage>('en');
+  const [downloadingToken, setDownloadingToken] = useState<string | null>(null);
   const [batchProgress, setBatchProgress] = useState<string>('');
   const [statusBanner, setStatusBanner] = useState<{
     type: 'success' | 'error';
@@ -66,6 +71,11 @@ export default function UserManualsPage() {
     return MANUAL_ROLE_ORDER;
   }, [state.currentRole]);
 
+  const activeManualsMap = useMemo(
+    () => getUserManualsByLanguage(selectedLanguage),
+    [selectedLanguage]
+  );
+
   const businessName = state.settings?.name || 'IPPAS FOOD SERVICE & EVENTS';
   const businessPhone = state.settings?.phone || '+91 98470 11111';
 
@@ -76,16 +86,17 @@ export default function UserManualsPage() {
     }, 4500);
   };
 
-  const handleDownloadSinglePdf = async (key: ManualRoleKey) => {
-    if (downloadingKey || batchProgress) return;
-    setDownloadingKey(key);
-    const manual = MALAYALAM_USER_MANUALS[key];
-    const ok = await downloadRoleUserManualPdf(key, businessName, businessPhone);
-    setDownloadingKey(null);
+  const handleDownloadSinglePdf = async (key: ManualRoleKey, lang: ManualLanguage) => {
+    if (downloadingToken || batchProgress) return;
+    const token = `${key}:${lang}`;
+    setDownloadingToken(token);
+    const manual = getUserManualsByLanguage(lang)[key];
+    const ok = await downloadRoleUserManualPdf(key, businessName, businessPhone, lang);
+    setDownloadingToken(null);
     if (ok) {
       showToast(
         'success',
-        `Downloaded ${manual.titleMl} (${manual.pdfFilename}) successfully.`
+        `Downloaded ${manual.englishRoleLabel} User Manual (${lang === 'ml' ? 'Malayalam' : 'English'} PDF: ${manual.pdfFilename}) successfully.`
       );
     } else {
       showToast(
@@ -95,21 +106,26 @@ export default function UserManualsPage() {
     }
   };
 
-  const handleDownloadAllFourPdfs = async () => {
-    if (downloadingKey || batchProgress) return;
+  const handleDownloadAllFourPdfs = async (lang: ManualLanguage) => {
+    if (downloadingToken || batchProgress) return;
+    const manuals = getUserManualsByLanguage(lang);
+    const editionName = lang === 'ml' ? 'Malayalam' : 'English';
     const ok = await downloadAllFourUserManualPdfs(
       businessName,
       businessPhone,
       (idx, key) => {
-        const m = MALAYALAM_USER_MANUALS[key];
-        setBatchProgress(`Generating PDF ${idx} of 4: ${m.titleMl}...`);
-      }
+        const m = manuals[key];
+        setBatchProgress(
+          `Generating ${editionName} PDF ${idx} of 4: ${m.englishRoleLabel} Manual...`
+        );
+      },
+      lang
     );
     setBatchProgress('');
     if (ok) {
       showToast(
         'success',
-        'Downloaded all 4 official User Manual PDFs (Owner, Manager, Accountant & Staff).'
+        `Downloaded all 4 official ${editionName} User Manual PDFs (Owner, Manager, Accountant & Staff).`
       );
     } else {
       showToast('error', 'Could not complete the batch PDF download. Please try again.');
@@ -121,13 +137,13 @@ export default function UserManualsPage() {
   return (
     <div
       style={{
-        fontFamily: EN_FONT_FAMILY,
+        fontFamily: UI_FONT_FAMILY,
         maxWidth: '1160px',
         margin: '0 auto',
         paddingBottom: '2.5rem'
       }}
     >
-      {/* Clean Page Header */}
+      {/* Clean Page Header (100% English App Chrome + Bilingual Manual Edition Controls) */}
       <div
         style={{
           display: 'flex',
@@ -135,12 +151,12 @@ export default function UserManualsPage() {
           alignItems: 'flex-start',
           gap: '1.25rem',
           flexWrap: 'wrap',
-          marginBottom: '1.5rem',
+          marginBottom: '1.35rem',
           paddingBottom: '1.25rem',
           borderBottom: '1px solid #e2e8f0'
         }}
       >
-        <div style={{ maxWidth: '740px' }}>
+        <div style={{ maxWidth: '720px' }}>
           <div
             style={{
               fontSize: '0.78rem',
@@ -161,7 +177,7 @@ export default function UserManualsPage() {
               textWrap: 'balance'
             }}
           >
-            Official Role-Based User Manuals (PDF Download)
+            Official Role-Based User Manuals (English &amp; Malayalam PDFs)
           </h1>
           <p
             style={{
@@ -173,28 +189,107 @@ export default function UserManualsPage() {
             }}
           >
             {showAllFourGrid
-              ? 'Download the revised, comprehensive English A4 PDF user manuals for Owner, Manager, Accountant, and Staff—updated with Top Clients analytics, flexible staff salary structures, separated Salary Advances, and full database backup & restore.'
-              : 'Download your revised, step-by-step official English A4 PDF user manual with complete instructions for every workflow in your workspace.'}
+              ? 'Download the revised A4 PDF User Manuals in both English and Malayalam for Owner, Manager, Accountant, and Staff—covering historical stock & menu price locks, mandatory quotation Labour Charges, shift rate switching, and full database backup & restore.'
+              : 'Download your official step-by-step A4 PDF User Manual in either English or Malayalam with complete instructions for every workflow in your workspace.'}
           </p>
         </div>
 
-        {showAllFourGrid && (
-          <button
-            type="button"
-            onClick={handleDownloadAllFourPdfs}
-            disabled={Boolean(downloadingKey || batchProgress)}
-            className="btn btn-primary"
+        {/* Language Edition Switcher + Batch Download */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: '0.65rem'
+          }}
+        >
+          <div
+            role="tablist"
+            aria-label="Select User Manual Language Edition"
             style={{
-              whiteSpace: 'nowrap',
-              padding: '0.68rem 1.2rem',
-              fontSize: '0.86rem',
-              fontWeight: 700,
-              borderRadius: '10px'
+              display: 'inline-flex',
+              padding: '0.28rem',
+              borderRadius: '10px',
+              background: '#f1f5f9',
+              border: '1px solid #cbd5e1',
+              gap: '0.25rem'
             }}
           >
-            {batchProgress || 'Download All 4 PDFs'}
-          </button>
-        )}
+            {(
+              [
+                { id: 'en' as const, label: 'English Edition' },
+                { id: 'ml' as const, label: 'Malayalam Edition' }
+              ] as const
+            ).map((tab) => {
+              const active = selectedLanguage === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setSelectedLanguage(tab.id)}
+                  style={{
+                    padding: '0.45rem 0.9rem',
+                    borderRadius: '7px',
+                    border: 'none',
+                    background: active ? '#0f172a' : 'transparent',
+                    color: active ? '#ffffff' : '#334155',
+                    fontWeight: 700,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    transition: 'background 0.15s ease, color 0.15s ease'
+                  }}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {showAllFourGrid && (
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => handleDownloadAllFourPdfs('en')}
+                disabled={Boolean(downloadingToken || batchProgress)}
+                className="btn btn-primary"
+                style={{
+                  whiteSpace: 'nowrap',
+                  padding: '0.58rem 0.95rem',
+                  fontSize: '0.81rem',
+                  fontWeight: 700,
+                  borderRadius: '9px'
+                }}
+              >
+                {batchProgress && batchProgress.includes('English')
+                  ? batchProgress
+                  : 'Download All 4 English PDFs'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDownloadAllFourPdfs('ml')}
+                disabled={Boolean(downloadingToken || batchProgress)}
+                className="btn btn-secondary"
+                style={{
+                  whiteSpace: 'nowrap',
+                  padding: '0.58rem 0.95rem',
+                  fontSize: '0.81rem',
+                  fontWeight: 700,
+                  borderRadius: '9px',
+                  borderColor: '#94a3b8',
+                  color: '#0f172a',
+                  background: '#ffffff'
+                }}
+              >
+                {batchProgress && batchProgress.includes('Malayalam')
+                  ? batchProgress
+                  : 'Download All 4 Malayalam PDFs'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Download Confirmation Banner */}
@@ -233,22 +328,26 @@ export default function UserManualsPage() {
         </div>
       )}
 
-      {/* Simplified PDF-Download-Only Cards */}
+      {/* Role-Based Bilingual PDF Download Cards */}
       <div
         style={{
           display: 'grid',
           gridTemplateColumns:
             visibleManualKeys.length === 1
-              ? 'minmax(280px, 560px)'
-              : 'repeat(auto-fit, minmax(270px, 1fr))',
+              ? 'minmax(280px, 580px)'
+              : 'repeat(auto-fit, minmax(275px, 1fr))',
           gap: '1.15rem'
         }}
       >
         {visibleManualKeys.map((roleKey, idx) => {
-          const m = MALAYALAM_USER_MANUALS[roleKey];
+          const m = activeManualsMap[roleKey];
+          const enManual = ENGLISH_USER_MANUALS[roleKey];
+          const mlManual = MALAYALAM_EDITION_USER_MANUALS[roleKey];
           const surface = ROLE_CARD_SURFACES[roleKey];
           const chapters = m.pages.flatMap((p) => p.chapters);
-          const isBusy = downloadingKey === roleKey;
+          const isBusyEn = downloadingToken === `${roleKey}:en`;
+          const isBusyMl = downloadingToken === `${roleKey}:ml`;
+          const anyBusy = Boolean(downloadingToken || batchProgress);
 
           return (
             <div
@@ -266,10 +365,11 @@ export default function UserManualsPage() {
                 boxShadow: '0 4px 14px -4px rgba(15, 23, 42, 0.06)'
               }}
             >
-              <div>
+              <div style={{ fontFamily: MANUAL_CONTENT_FONT_FAMILY }}>
                 <div
                   className="tabular-nums"
                   style={{
+                    fontFamily: UI_FONT_FAMILY,
                     fontSize: '0.75rem',
                     color: '#64748b',
                     marginBottom: '0.4rem',
@@ -286,15 +386,17 @@ export default function UserManualsPage() {
                   <span>{m.pages.length} A4 Pages</span>
                   <span aria-hidden="true">&middot;</span>
                   <span>{chapters.length} Chapters</span>
+                  <span aria-hidden="true">&middot;</span>
+                  <span>{selectedLanguage === 'ml' ? 'Malayalam Preview' : 'English Preview'}</span>
                 </div>
 
                 <h2
                   style={{
-                    fontSize: '1.2rem',
+                    fontSize: selectedLanguage === 'ml' ? '1.14rem' : '1.2rem',
                     fontWeight: 800,
                     color: '#0f172a',
                     margin: '0 0 0.4rem 0',
-                    lineHeight: 1.35
+                    lineHeight: 1.4
                   }}
                 >
                   {m.titleMl}
@@ -302,42 +404,43 @@ export default function UserManualsPage() {
 
                 <p
                   style={{
-                    fontSize: '0.83rem',
+                    fontSize: selectedLanguage === 'ml' ? '0.81rem' : '0.83rem',
                     color: '#475569',
-                    lineHeight: 1.6,
+                    lineHeight: selectedLanguage === 'ml' ? 1.68 : 1.6,
                     margin: '0 0 0.9rem 0'
                   }}
                 >
                   {m.subtitleMl}
                 </p>
 
-                {/* Concise Table of Contents Preview */}
+                {/* Concise Table of Contents Preview in Selected Language */}
                 <div
                   style={{
                     paddingTop: '0.8rem',
                     borderTop: '1px solid rgba(15, 23, 42, 0.07)',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.32rem'
+                    gap: '0.34rem'
                   }}
                 >
                   <div
                     style={{
+                      fontFamily: UI_FONT_FAMILY,
                       fontSize: '0.74rem',
                       fontWeight: 700,
                       color: '#334155',
                       marginBottom: '0.15rem'
                     }}
                   >
-                    Included Chapters:
+                    Included Chapters ({selectedLanguage === 'ml' ? 'Malayalam Edition' : 'English Edition'}):
                   </div>
                   {chapters.map((ch) => (
                     <div
                       key={ch.number}
                       style={{
-                        fontSize: '0.78rem',
+                        fontSize: selectedLanguage === 'ml' ? '0.77rem' : '0.78rem',
                         color: '#475569',
-                        lineHeight: 1.48
+                        lineHeight: selectedLanguage === 'ml' ? 1.58 : 1.48
                       }}
                     >
                       <strong
@@ -352,42 +455,62 @@ export default function UserManualsPage() {
                 </div>
               </div>
 
+              {/* Dual Direct Download Buttons (English PDF + Malayalam PDF) */}
               <div style={{ paddingTop: '0.75rem', borderTop: '1px solid rgba(15, 23, 42, 0.07)' }}>
                 <div
                   style={{
-                    fontSize: '0.72rem',
+                    fontSize: '0.71rem',
                     color: '#64748b',
-                    marginBottom: '0.65rem',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
+                    marginBottom: '0.6rem',
+                    lineHeight: 1.45
                   }}
-                  title={m.pdfFilename}
                 >
-                  PDF File: {m.pdfFilename}
+                  <div>EN File: {enManual.pdfFilename}</div>
+                  <div>ML File: {mlManual.pdfFilename}</div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleDownloadSinglePdf(roleKey)}
-                  disabled={Boolean(downloadingKey || batchProgress)}
-                  style={{
-                    width: '100%',
-                    background: isBusy ? '#64748b' : surface.buttonBg,
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '10px',
-                    padding: '0.68rem 1rem',
-                    fontSize: '0.86rem',
-                    fontWeight: 700,
-                    cursor: isBusy ? 'wait' : 'pointer',
-                    whiteSpace: 'nowrap',
-                    boxShadow: '0 4px 10px -2px rgba(15, 23, 42, 0.16)',
-                    transition: 'transform 0.15s ease, opacity 0.15s ease'
-                  }}
-                >
-                  {isBusy ? 'Generating PDF...' : 'Download Official PDF'}
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadSinglePdf(roleKey, 'en')}
+                    disabled={anyBusy}
+                    style={{
+                      width: '100%',
+                      background: isBusyEn ? '#64748b' : surface.buttonBg,
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '10px',
+                      padding: '0.64rem 0.95rem',
+                      fontSize: '0.84rem',
+                      fontWeight: 700,
+                      cursor: anyBusy ? 'wait' : 'pointer',
+                      whiteSpace: 'nowrap',
+                      boxShadow: '0 4px 10px -2px rgba(15, 23, 42, 0.16)'
+                    }}
+                  >
+                    {isBusyEn ? 'Generating English PDF...' : 'Download English PDF'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadSinglePdf(roleKey, 'ml')}
+                    disabled={anyBusy}
+                    style={{
+                      width: '100%',
+                      background: isBusyMl ? '#e2e8f0' : '#ffffff',
+                      color: m.accentColor,
+                      border: `1.5px solid ${m.accentColor}`,
+                      borderRadius: '10px',
+                      padding: '0.6rem 0.95rem',
+                      fontSize: '0.84rem',
+                      fontWeight: 700,
+                      cursor: anyBusy ? 'wait' : 'pointer',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {isBusyMl ? 'Generating Malayalam PDF...' : 'Download Malayalam PDF'}
+                  </button>
+                </div>
               </div>
             </div>
           );
