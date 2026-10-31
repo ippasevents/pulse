@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { store } from '@/lib/store';
@@ -9,6 +9,13 @@ import { PWAInstallButton } from './PWAInstallButton';
 import StockNotificationModal from './StockNotificationModal';
 import OwnerActivityAlertModal from './OwnerActivityAlertModal';
 import ChangePasswordModal from './ChangePasswordModal';
+
+interface NavRoute {
+  label: string;
+  href: string;
+  desc?: string;
+  accent?: string;
+}
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -19,8 +26,12 @@ export default function Navbar() {
   const [unreadAuditCount, setUnreadAuditCount] = useState(0);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
-
   const [isDbConnected, setIsDbConnected] = useState(false);
+
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+  const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const update = () => {
@@ -44,32 +55,100 @@ export default function Navbar() {
     return unsubscribe;
   }, []);
 
-  const handleLogout = () => {
-    if (confirm('Are you sure you want to log out of your account?')) {
-      store.logout();
+  // Close dropdowns on route change or outside click
+  useEffect(() => {
+    setMoreMenuOpen(false);
+    setProfileMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+      }
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setProfileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  const isStaff = role === 'staff';
+
+  const getPrimaryAndMoreRoutes = (): { primary: NavRoute[]; more: NavRoute[] } => {
+    if (role === 'staff') {
+      return {
+        primary: [
+          { label: 'Duty & Salary', href: '/dashboard' },
+          { label: 'മലയാളം മാനുവൽ', href: '/manuals' }
+        ],
+        more: []
+      };
     }
+
+    if (role === 'accountant') {
+      return {
+        primary: [
+          { label: 'Dashboard', href: '/dashboard' },
+          { label: 'Invoices', href: '/invoices' },
+          { label: 'Events', href: '/events' },
+          { label: 'Clients', href: '/clients' },
+          { label: 'Staff', href: '/staff' }
+        ],
+        more: [
+          { label: 'മലയാളം യൂസർ മാനുവൽ (PDF)', href: '/manuals', desc: 'Malayalam PDF user guide', accent: '#059669' }
+        ]
+      };
+    }
+
+    if (role === 'manager') {
+      return {
+        primary: [
+          { label: 'Dashboard', href: '/dashboard' },
+          { label: 'Events', href: '/events' },
+          { label: 'Menu', href: '/menu' },
+          { label: 'Stock', href: '/stock' },
+          { label: 'Staff', href: '/staff' }
+        ],
+        more: [
+          { label: 'Clients Directory', href: '/clients', desc: 'Customer contacts & bookings', accent: '#2563eb' },
+          { label: 'മലയാളം യൂസർ മാനുവൽ (PDF)', href: '/manuals', desc: 'Malayalam PDF user manuals', accent: '#059669' }
+        ]
+      };
+    }
+
+    // Owner & Super Admin — clean 5 primary links + organized More menu
+    return {
+      primary: [
+        { label: 'Dashboard', href: '/dashboard' },
+        { label: 'Events', href: '/events' },
+        { label: 'Menu', href: '/menu' },
+        { label: 'Invoices', href: '/invoices' },
+        { label: 'Staff', href: '/staff' }
+      ],
+      more: [
+        { label: 'Stock & Inventory', href: '/stock', desc: 'Warehouse pantry, bulk update & CSV', accent: '#d97706' },
+        { label: 'Clients Directory', href: '/clients', desc: 'Customer profiles & event history', accent: '#2563eb' },
+        { label: 'Profit & Loss (P&L)', href: '/pnl', desc: 'Event expenditure & net profit', accent: '#e11d48' },
+        { label: 'Activity History', href: '/activity', desc: 'Previous → New edited data log', accent: '#6366f1' },
+        { label: 'Team & Passwords', href: '/users', desc: 'Manage Manager, Accountant & Staff logins', accent: '#7c3aed' },
+        { label: 'Business Settings', href: '/settings', desc: 'Bank details, terms & cloud sync', accent: '#0d9488' },
+        { label: 'മലയാളം യൂസർ മാനുവൽ (PDF)', href: '/manuals', desc: '4 role-wise Malayalam PDF manuals', accent: '#059669' }
+      ]
+    };
   };
 
-  // Visible nav items strictly filtered per role
-  const allNavItems = [
-    { label: 'Duty & Salary', href: '/dashboard', roles: ['staff'] },
-    { label: 'Dashboard', href: '/dashboard', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
-    { label: 'Events & Quotes', href: '/events', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
-    { label: 'Clients', href: '/clients', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
-    { label: 'Menu & Recipes', href: '/menu', roles: ['super_admin', 'owner', 'manager'] },
-    { label: 'Stock & Inventory', href: '/stock', roles: ['super_admin', 'owner', 'manager'] },
-    { label: 'Staff & Salary', href: '/staff', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
-    { label: 'Invoices & Billing', href: '/invoices', roles: ['super_admin', 'owner', 'accountant'] },
-    { label: 'Profit & Loss', href: '/pnl', roles: ['super_admin', 'owner'] },
-    { label: 'Notifications', href: '/activity', roles: ['super_admin', 'owner'] },
-    { label: 'Users & Passwords', href: '/users', roles: ['super_admin', 'owner'] },
-    { label: 'Settings', href: '/settings', roles: ['super_admin', 'owner'] },
-    { label: 'User Manuals', href: '/manuals', roles: ['super_admin', 'owner', 'manager', 'accountant', 'staff'] }
-  ];
+  const { primary: primaryRoutes, more: moreRoutes } = getPrimaryAndMoreRoutes();
 
-  const visibleNavItems = allNavItems.filter((item) => item.roles.includes(role));
+  const isRouteActive = (href: string) =>
+    pathname === href ||
+    (href === '/dashboard' && pathname === '/') ||
+    (href !== '/dashboard' && pathname.startsWith(href));
 
-  const roleColors: Record<UserRole, string> = {
+  const isAnyMoreActive = moreRoutes.some((r) => isRouteActive(r.href));
+
+  const roleAccent: Record<UserRole, string> = {
     super_admin: '#4f46e5',
     owner: '#e11d48',
     manager: '#2563eb',
@@ -77,328 +156,261 @@ export default function Navbar() {
     staff: '#7c3aed'
   };
 
-  const isStaff = role === 'staff';
+  const roleDisplayName: Record<UserRole, string> = {
+    super_admin: 'System Admin',
+    owner: 'Owner',
+    manager: 'Manager',
+    accountant: 'Accountant',
+    staff: 'Staff'
+  };
+
+  const initials = (currentUser?.full_name || 'IP')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('');
 
   return (
     <>
       <header className="top-navbar">
-        {/* Desktop Top Status Banner */}
-        <div className="role-switcher-banner desktop-only">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <span style={{ opacity: 0.8 }}>Logged in as:</span>
-            <strong>{currentUser?.full_name || 'User'}</strong>
-            <span
-              className="role-tag-badge"
-              style={{
-                background: roleColors[role] || '#e11d48',
-                color: '#ffffff'
-              }}
-            >
-              {role.toUpperCase().replace('_', ' ')}
-            </span>
-
-            {/* Live Supabase Database Status Indicator */}
+        <div className="top-navbar-accent" />
+        <div className="nav-inner">
+          {/* Zone 1: Brand Logo */}
+          <div className="brand-section">
             <Link
-              href="/settings"
+              href="/dashboard"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '0.35rem',
-                background: '#064e3b',
-                color: '#6ee7b7',
-                border: '1px solid #059669',
-                borderRadius: '9999px',
-                padding: '0.12rem 0.55rem',
-                fontSize: '0.7rem',
-                fontWeight: 700,
-                textDecoration: 'none',
-                letterSpacing: '0.02em'
+                gap: '0.6rem',
+                whiteSpace: 'nowrap',
+                flexShrink: 0
               }}
-              title="Live connected to online Supabase PostgreSQL database."
             >
-              <span
-                style={{
-                  width: '6px',
-                  height: '6px',
-                  borderRadius: '50%',
-                  background: '#10b981',
-                  boxShadow: '0 0 6px #10b981'
-                }}
+              <img
+                src="/logo.png"
+                alt="IPPAS Food Service & Events"
+                referrerPolicy="no-referrer"
+                className="brand-logo-img"
               />
-              <span>LIVE SUPABASE</span>
             </Link>
-
-            <span style={{ opacity: 0.7, fontSize: '0.75rem' }}>
-              {role === 'super_admin' && '• Master System Control (Stealth Admin)'}
-              {role === 'owner' && '• Full Executive Access'}
-              {role === 'manager' && '• Events & Operations Schedule'}
-              {role === 'accountant' && '• Financial Billing & Invoicing'}
-              {role === 'staff' && '• Duty Schedule & Salary Balance'}
-            </span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            {/* Calm Activity Notifications for Owner and Super Admin */}
-            {(role === 'owner' || role === 'super_admin') && (
-              <button
-                type="button"
-                onClick={() => setIsAuditModalOpen(true)}
-                style={{
-                  background: unreadAuditCount > 0 ? '#1d4ed8' : '#1e293b',
-                  color: '#ffffff',
-                  border: unreadAuditCount > 0 ? '1px solid #93c5fd' : '1px solid #475569',
-                  borderRadius: '6px',
-                  padding: '0.25rem 0.65rem',
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  transition: 'all 0.15s ease'
-                }}
-                title="View recent edits & activity notifications"
-              >
-                <span>🔔</span>
-                <span>Notifications</span>
-                {unreadAuditCount > 0 && (
-                  <span
-                    style={{
-                      background: '#ffffff',
-                      color: '#1d4ed8',
-                      padding: '0.08rem 0.42rem',
-                      borderRadius: '10px',
-                      fontSize: '0.73rem',
-                      fontWeight: 800
-                    }}
-                  >
-                    {unreadAuditCount}
-                  </span>
-                )}
-              </button>
-            )}
+          {/* Zone 2: Simplified Single-Row Primary Nav (Desktop) */}
+          <nav className="nav-links desktop-only" aria-label="Main Navigation">
+            {primaryRoutes.map((item) => {
+              const active = isRouteActive(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`nav-link ${active ? 'active' : ''}`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
 
-            {/* Stock Low Notification Button (only for non-staff) */}
+            {moreRoutes.length > 0 && (
+              <div ref={moreRef} style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  onClick={() => setMoreMenuOpen((prev) => !prev)}
+                  className={`nav-link nav-more-trigger ${isAnyMoreActive || moreMenuOpen ? 'active' : ''}`}
+                >
+                  <span>More</span>
+                  <span style={{ fontSize: '0.7rem', marginLeft: '0.22rem' }}>▾</span>
+                </button>
+
+                {moreMenuOpen && (
+                  <div className="nav-dropdown-menu" style={{ left: 0, minWidth: '285px' }}>
+                    {moreRoutes.map((item) => {
+                      const active = isRouteActive(item.href);
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          onClick={() => setMoreMenuOpen(false)}
+                          className={`nav-dropdown-item ${active ? 'active' : ''}`}
+                        >
+                          <span
+                            style={{
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '2px',
+                              background: item.accent || '#e11d48',
+                              flexShrink: 0,
+                              marginTop: '0.35rem'
+                            }}
+                          />
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: '0.84rem', color: '#0f172a' }}>
+                              {item.label}
+                            </div>
+                            {item.desc && (
+                              <div style={{ fontSize: '0.73rem', color: '#64748b', marginTop: '0.08rem' }}>
+                                {item.desc}
+                              </div>
+                            )}
+                          </div>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </nav>
+
+          {/* Zone 3: Compact Action & Profile Cluster (Desktop & Mobile) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
+            <PWAInstallButton variant="navbar" />
+
             {!isStaff && (
               <button
                 type="button"
                 onClick={() => setIsNotifOpen(true)}
+                className="nav-icon-btn"
                 style={{
-                  background: lowStockCount > 0 ? '#b91c1c' : '#334155',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '6px',
-                  padding: '0.25rem 0.65rem',
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  transition: 'all 0.15s ease'
+                  background: lowStockCount > 0 ? '#fff1f2' : '#f8fafc',
+                  borderColor: lowStockCount > 0 ? '#fecdd3' : '#e2e8f0',
+                  color: lowStockCount > 0 ? '#be123c' : '#475569'
                 }}
-                title="Low Stock Notifications"
+                title="Warehouse Low Stock Alerts"
               >
                 <span>📦</span>
-                <span>Low Stock</span>
                 {lowStockCount > 0 && (
-                  <span
-                    style={{
-                      background: '#fef2f2',
-                      color: '#dc2626',
-                      padding: '0.1rem 0.4rem',
-                      borderRadius: '10px',
-                      fontSize: '0.75rem',
-                      fontWeight: 800
-                    }}
-                  >
+                  <span className="nav-count-badge" style={{ background: '#e11d48', color: '#ffffff' }}>
                     {lowStockCount}
                   </span>
                 )}
               </button>
             )}
 
-            {/* Change Password for ANY user */}
-            <button
-              type="button"
-              onClick={() => setIsChangePasswordOpen(true)}
-              style={{
-                background: '#334155',
-                color: '#ffffff',
-                border: '1px solid #475569',
-                borderRadius: '6px',
-                padding: '0.25rem 0.65rem',
-                fontSize: '0.75rem',
-                cursor: 'pointer',
-                fontWeight: 600,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.3rem'
-              }}
-              title="Change your login password"
-            >
-              🔑 Password
-            </button>
-
-            <PWAInstallButton />
-
-            {/* Logout Button */}
-            <button
-              type="button"
-              onClick={handleLogout}
-              style={{
-                background: '#475569',
-                color: '#ffffff',
-                border: '1px solid #64748b',
-                borderRadius: '6px',
-                padding: '0.25rem 0.65rem',
-                fontSize: '0.75rem',
-                cursor: 'pointer',
-                fontWeight: 600,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.3rem'
-              }}
-              title="Sign out of your account"
-            >
-              🚪 Logout
-            </button>
-          </div>
-        </div>
-
-        <div className="nav-inner">
-          <div className="brand-section">
-            <Link href="/dashboard" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <img
-                src="/logo.png"
-                alt="IPPAS Food Service & Events"
-                className="brand-logo-img"
-                style={{ height: '38px', width: 'auto', objectFit: 'contain' }}
-              />
-            </Link>
-          </div>
-
-          {/* Desktop Nav Links */}
-          <nav className="nav-links desktop-only">
-            {visibleNavItems.map((item) => {
-              const isActive =
-                pathname === item.href ||
-                (item.href === '/dashboard' && pathname === '/') ||
-                (item.href !== '/dashboard' && pathname.startsWith(item.href));
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`nav-link ${isActive ? 'active' : ''}`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-
-          {/* Mobile Top Bar */}
-          <div className="mobile-only" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             {(role === 'owner' || role === 'super_admin') && (
               <button
                 type="button"
                 onClick={() => setIsAuditModalOpen(true)}
+                className="nav-icon-btn"
                 style={{
-                  background: unreadAuditCount > 0 ? '#eff6ff' : '#f1f5f9',
-                  color: unreadAuditCount > 0 ? '#1d4ed8' : '#334155',
-                  border: `1px solid ${unreadAuditCount > 0 ? '#93c5fd' : 'var(--border)'}`,
-                  borderRadius: '6px',
-                  padding: '0.25rem 0.5rem',
-                  fontSize: '0.75rem',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.25rem',
-                  fontWeight: 700
+                  background: unreadAuditCount > 0 ? '#eef2ff' : '#f8fafc',
+                  borderColor: unreadAuditCount > 0 ? '#c7d2fe' : '#e2e8f0',
+                  color: unreadAuditCount > 0 ? '#4338ca' : '#475569'
                 }}
-                title="Notifications & Edit History"
+                title="Recent Edits & Activity Notifications"
               >
-                🔔 {unreadAuditCount > 0 ? unreadAuditCount : ''}
+                <span>🔔</span>
+                {unreadAuditCount > 0 && (
+                  <span className="nav-count-badge" style={{ background: '#4f46e5', color: '#ffffff' }}>
+                    {unreadAuditCount}
+                  </span>
+                )}
               </button>
             )}
 
-            {!isStaff && (
+            {/* Account Profile Dropdown */}
+            <div ref={profileRef} style={{ position: 'relative' }}>
               <button
                 type="button"
-                onClick={() => setIsNotifOpen(true)}
-                style={{
-                  background: lowStockCount > 0 ? '#fee2e2' : '#f1f5f9',
-                  color: lowStockCount > 0 ? '#dc2626' : '#475569',
-                  border: '1px solid var(--border)',
-                  borderRadius: '6px',
-                  padding: '0.25rem 0.5rem',
-                  fontSize: '0.75rem',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.25rem',
-                  fontWeight: 700
-                }}
-                title="Low Stock Items"
+                onClick={() => setProfileMenuOpen((prev) => !prev)}
+                className="nav-profile-trigger"
+                title="Account & Settings"
               >
-                📦 {lowStockCount > 0 ? lowStockCount : ''}
+                <span
+                  className="nav-avatar"
+                  style={{ background: roleAccent[role] || '#e11d48' }}
+                >
+                  {initials}
+                </span>
+                <span className="desktop-only" style={{ fontSize: '0.82rem', fontWeight: 700, color: '#0f172a', maxWidth: '110px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {currentUser?.full_name?.split(' ')[0] || 'Account'}
+                </span>
+                <span style={{ fontSize: '0.68rem', color: '#64748b' }}>▾</span>
               </button>
-            )}
 
-            {isDbConnected && (
-              <Link
-                href="/settings"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.2rem',
-                  background: '#064e3b',
-                  color: '#6ee7b7',
-                  border: '1px solid #059669',
-                  borderRadius: '9999px',
-                  padding: '0.12rem 0.4rem',
-                  fontSize: '0.62rem',
-                  fontWeight: 700,
-                  textDecoration: 'none'
-                }}
-                title="Live Supabase Database Connected"
-              >
-                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#10b981' }} />
-                <span>LIVE</span>
-              </Link>
-            )}
+              {profileMenuOpen && (
+                <div className="nav-dropdown-menu" style={{ right: 0, minWidth: '245px' }}>
+                  <div
+                    style={{
+                      padding: '0.65rem 0.75rem',
+                      borderBottom: '1px solid #f1f5f9',
+                      marginBottom: '0.3rem'
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#0f172a' }}>
+                      {currentUser?.full_name || 'User'}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.12rem' }}>
+                      {roleDisplayName[role]} &middot; {isDbConnected ? 'Cloud Synced' : 'Online'}
+                    </div>
+                  </div>
 
-            <span
-              className="role-tag-badge"
-              style={{
-                background: roleColors[role] || '#e11d48',
-                color: '#ffffff',
-                fontSize: '0.65rem'
-              }}
-            >
-              {role.toUpperCase()}
-            </span>
+                  <Link
+                    href="/manuals"
+                    onClick={() => setProfileMenuOpen(false)}
+                    className="nav-dropdown-item"
+                  >
+                    <span>📘</span>
+                    <span style={{ fontWeight: 600, fontSize: '0.83rem' }}>
+                      മലയാളം യൂസർ മാനുവൽ (PDF)
+                    </span>
+                  </Link>
 
-            {/* Mobile Change Password */}
-            <button
-              type="button"
-              onClick={() => setIsChangePasswordOpen(true)}
-              className="btn btn-secondary btn-sm"
-              style={{ padding: '0.2rem 0.45rem', fontSize: '0.75rem' }}
-              title="Change Password"
-            >
-              🔑
-            </button>
+                  {(role === 'owner' || role === 'super_admin') && (
+                    <Link
+                      href="/settings"
+                      onClick={() => setProfileMenuOpen(false)}
+                      className="nav-dropdown-item"
+                    >
+                      <span>⚙️</span>
+                      <span style={{ fontWeight: 600, fontSize: '0.83rem' }}>
+                        Business Settings
+                      </span>
+                    </Link>
+                  )}
 
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="btn btn-secondary btn-sm"
-              style={{ padding: '0.2rem 0.45rem', fontSize: '0.72rem' }}
-              title="Logout"
-            >
-              🚪
-            </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileMenuOpen(false);
+                      setIsChangePasswordOpen(true);
+                    }}
+                    className="nav-dropdown-item"
+                    style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
+                  >
+                    <span>🔑</span>
+                    <span style={{ fontWeight: 600, fontSize: '0.83rem' }}>
+                      Change Password
+                    </span>
+                  </button>
 
-            <PWAInstallButton />
+                  <div style={{ borderTop: '1px solid #f1f5f9', marginTop: '0.3rem', paddingTop: '0.3rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileMenuOpen(false);
+                        store.logout();
+                      }}
+                      className="nav-dropdown-item"
+                      style={{
+                        width: '100%',
+                        border: 'none',
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        color: '#dc2626'
+                      }}
+                    >
+                      <span>🚪</span>
+                      <span style={{ fontWeight: 700, fontSize: '0.83rem' }}>
+                        Sign Out
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>

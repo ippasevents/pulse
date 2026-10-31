@@ -391,24 +391,56 @@ export async function shareRoleUserManualOnWhatsApp(params: {
   recipientPhone?: string;
   businessName?: string;
   businessPhone?: string;
-}): Promise<boolean> {
-  const { roleKey, recipientPhone = '', businessName, businessPhone } = params;
-  const generated = await generateRoleUserManualPdfBlob(roleKey, businessName, businessPhone);
-  if (!generated) return false;
+  prebuiltPdf?: { blob: Blob; file: File; filename: string };
+  customMessage?: string;
+}): Promise<{
+  success: boolean;
+  sharedDirectlyWithFile: boolean;
+  gestureExpired?: boolean;
+  error?: string;
+}> {
+  const {
+    roleKey,
+    recipientPhone = '',
+    businessName,
+    businessPhone,
+    prebuiltPdf,
+    customMessage
+  } = params;
 
   const cleanPhone = recipientPhone.replace(/\D/g, '');
   const normalizedPhone =
     cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
 
-  const messageText = buildManualWhatsAppCaption(roleKey, businessName);
+  const messageText =
+    customMessage && customMessage.trim()
+      ? customMessage.trim()
+      : buildManualWhatsAppCaption(roleKey, businessName);
 
-  const shared = await sharePdfWithCaptionToWhatsApp({
+  if (prebuiltPdf) {
+    return sharePdfWithCaptionToWhatsApp({
+      file: prebuiltPdf.file,
+      blob: prebuiltPdf.blob,
+      filename: prebuiltPdf.filename,
+      messageText,
+      cleanPhone: normalizedPhone
+    });
+  }
+
+  const generated = await generateRoleUserManualPdfBlob(roleKey, businessName, businessPhone);
+  if (!generated) {
+    return {
+      success: false,
+      sharedDirectlyWithFile: false,
+      error: 'Could not generate manual PDF.'
+    };
+  }
+
+  return sharePdfWithCaptionToWhatsApp({
     file: generated.file,
     blob: generated.blob,
     filename: generated.filename,
     messageText,
     cleanPhone: normalizedPhone
   });
-
-  return shared.success;
 }

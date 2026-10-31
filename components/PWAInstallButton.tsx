@@ -1,69 +1,59 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { usePWAInstall } from './usePWAInstall';
 
 interface PWAInstallButtonProps {
-  className?: string;
-  variant?: 'nav' | 'banner' | 'card' | 'bottom' | 'login';
+  variant?: 'navbar' | 'banner' | 'bottom' | 'login' | 'card';
   showAlways?: boolean;
 }
 
-export function PWAInstallButton({
-  className = '',
-  variant = 'nav',
+export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
+  variant = 'navbar',
   showAlways = false
-}: PWAInstallButtonProps) {
-  const { isInstallable, isInstalled, install } = usePWAInstall();
-  const [showModal, setShowModal] = useState(false);
+}) => {
+  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
+  const [showQuickGuide, setShowQuickGuide] = useState(false);
+  const [isAndroid, setIsAndroid] = useState(false);
+  const [installingNow, setInstallingNow] = useState(false);
 
-  // If already installed and running standalone, hide unless forced
-  if (isInstalled && !showAlways) {
-    if (variant === 'card') {
-      return (
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.4rem',
-            padding: '0.35rem 0.75rem',
-            borderRadius: '6px',
-            background: '#dcfce7',
-            color: '#15803d',
-            fontSize: '0.8rem',
-            fontWeight: 600
-          }}
-        >
-          <span>✓</span>
-          <span>App Installed on Home Screen</span>
-        </div>
-      );
+  useEffect(() => {
+    if (typeof navigator !== 'undefined') {
+      setIsAndroid(/android/i.test(navigator.userAgent || ''));
     }
+  }, []);
+
+  if (isInstalled && !showAlways) {
     return null;
   }
 
-  const handleClick = async () => {
+  const handleOneTapInstall = async () => {
+    if (isInstalled) return;
     if (isInstallable) {
-      const outcome = await install();
-      if (!outcome) {
-        setShowModal(true);
+      setInstallingNow(true);
+      const accepted = await install();
+      setInstallingNow(false);
+      if (accepted) {
+        setShowQuickGuide(false);
       }
-    } else {
-      setShowModal(true);
+      return;
     }
+    setShowQuickGuide(true);
   };
 
-  const renderButton = () => {
+  const renderTrigger = () => {
     if (variant === 'bottom') {
       return (
         <button
           type="button"
-          onClick={handleClick}
-          className={`mobile-nav-item ${className}`}
+          onClick={handleOneTapInstall}
+          className="mobile-nav-item"
           style={{ color: '#e11d48', fontWeight: 700 }}
         >
           <span className="mobile-nav-icon">📲</span>
-          <span className="mobile-nav-label">Install App</span>
+          <span className="mobile-nav-label" style={{ whiteSpace: 'nowrap' }}>
+            {installingNow ? 'Installing...' : 'Install App'}
+          </span>
         </button>
       );
     }
@@ -72,240 +62,279 @@ export function PWAInstallButton({
       return (
         <button
           type="button"
-          onClick={handleClick}
-          className={`btn btn-secondary ${className}`}
+          onClick={handleOneTapInstall}
           style={{
             width: '100%',
-            display: 'inline-flex',
+            display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '0.5rem',
-            fontWeight: 700,
-            fontSize: '0.88rem',
-            padding: '0.65rem 1rem',
-            borderRadius: '8px',
-            background: '#fff1f2',
+            gap: '0.55rem',
+            padding: '0.72rem 1rem',
+            borderRadius: '10px',
+            background: 'linear-gradient(135deg, #eef2ff 0%, #fdf2f8 100%)',
             color: '#be123c',
-            border: '1px solid #fecdd3'
-          }}
-        >
-          <span style={{ fontSize: '1.05rem' }}>📲</span>
-          <span>Install IPPAS Pulse App</span>
-        </button>
-      );
-    }
-
-    if (variant === 'banner') {
-      return (
-        <button
-          type="button"
-          onClick={handleClick}
-          className={`btn btn-primary ${className}`}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.5rem',
+            border: '1px solid #fbcfe8',
             fontWeight: 700,
-            fontSize: '0.9rem',
-            padding: '0.55rem 1.1rem',
-            boxShadow: '0 2px 4px rgba(225, 29, 72, 0.25)'
-          }}
-        >
-          <span style={{ fontSize: '1.1rem' }}>📲</span>
-          <span>Install App on Phone / PC</span>
-        </button>
-      );
-    }
-
-    if (variant === 'card') {
-      return (
-        <button
-          type="button"
-          onClick={handleClick}
-          className={`btn btn-primary ${className}`}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.45rem',
-            fontWeight: 600,
-            fontSize: '0.85rem'
+            fontSize: '0.86rem',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            transition: 'transform 0.15s ease, box-shadow 0.15s ease'
           }}
         >
           <span>📲</span>
-          <span>Install App</span>
+          <span>
+            {isInstalled
+              ? '✓ IPPAS Pulse App Installed'
+              : installingNow
+              ? 'Installing App...'
+              : 'Install IPPAS Pulse App (1-Tap)'}
+          </span>
         </button>
       );
     }
 
-    // Default Nav Button
+    if (variant === 'banner' || variant === 'card') {
+      return (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
+            padding: '0.85rem 1rem',
+            borderRadius: '12px',
+            background: 'linear-gradient(135deg, #fff1f2 0%, #eef2ff 100%)',
+            border: '1px solid #fecdd3',
+            flexWrap: 'wrap'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', minWidth: 0 }}>
+            <img
+              src="/pwa-192x192.png"
+              alt="IPPAS Pulse"
+              referrerPolicy="no-referrer"
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '10px',
+                border: '1px solid #fda4af',
+                flexShrink: 0
+              }}
+            />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#0f172a' }}>
+                {isInstalled ? 'IPPAS Pulse Installed' : 'Install IPPAS Pulse App'}
+              </div>
+              <div style={{ fontSize: '0.74rem', color: '#475569' }}>
+                Adds icon to App Drawer &amp; Home Screen • No permissions needed
+              </div>
+            </div>
+          </div>
+
+          {!isInstalled && (
+            <button
+              type="button"
+              onClick={handleOneTapInstall}
+              className="btn btn-primary btn-sm"
+              style={{
+                fontWeight: 700,
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+                padding: '0.45rem 0.9rem',
+                borderRadius: '8px'
+              }}
+            >
+              {installingNow ? 'Installing...' : '📲 Install Now'}
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    // Default: Compact Navbar Action Button
     return (
       <button
         type="button"
-        onClick={handleClick}
-        className={`btn btn-primary btn-sm ${className}`}
+        onClick={handleOneTapInstall}
         style={{
+          background: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
+          color: '#ffffff',
+          border: 'none',
+          borderRadius: '8px',
+          padding: '0.38rem 0.72rem',
+          fontSize: '0.78rem',
+          fontWeight: 700,
+          cursor: 'pointer',
           display: 'inline-flex',
           alignItems: 'center',
-          gap: '0.3rem',
-          fontSize: '0.73rem',
-          padding: '0.28rem 0.6rem',
-          borderRadius: '6px',
-          fontWeight: 700,
-          background: '#e11d48',
-          color: '#ffffff',
+          gap: '0.35rem',
           whiteSpace: 'nowrap',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+          flexShrink: 0,
+          boxShadow: '0 2px 6px rgba(225, 29, 72, 0.22)',
+          transition: 'transform 0.15s ease, opacity 0.15s ease'
         }}
-        title="Install IPPAS Pulse as an app on your phone or laptop"
+        title="Install IPPAS Pulse on your phone or computer — zero extra permissions needed"
       >
         <span>📲</span>
-        <span>Install</span>
+        <span>{installingNow ? 'Installing...' : 'Install App'}</span>
       </button>
     );
   };
 
   return (
     <>
-      {renderButton()}
+      {renderTrigger()}
 
-      {/* Comprehensive Cross-Platform Installation Guide Modal */}
-      {showModal && (
-        <div
-          className="modal-overlay"
-          onClick={() => setShowModal(false)}
-          style={{ zIndex: 100 }}
-        >
+      {showQuickGuide && (
+        <div className="modal-overlay" onClick={() => setShowQuickGuide(false)}>
           <div
             className="modal-content"
             onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: '480px', padding: '1.5rem' }}
+            style={{ maxWidth: '430px', padding: '1.35rem' }}
           >
-            <div className="modal-header" style={{ marginBottom: '1rem', paddingBottom: '0.75rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontSize: '1.5rem' }}>📲</span>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+                paddingBottom: '0.9rem',
+                marginBottom: '1rem',
+                borderBottom: '1px solid #e2e8f0'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+                <img
+                  src="/pwa-192x192.png"
+                  alt="IPPAS Pulse Icon"
+                  referrerPolicy="no-referrer"
+                  style={{
+                    width: '44px',
+                    height: '44px',
+                    borderRadius: '11px',
+                    border: '1px solid #fecdd3'
+                  }}
+                />
                 <div>
-                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                    Install IPPAS Pulse
+                  <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                    Install IPPAS Pulse App
                   </h3>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-                    Install directly on your phone, tablet, or desktop
-                  </p>
+                  <div style={{ fontSize: '0.76rem', color: '#059669', fontWeight: 600 }}>
+                    ✓ App Drawer Icon + Home Screen Shortcut
+                  </div>
                 </div>
               </div>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => setShowModal(false)}
+                onClick={() => setShowQuickGuide(false)}
               >
                 ✕
               </button>
             </div>
 
-            {/* Direct prompt trigger if available */}
-            {isInstallable && (
-              <div style={{ marginBottom: '1.25rem' }}>
+            {isInstallable ? (
+              <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
+                <p style={{ fontSize: '0.88rem', color: '#334155', marginBottom: '1rem', lineHeight: 1.6 }}>
+                  ഒറ്റ ടാപ്പിൽ <strong>IPPAS Pulse</strong> നിങ്ങളുടെ ഫോണിലെ മറ്റ് ആപ്പുകളുടെ കൂടെയും ഹോം സ്ക്രീനിലും ഇൻസ്റ്റാൾ ചെയ്യാം. യാതൊരു അധിക പെർമിഷനും ആവശ്യമില്ല.
+                </p>
                 <button
                   type="button"
-                  onClick={async () => {
-                    await install();
-                    setShowModal(false);
-                  }}
+                  onClick={handleOneTapInstall}
                   className="btn btn-primary"
-                  style={{ width: '100%', padding: '0.7rem', fontWeight: 700, fontSize: '0.95rem' }}
+                  style={{ width: '100%', fontWeight: 700, padding: '0.75rem 1rem' }}
                 >
-                  🚀 Click Here to Install Now
+                  📲 Install App Now
                 </button>
+              </div>
+            ) : isIOS ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div
+                  style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '10px',
+                    padding: '0.9rem 1rem',
+                    fontSize: '0.86rem',
+                    color: '#1e293b',
+                    lineHeight: 1.65
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.4rem' }}>
+                    iPhone / iPad ഹോം സ്ക്രീനിൽ ആഡ് ചെയ്യാൻ (2 Steps):
+                  </div>
+                  <div>
+                    <strong>1.</strong> Safari താഴെയുള്ള <strong>Share (⬆️)</strong> ബട്ടൺ അമർത്തുക.
+                  </div>
+                  <div style={{ marginTop: '0.25rem' }}>
+                    <strong>2.</strong> <strong>&ldquo;Add to Home Screen&rdquo;</strong> തിരഞ്ഞെടുത്ത് <strong>Add</strong> അമർത്തുക.
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                  മറ്റ് ആപ്പുകളുടെ കൂടെ IPPAS Pulse ഐക്കൺ ഉടൻ ഹോം സ്ക്രീനിൽ വരും — പ്രത്യേക പെർമിഷനുകൾ ഒന്നും ആവശ്യമില്ല.
+                </div>
+              </div>
+            ) : isAndroid ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div
+                  style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '10px',
+                    padding: '0.9rem 1rem',
+                    fontSize: '0.86rem',
+                    color: '#1e293b',
+                    lineHeight: 1.65
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.4rem' }}>
+                    സ്മാർട്ട്ഫോണിൽ ഇൻസ്റ്റാൾ ചെയ്യാൻ (2 Steps):
+                  </div>
+                  <div>
+                    <strong>1.</strong> Chrome മുകളിലെ വലതുവശത്തുള്ള <strong>⋮ (Menu)</strong> അമർത്തുക.
+                  </div>
+                  <div style={{ marginTop: '0.25rem' }}>
+                    <strong>2.</strong> <strong>&ldquo;Install app&rdquo;</strong> (അല്ലെങ്കിൽ <em>Add to Home screen</em>) തിരഞ്ഞെടുത്ത് <strong>Install</strong> അമർത്തുക.
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                  ഫോണിലെ മറ്റ് ആപ്പുകളുടെ കൂടെ App List-ലും Home Screen-ലും IPPAS Pulse ഐക്കൺ തനിയെ ചേർക്കപ്പെടും. മറ്റ് പെർമിഷനുകൾ ഒന്നും ആവശ്യമില്ല.
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div
+                  style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '10px',
+                    padding: '0.9rem 1rem',
+                    fontSize: '0.86rem',
+                    color: '#1e293b',
+                    lineHeight: 1.65
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.35rem' }}>
+                    Quick Desktop / Browser Install:
+                  </div>
+                  <div>
+                    Click the <strong>Install icon (⊕)</strong> on the right side of your browser address bar, or open browser menu <strong>⋮ &rarr; Install IPPAS Pulse</strong>.
+                  </div>
+                </div>
               </div>
             )}
 
-            <div style={{ fontSize: '0.85rem', color: '#334155', lineHeight: 1.6 }}>
-              {/* Android Instructions */}
-              <div
-                style={{
-                  background: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  padding: '0.85rem',
-                  marginBottom: '0.85rem'
-                }}
-              >
-                <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <span>🤖</span>
-                  <span>Android Devices (Google Chrome):</span>
-                </div>
-                <ol style={{ paddingLeft: '1.25rem', margin: 0, fontSize: '0.8rem' }}>
-                  <li style={{ marginBottom: '0.3rem' }}>
-                    Tap the <strong>three vertical dots (⋮)</strong> at the top right corner.
-                  </li>
-                  <li style={{ marginBottom: '0.3rem' }}>
-                    Select <strong>"Install app"</strong> or <strong>"Add to Home screen"</strong>.
-                  </li>
-                  <li>
-                    Tap <strong>"Install"</strong>. The app icon will appear on your home screen.
-                  </li>
-                </ol>
-              </div>
-
-              {/* iPhone / iPad Instructions */}
-              <div
-                style={{
-                  background: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  padding: '0.85rem',
-                  marginBottom: '0.85rem'
-                }}
-              >
-                <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <span>🍎</span>
-                  <span>iPhone / iPad (Apple Safari):</span>
-                </div>
-                <ol style={{ paddingLeft: '1.25rem', margin: 0, fontSize: '0.8rem' }}>
-                  <li style={{ marginBottom: '0.3rem' }}>
-                    Tap the <strong>Share button</strong> (square with an upward arrow) at the bottom.
-                  </li>
-                  <li style={{ marginBottom: '0.3rem' }}>
-                    Scroll down and tap <strong>"Add to Home Screen"</strong>.
-                  </li>
-                  <li>
-                    Tap <strong>"Add"</strong> in the top right corner.
-                  </li>
-                </ol>
-              </div>
-
-              {/* Laptop / PC Instructions */}
-              <div
-                style={{
-                  background: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  padding: '0.85rem',
-                  marginBottom: '1rem'
-                }}
-              >
-                <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <span>💻</span>
-                  <span>Laptop / Desktop (Chrome / Edge):</span>
-                </div>
-                <p style={{ margin: 0, fontSize: '0.8rem' }}>
-                  Click the <strong>Install icon (⊕ or computer icon)</strong> on the right side of the URL address bar and click <strong>"Install"</strong>.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className="btn btn-secondary"
-                style={{ width: '100%' }}
-              >
-                Got It
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowQuickGuide(false)}
+              className="btn btn-secondary"
+              style={{ width: '100%', marginTop: '1rem', fontWeight: 600 }}
+            >
+              Done
+            </button>
           </div>
         </div>
       )}
     </>
   );
-}
-
-export default PWAInstallButton;
+};

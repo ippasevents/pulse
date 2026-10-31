@@ -12,7 +12,7 @@ function escapeHtml(val?: string | number | null): string {
     .replace(/"/g, '&quot;');
 }
 
-function normalizeWhatsAppPhone(raw?: string): string {
+export function normalizeWhatsAppPhone(raw?: string): string {
   const digits = (raw || '').replace(/[^0-9]/g, '');
   if (!digits) return '';
   if (digits.length === 10) return `91${digits}`;
@@ -484,20 +484,36 @@ export function formatWhatsAppInvoiceMessage(
 export async function shareInvoicePdfToWhatsApp(
   invoice: Invoice,
   state: AppState,
-  prebuiltPdf?: { blob: Blob; file: File }
+  prebuiltPdf?: { blob: Blob; file: File },
+  customMessage?: string
 ): Promise<{
   success: boolean;
   sharedDirectlyWithFile: boolean;
+  gestureExpired?: boolean;
   file?: File;
   error?: string;
 }> {
   const liveInv = state.invoices.find((i) => i.id === invoice.id) || invoice;
   const evt = state.events.find((e) => e.id === liveInv.event_id);
   const client = state.clients.find((c) => c.id === evt?.client_id);
-  const messageText = formatWhatsAppInvoiceMessage(liveInv, state);
+  const messageText =
+    customMessage && customMessage.trim()
+      ? customMessage.trim()
+      : formatWhatsAppInvoiceMessage(liveInv, state);
   const cleanPhone = normalizeWhatsAppPhone(client?.phone);
 
-  const pdfResult = prebuiltPdf || (await generateInvoicePdfBlob(liveInv, state));
+  // When prebuiltPdf is ready, invoke sharePdfWithCaptionToWhatsApp immediately with zero preceding await!
+  if (prebuiltPdf) {
+    return sharePdfWithCaptionToWhatsApp({
+      file: prebuiltPdf.file,
+      blob: prebuiltPdf.blob,
+      filename: `${liveInv.invoice_number}.pdf`,
+      messageText,
+      cleanPhone
+    });
+  }
+
+  const pdfResult = await generateInvoicePdfBlob(liveInv, state);
   if (!pdfResult) {
     return {
       success: false,

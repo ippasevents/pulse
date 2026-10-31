@@ -814,17 +814,18 @@ export default function EventDetailPage() {
               onClick={() => setIsQuoteWhatsAppOpen(true)}
               className="btn btn-sm"
               style={{
-                background: '#f0fdf4',
-                border: '1px solid #86efac',
-                color: '#15803d',
+                background: '#ecfdf5',
+                border: '1px solid #6ee7b7',
+                color: '#047857',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.35rem',
-                fontWeight: 700
+                fontWeight: 700,
+                whiteSpace: 'nowrap'
               }}
-              title="Send Quotation directly to Client's WhatsApp"
+              title="Send Quotation PDF & Proposal Text together to Client's WhatsApp"
             >
-              💬 Send Quote on WhatsApp
+              💬 Send Quote (PDF + Text)
             </button>
 
             <button

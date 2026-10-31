@@ -256,7 +256,8 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       <div
         style={{
           minHeight: '100vh',
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+          background:
+            'radial-gradient(at 15% 15%, rgba(225, 29, 72, 0.32) 0px, transparent 50%), radial-gradient(at 85% 20%, rgba(79, 70, 229, 0.35) 0px, transparent 52%), radial-gradient(at 50% 90%, rgba(16, 185, 129, 0.24) 0px, transparent 55%), linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -266,26 +267,35 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       >
         <div
           style={{
-            maxWidth: '400px',
+            maxWidth: '410px',
             width: '100%',
             background: '#ffffff',
             color: '#0f172a',
-            borderRadius: '16px',
-            padding: '2.25rem 2rem',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3)'
+            borderRadius: '18px',
+            overflow: 'hidden',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.45)'
           }}
         >
-          <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+          <div
+            style={{
+              height: '5px',
+              width: '100%',
+              background: 'linear-gradient(90deg, #e11d48 0%, #7c3aed 50%, #10b981 100%)'
+            }}
+          />
+          <div style={{ padding: '2rem 2rem 2.15rem 2rem' }}>
+          <div style={{ textAlign: 'center', marginBottom: '1.65rem' }}>
             <img
               src="/logo.png"
               alt="IPPAS Food Service & Events"
-              style={{ height: '48px', width: 'auto', margin: '0 auto 0.75rem auto', display: 'block' }}
+              referrerPolicy="no-referrer"
+              style={{ height: '50px', width: 'auto', margin: '0 auto 0.75rem auto', display: 'block' }}
             />
-            <h1 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
+            <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
               IPPAS Pulse
             </h1>
-            <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '0.35rem' }}>
-              Sign in to your account
+            <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.3rem', fontWeight: 500 }}>
+              Outdoor Catering • Event Management • Calicut
             </p>
           </div>
 
@@ -357,6 +367,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
           <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
             <PWAInstallButton variant="login" />
+          </div>
           </div>
         </div>
       </div>

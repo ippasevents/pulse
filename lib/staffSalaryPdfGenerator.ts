@@ -633,16 +633,13 @@ function sanitizeFileSlug(text: string): string {
   );
 }
 
-/**
- * Exports a single staff member's official A4 Salary Slip PDF for the selected date range.
- */
-export async function downloadSingleStaffSalarySlipPdf(
+export async function generateSingleStaffSalarySlipPdfBlob(
   row: StaffPeriodReportRow,
   startDate: string,
   endDate: string,
   state: AppState
-): Promise<boolean> {
-  if (typeof window === 'undefined') return false;
+): Promise<{ blob: Blob; file: File; filename: string } | null> {
+  if (typeof window === 'undefined') return null;
   try {
     const pdf = new jsPDF({
       orientation: 'portrait',
@@ -659,12 +656,77 @@ export async function downloadSingleStaffSalarySlipPdf(
         ? `${startDate}_to_${endDate}`
         : startDate || endDate || 'All-Dates';
     const filename = `Salary-Slip-${sanitizeFileSlug(row.staff.name)}-${periodTag}.pdf`;
-    pdf.save(filename);
-    return true;
+    const blob = pdf.output('blob');
+    const file = new File([blob], filename, { type: 'application/pdf' });
+    return { blob, file, filename };
   } catch (err) {
-    console.error('Error generating single staff salary slip PDF:', err);
-    return false;
+    console.error('Error generating single staff salary slip PDF blob:', err);
+    return null;
   }
+}
+
+export function formatStaffSalarySlipWhatsAppMessage(
+  row: StaffPeriodReportRow,
+  startDate: string,
+  endDate: string,
+  state: AppState
+): string {
+  const businessName = state.settings?.name || 'IPPAS FOOD SERVICE & EVENTS';
+  const periodLabel = formatPeriodLabel(startDate, endDate);
+  const lines: string[] = [
+    `🧾 *${businessName}*`,
+    `Outdoor Catering • Event Management • Calicut`,
+    ``,
+    `*STAFF SALARY SLIP*`,
+    `👤 *Name:* ${row.staff.name} (${row.staff.role_title || 'Service Crew'})`,
+    `📅 *Period:* ${periodLabel}`,
+    `⏱ *Attended Shifts:* ${row.attendedShiftsCount} (${row.totalHoursWorked} hrs)`,
+    ``,
+    `💼 *Shift Wages:* ₹${row.shiftEarnings.toLocaleString('en-IN')}`
+  ];
+
+  if (row.extraEarnings > 0) {
+    lines.push(`🎁 *Allowances / Bonus:* ₹${row.extraEarnings.toLocaleString('en-IN')}`);
+  }
+
+  lines.push(
+    `💰 *Total Earned:* ₹${row.totalEarnings.toLocaleString('en-IN')}`,
+    `✅ *Payments Received:* ₹${row.paymentsReceived.toLocaleString('en-IN')}`,
+    row.periodPayable > 0
+      ? `⏳ *Period Balance Payable:* ₹${row.periodPayable.toLocaleString('en-IN')}`
+      : `🎉 *Status:* Period Settled`
+  );
+
+  lines.push(
+    ``,
+    `Please find your itemized A4 Salary Slip PDF attached herewith.`,
+    `📞 ${state.settings?.phone || '+91 98470 11111'}`
+  );
+
+  return lines.join('\n');
+}
+
+/**
+ * Exports a single staff member's official A4 Salary Slip PDF for the selected date range.
+ */
+export async function downloadSingleStaffSalarySlipPdf(
+  row: StaffPeriodReportRow,
+  startDate: string,
+  endDate: string,
+  state: AppState
+): Promise<boolean> {
+  const res = await generateSingleStaffSalarySlipPdfBlob(row, startDate, endDate, state);
+  if (!res) return false;
+  const url = URL.createObjectURL(res.blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = res.filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return true;
 }
 
 /**

@@ -4,94 +4,106 @@ import React, { useEffect, useState } from 'react';
 import { Invoice } from '@/lib/types';
 import { store } from '@/lib/store';
 import {
-  generateInvoicePdfBlob,
   formatWhatsAppInvoiceMessage,
+  generateInvoicePdfBlob,
+  normalizeWhatsAppPhone,
   shareInvoicePdfToWhatsApp
 } from '@/lib/invoicePdfGenerator';
 import {
   isDesktopWebView,
-  openExternalUrlSafe,
   triggerPdfBlobDownload
 } from '@/lib/whatsappDeviceShare';
 
 interface WhatsAppShareModalProps {
   invoice: Invoice | null;
-  isOpen: boolean;
+  isOpen?: boolean;
   onClose: () => void;
 }
 
 export default function WhatsAppShareModal({
   invoice,
-  isOpen,
+  isOpen = true,
   onClose
 }: WhatsAppShareModalProps) {
   const [state, setState] = useState(store.getState());
-  const [isDesktop, setIsDesktop] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [phoneInput, setPhoneInput] = useState('');
+  const [messageText, setMessageText] = useState('');
+  const [isMessageEdited, setIsMessageEdited] = useState(false);
   const [isPreparingPdf, setIsPreparingPdf] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
   const [preparedPdf, setPreparedPdf] = useState<{ blob: Blob; file: File } | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [feedback, setFeedback] = useState<{
-    type: 'success' | 'info' | 'error';
-    message: string;
+  const [statusMsg, setStatusMsg] = useState<{
+    type: 'info' | 'success' | 'error';
+    text: string;
   } | null>(null);
+  const [copiedText, setCopiedText] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
 
   useEffect(() => {
-    setState(store.getState());
+    setIsDesktop(isDesktopWebView());
     const unsub = store.subscribe(() => {
       setState(store.getState());
     });
     return unsub;
   }, []);
 
-  useEffect(() => {
-    const updateDeviceMode = () => setIsDesktop(isDesktopWebView());
-    updateDeviceMode();
-    window.addEventListener('resize', updateDeviceMode);
-    return () => window.removeEventListener('resize', updateDeviceMode);
-  }, []);
-
-  const liveInvoice = invoice
+  const liveInv = invoice
     ? state.invoices.find((i) => i.id === invoice.id) || invoice
     : null;
-  const invPayments = liveInvoice
-    ? state.payments.filter((p) => p.invoice_id === liveInvoice.id)
-    : [];
-  const paymentsForThis = invPayments.reduce((s, p) => s + p.amount, 0);
-  const showBankDetails = liveInvoice ? liveInvoice.show_bank_details !== false : true;
-  const showPaymentDetails = liveInvoice ? liveInvoice.show_payment_details !== false : true;
-  const invoiceId = liveInvoice?.id || '';
-  const liveAmount = liveInvoice?.amount || 0;
-  const liveDiscount = liveInvoice?.discount || 0;
-  const liveDiscountNote = liveInvoice?.discount_note || '';
-  const liveStatus = liveInvoice?.status || '';
+  const evt = liveInv ? state.events.find((e) => e.id === liveInv.event_id) : undefined;
+  const client = evt ? state.clients.find((c) => c.id === evt.client_id) : undefined;
 
-  // Pre-build PDF as soon as the modal opens so smartphone tap shares PDF + Text synchronously inside user gesture
   useEffect(() => {
-    if (!isOpen || !invoiceId) {
+    if (!isOpen || !invoice) {
       setPreparedPdf(null);
-      setIsPreparingPdf(false);
+      setStatusMsg(null);
+      setIsMessageEdited(false);
       return;
     }
+
+    const currentState = store.getState();
+    const currentInv =
+      currentState.invoices.find((i) => i.id === invoice.id) || invoice;
+    const currentEvt = currentState.events.find((e) => e.id === currentInv.event_id);
+    const currentClient = currentState.clients.find((c) => c.id === currentEvt?.client_id);
+
+    setPhoneInput(currentClient?.phone || '');
+    setMessageText(formatWhatsAppInvoiceMessage(currentInv, currentState));
+    setIsMessageEdited(false);
+    setStatusMsg(null);
+  }, [invoice?.id]);
+
+  // Keep message text synced with Bank/Payment toggles unless manually edited
+  useEffect(() => {
+    if (!liveInv || isMessageEdited) return;
+    setMessageText(formatWhatsAppInvoiceMessage(liveInv, state));
+  }, [
+    liveInv?.id,
+    liveInv?.show_bank_details,
+    liveInv?.show_payment_details,
+    liveInv?.amount,
+    liveInv?.discount,
+    liveInv?.status,
+    isMessageEdited,
+    state
+  ]);
+
+  // Pre-build Invoice PDF immediately so tapping the WhatsApp button attaches PDF + Text synchronously!
+  useEffect(() => {
+    if (!isOpen || !liveInv) return;
 
     let cancelled = false;
     setIsPreparingPdf(true);
     setPreparedPdf(null);
 
-    const latestState = store.getState();
-    const targetInv = latestState.invoices.find((i) => i.id === invoiceId);
-    if (!targetInv) {
-      setIsPreparingPdf(false);
-      return;
-    }
-
-    generateInvoicePdfBlob(targetInv, latestState)
+    generateInvoicePdfBlob(liveInv, state)
       .then((res) => {
-        if (!cancelled && res) {
-          setPreparedPdf({ blob: res.blob, file: res.file });
+        if (!cancelled) {
+          setPreparedPdf(res);
+          setIsPreparingPdf(false);
         }
       })
-      .finally(() => {
+      .catch(() => {
         if (!cancelled) {
           setIsPreparingPdf(false);
         }
@@ -102,438 +114,245 @@ export default function WhatsAppShareModal({
     };
   }, [
     isOpen,
-    invoiceId,
-    liveAmount,
-    liveDiscount,
-    liveDiscountNote,
-    liveStatus,
-    showBankDetails,
-    showPaymentDetails,
-    paymentsForThis
+    liveInv?.id,
+    liveInv?.show_bank_details,
+    liveInv?.show_payment_details,
+    liveInv?.amount,
+    liveInv?.discount,
+    liveInv?.status
   ]);
 
-  if (!isOpen || !liveInvoice) return null;
+  if (!isOpen || !invoice || !liveInv) return null;
 
-  const evt = state.events.find((e) => e.id === liveInvoice.event_id);
-  const client = state.clients.find((c) => c.id === evt?.client_id);
-  const balanceDue = Math.max(0, liveInvoice.amount - paymentsForThis);
+  const paymentsForThis = state.payments
+    .filter((p) => p.invoice_id === liveInv.id)
+    .reduce((s, p) => s + p.amount, 0);
+  const balanceDue = Math.max(0, liveInv.amount - paymentsForThis);
   const isFullyPaid =
-    liveInvoice.status === 'paid' || (liveInvoice.amount > 0 && balanceDue <= 0);
+    liveInv.status === 'paid' || (liveInv.amount > 0 && balanceDue <= 0);
+  const isFinalSettlement = isFullyPaid || liveInv.kind === 'final';
 
-  const rawDigits = (client?.phone || '').replace(/[^0-9]/g, '');
-  const cleanPhone = rawDigits.length === 10 ? `91${rawDigits}` : rawDigits;
-  const messageText = formatWhatsAppInvoiceMessage(liveInvoice, state);
+  const showBankDetails = liveInv.show_bank_details !== false;
+  const showPaymentDetails = liveInv.show_payment_details !== false;
+  const cleanPhone = normalizeWhatsAppPhone(phoneInput);
 
-  const handleToggleBank = (checked: boolean) => {
-    store.updateInvoice(liveInvoice.id, { show_bank_details: checked });
+  const handleToggleOption = (
+    field: 'show_bank_details' | 'show_payment_details',
+    checked: boolean
+  ) => {
+    store.updateInvoice(liveInv.id, { [field]: checked });
   };
 
-  const handleTogglePayment = (checked: boolean) => {
-    store.updateInvoice(liveInvoice.id, { show_payment_details: checked });
-  };
+  // Unified 1-click handler: Attaches BOTH PDF Document AND Message Text together on WhatsApp
+  const handleSendWhatsAppWithPdfAndText = async () => {
+    setIsSharing(true);
+    setStatusMsg(null);
 
-  const handleShareWithPdf = async () => {
-    setIsGenerating(true);
-    setFeedback(null);
+    const adjustedState = {
+      ...state,
+      clients: state.clients.map((c) =>
+        c.id === client?.id ? { ...c, phone: phoneInput } : c
+      )
+    };
 
-    try {
-      const res = await shareInvoicePdfToWhatsApp(
-        liveInvoice,
-        store.getState(),
-        preparedPdf || undefined
-      );
+    const result = await shareInvoicePdfToWhatsApp(
+      liveInv,
+      adjustedState,
+      preparedPdf || undefined,
+      messageText
+    );
+    setIsSharing(false);
 
-      if (res.success) {
-        if (res.sharedDirectlyWithFile) {
-          setFeedback({
-            type: 'success',
-            message:
-              '✓ WhatsApp opened with Invoice PDF and message text attached automatically!'
-          });
-        } else {
-          setFeedback({
-            type: 'info',
-            message:
-              '✓ Invoice PDF downloaded and WhatsApp opened with message text ready. Attach the downloaded PDF in chat to send.'
-          });
-        }
-      } else {
-        setFeedback({
-          type: 'error',
-          message: res.error || 'Unable to share directly to WhatsApp.'
-        });
-      }
-    } catch (err: any) {
-      setFeedback({
+    if (!result.success) {
+      setStatusMsg({
         type: 'error',
-        message: err?.message || 'An unexpected error occurred.'
+        text: result.error || 'Could not share invoice PDF & text.'
       });
-    } finally {
-      setIsGenerating(false);
+      return;
+    }
+
+    if (result.sharedDirectlyWithFile) {
+      setStatusMsg({
+        type: 'success',
+        text: `✓ ${liveInv.invoice_number}.pdf and message text attached together! Select WhatsApp and your client to send.`
+      });
+    } else {
+      setStatusMsg({
+        type: 'info',
+        text: `📥 ${liveInv.invoice_number}.pdf downloaded & WhatsApp opened with text pre-filled! Attach the downloaded PDF in chat and press Send.`
+      });
     }
   };
 
-  const handleDownloadOnly = async () => {
-    setIsGenerating(true);
-    setFeedback(null);
-    try {
-      const res =
-        preparedPdf || (await generateInvoicePdfBlob(liveInvoice, store.getState()));
-      if (res) {
-        triggerPdfBlobDownload(res.blob, `${liveInvoice.invoice_number}.pdf`);
-        setFeedback({
-          type: 'success',
-          message: `✓ Invoice PDF (${liveInvoice.invoice_number}.pdf) downloaded successfully!`
-        });
-      }
-    } catch {
-      setFeedback({
-        type: 'error',
-        message: 'Unable to download PDF file.'
+  const handleDownloadPdfOnly = async () => {
+    setIsSharing(true);
+    const pdfData =
+      preparedPdf || (await generateInvoicePdfBlob(liveInv, state));
+    setIsSharing(false);
+
+    if (pdfData) {
+      triggerPdfBlobDownload(pdfData.blob, `${liveInv.invoice_number}.pdf`);
+      setStatusMsg({
+        type: 'success',
+        text: `✓ Downloaded ${liveInv.invoice_number}.pdf.`
       });
-    } finally {
-      setIsGenerating(false);
     }
   };
 
-  const handleCopyText = async () => {
+  const handleCopyMessage = async () => {
     try {
       await navigator.clipboard.writeText(messageText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
+      setCopiedText(true);
+      setTimeout(() => setCopiedText(false), 2000);
     } catch {
-      // ignore clipboard errors
+      // ignore
     }
   };
 
-  const handleOpenDirectChat = () => {
-    const waUrl = cleanPhone
-      ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(messageText)}`
-      : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
-    openExternalUrlSafe(waUrl);
-  };
-
-  const isBusy = isGenerating || (!isDesktop && isPreparingPdf);
-
   return (
-    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1250 }}>
+    <div className="modal-overlay" onClick={onClose}>
       <div
         className="modal-content"
+        style={{ maxWidth: '580px', width: '96%', padding: 0, overflow: 'hidden' }}
         onClick={(e) => e.stopPropagation()}
-        style={{
-          maxWidth: '550px',
-          width: '95%',
-          padding: 0,
-          borderRadius: '12px',
-          overflow: 'hidden',
-          border: '1px solid #86efac',
-          boxShadow:
-            '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)'
-        }}
       >
-        {/* Header */}
+        {/* Vibrant Emerald Header */}
         <div
           style={{
-            background: 'linear-gradient(135deg, #15803d 0%, #166534 100%)',
+            background: 'linear-gradient(135deg, #059669 0%, #0d9488 100%)',
             color: '#ffffff',
-            padding: '1.15rem 1.4rem',
+            padding: '1.1rem 1.35rem',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            gap: '0.75rem'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div
-              style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                background: '#22c55e',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '1.4rem'
-              }}
-            >
-              💬
-            </div>
-            <div>
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>
-                Share{' '}
-                {isFullyPaid || liveInvoice.kind === 'final'
-                  ? 'Final Settlement Invoice'
-                  : 'Invoice'}{' '}
-                on WhatsApp
-              </h2>
-              <div style={{ fontSize: '0.75rem', color: '#bbf7d0', marginTop: '0.15rem' }}>
-                PDF Document &amp; Message Auto-Attach &bull; #{liveInvoice.invoice_number}
-              </div>
-            </div>
+          <div>
+            <h2 style={{ fontSize: '1.12rem', fontWeight: 800, margin: 0 }}>
+              💬 Send Invoice PDF + Text on WhatsApp
+            </h2>
+            <p style={{ fontSize: '0.78rem', opacity: 0.92, marginTop: '0.2rem' }}>
+              {isFinalSettlement ? 'Final Settlement Invoice' : 'Official Invoice'} #{liveInv.invoice_number} • PDF &amp; message attach together
+            </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            disabled={isGenerating}
             style={{
-              background: 'transparent',
-              border: 'none',
+              background: 'rgba(255,255,255,0.18)',
               color: '#ffffff',
-              fontSize: '1.4rem',
+              border: '1px solid rgba(255,255,255,0.3)',
+              borderRadius: '8px',
+              padding: '0.3rem 0.6rem',
               cursor: 'pointer',
-              lineHeight: 1
+              fontWeight: 700
             }}
           >
-            ×
+            ✕
           </button>
         </div>
 
-        {/* Body */}
-        <div style={{ padding: '1.25rem 1.4rem', maxHeight: '82vh', overflowY: 'auto' }}>
-          {/* Client & Summary Card */}
+        <div style={{ padding: '1.25rem 1.35rem', maxHeight: '80vh', overflowY: 'auto' }}>
+          {/* PDF + Text Bundle Summary Card */}
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfeff 100%)',
+              border: '1px solid #a7f3d0',
+              borderRadius: '10px',
+              padding: '0.85rem 1rem',
+              marginBottom: '1rem',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '0.75rem'
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 800, color: '#065f46', fontSize: '0.92rem' }}>
+                📎 {liveInv.invoice_number}.pdf + Message Text
+              </div>
+              <div style={{ fontSize: '0.78rem', color: '#047857', marginTop: '0.15rem' }}>
+                {evt?.title || 'Catering Event'} • Net: ₹{liveInv.amount.toLocaleString('en-IN')}
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  color: isPreparingPdf ? '#b45309' : '#065f46',
+                  background: isPreparingPdf ? '#fef3c7' : '#d1fae5',
+                  padding: '0.25rem 0.65rem',
+                  borderRadius: '6px',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {isPreparingPdf ? '⏳ Preparing PDF...' : '✓ PDF + Text Ready'}
+              </span>
+            </div>
+          </div>
+
+          {/* Bank & Payment Toggle Switches */}
           <div
             style={{
               background: '#f8fafc',
               border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-              padding: '0.85rem 1rem',
-              marginBottom: '0.95rem'
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                flexWrap: 'wrap',
-                gap: '0.5rem'
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    fontSize: '0.72rem',
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                    fontWeight: 600
-                  }}
-                >
-                  Client:
-                </div>
-                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#0f172a' }}>
-                  {client?.name || 'Valued Client'}
-                </div>
-                <div style={{ fontSize: '0.8rem', color: '#475569' }}>
-                  📞 {client?.phone || 'Phone not added'}
-                </div>
-              </div>
-
-              <div style={{ textAlign: 'right' }}>
-                <div
-                  style={{
-                    fontSize: '0.72rem',
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                    fontWeight: 600
-                  }}
-                >
-                  {isFullyPaid || liveInvoice.kind === 'final'
-                    ? 'Final Settlement Total:'
-                    : 'Invoice Total:'}
-                </div>
-                <div style={{ fontWeight: 800, fontSize: '1.1rem', color: '#15803d' }}>
-                  ₹{liveInvoice.amount.toLocaleString('en-IN')}
-                </div>
-                <div
-                  style={{
-                    fontSize: '0.75rem',
-                    color: !isFullyPaid ? '#dc2626' : '#16a34a',
-                    fontWeight: 600
-                  }}
-                >
-                  {!isFullyPaid
-                    ? `Balance Due: ₹${balanceDue.toLocaleString('en-IN')}`
-                    : '✓ Fully Paid (Payment Terms Hidden)'}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Bank Details & Payment Details Visibility Toggles */}
-          <div
-            style={{
-              background: '#f1f5f9',
-              border: '1px solid #cbd5e1',
-              borderRadius: '8px',
+              borderRadius: '10px',
               padding: '0.7rem 0.9rem',
-              marginBottom: '0.95rem',
+              marginBottom: '1rem',
               display: 'flex',
-              flexWrap: 'wrap',
-              gap: '0.85rem',
               alignItems: 'center',
-              justifyContent: 'space-between'
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '0.75rem'
             }}
           >
-            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#0f172a' }}>
-              Show on Invoice PDF &amp; WA:
+            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155' }}>
+              Include in PDF &amp; Text:
             </span>
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              <label
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.35rem',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  color: '#1e293b'
-                }}
-              >
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={showBankDetails}
-                  onChange={(e) => handleToggleBank(e.target.checked)}
+                  onChange={(e) => handleToggleOption('show_bank_details', e.target.checked)}
                 />
-                🏦 Bank Details
+                Bank Details
               </label>
-              <label
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.35rem',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  color: '#1e293b'
-                }}
-              >
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={showPaymentDetails}
-                  onChange={(e) => handleTogglePayment(e.target.checked)}
+                  onChange={(e) => handleToggleOption('show_payment_details', e.target.checked)}
                 />
-                💳 Payment Details
+                Payment Details
               </label>
             </div>
           </div>
 
-          {/* Status Feedback */}
-          {feedback && (
-            <div
-              style={{
-                background:
-                  feedback.type === 'success'
-                    ? '#dcfce7'
-                    : feedback.type === 'info'
-                    ? '#eff6ff'
-                    : '#fee2e2',
-                border: `1px solid ${
-                  feedback.type === 'success'
-                    ? '#86efac'
-                    : feedback.type === 'info'
-                    ? '#93c5fd'
-                    : '#fca5a5'
-                }`,
-                color:
-                  feedback.type === 'success'
-                    ? '#15803d'
-                    : feedback.type === 'info'
-                    ? '#1e40af'
-                    : '#991b1b',
-                padding: '0.75rem 0.9rem',
-                borderRadius: '8px',
-                fontSize: '0.82rem',
-                marginBottom: '1rem',
-                fontWeight: 600,
-                lineHeight: 1.5
-              }}
-            >
-              {feedback.message}
-            </div>
-          )}
-
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-            <button
-              type="button"
-              onClick={handleShareWithPdf}
-              disabled={isBusy}
-              style={{
-                background: '#16a34a',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '8px',
-                padding: '0.85rem 1.25rem',
-                fontWeight: 700,
-                fontSize: '0.95rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.55rem',
-                cursor: isBusy ? 'not-allowed' : 'pointer',
-                opacity: isBusy ? 0.85 : 1,
-                boxShadow: '0 4px 6px -1px rgba(22, 163, 74, 0.25)'
-              }}
-            >
-              <span style={{ fontSize: '1.2rem' }}>{isBusy ? '⏳' : '📲'}</span>
-              <span>
-                {isGenerating
-                  ? 'Sharing to WhatsApp...'
-                  : !isDesktop && isPreparingPdf
-                  ? 'Preparing Document & Text...'
-                  : 'Share PDF & Text on WhatsApp'}
-              </span>
-            </button>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '0.65rem',
-                marginTop: '0.2rem'
-              }}
-            >
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={handleDownloadOnly}
-                disabled={isGenerating}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.4rem',
-                  padding: '0.6rem'
-                }}
-              >
-                <span>📥</span>
-                <span>Download PDF File</span>
-              </button>
-
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={handleOpenDirectChat}
-                disabled={isGenerating}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.4rem',
-                  padding: '0.6rem',
-                  background: '#f0fdf4',
-                  borderColor: '#bbf7d0',
-                  color: '#15803d',
-                  fontWeight: 600
-                }}
-              >
-                <span>💬</span>
-                <span>Open WhatsApp Chat</span>
-              </button>
-            </div>
+          {/* Client WhatsApp Number */}
+          <div className="form-group" style={{ marginBottom: '0.9rem' }}>
+            <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Client WhatsApp Number ({client?.name || 'Client'})</span>
+              {cleanPhone && (
+                <span style={{ color: '#059669', fontWeight: 700, fontSize: '0.75rem' }}>
+                  +{cleanPhone}
+                </span>
+              )}
+            </label>
+            <input
+              type="tel"
+              className="form-control"
+              placeholder="e.g. +91 98471 23456"
+              value={phoneInput}
+              onChange={(e) => setPhoneInput(e.target.value)}
+            />
           </div>
 
-          {/* Message Preview — Copy Text shown ONLY on Desktop / Laptop Web View */}
-          <div style={{ marginTop: '1rem' }}>
+          {/* Editable Attached WhatsApp Text */}
+          <div style={{ marginBottom: '1rem' }}>
             <div
               style={{
                 display: 'flex',
@@ -543,49 +362,138 @@ export default function WhatsAppShareModal({
                 gap: '0.5rem'
               }}
             >
-              <span
-                style={{
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  color: '#64748b',
-                  textTransform: 'uppercase'
-                }}
-              >
-                WhatsApp Message Preview
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155' }}>
+                Attached Message Text (Sent Together with PDF)
               </span>
-              {isDesktop ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem' }}
-                  onClick={handleCopyText}
-                >
-                  {copied ? '✓ Copied!' : '📋 Copy Text'}
-                </button>
-              ) : (
-                <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>
-                  ✓ Auto-attached with PDF
-                </span>
-              )}
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                {isMessageEdited && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '0.18rem 0.5rem', fontSize: '0.72rem' }}
+                    onClick={() => {
+                      setIsMessageEdited(false);
+                      setMessageText(formatWhatsAppInvoiceMessage(liveInv, state));
+                    }}
+                  >
+                    Reset Text
+                  </button>
+                )}
+                {isDesktop && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleCopyMessage}
+                    style={{ padding: '0.18rem 0.55rem', fontSize: '0.73rem' }}
+                  >
+                    {copiedText ? '✓ Copied' : '📋 Copy Text'}
+                  </button>
+                )}
+              </div>
             </div>
-            <pre
+            <textarea
+              className="form-control"
+              rows={6}
+              value={messageText}
+              onChange={(e) => {
+                setIsMessageEdited(true);
+                setMessageText(e.target.value);
+              }}
               style={{
+                fontSize: '0.8rem',
+                lineHeight: 1.5,
                 background: '#f8fafc',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                padding: '0.75rem',
-                fontSize: '0.76rem',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                maxHeight: '160px',
-                overflowY: 'auto',
-                margin: 0,
-                color: '#1e293b',
                 fontFamily: 'inherit'
               }}
+            />
+          </div>
+
+          {/* Status Feedback */}
+          {statusMsg && (
+            <div
+              style={{
+                padding: '0.75rem 0.9rem',
+                borderRadius: '8px',
+                fontSize: '0.82rem',
+                marginBottom: '1rem',
+                lineHeight: 1.45,
+                background:
+                  statusMsg.type === 'success'
+                    ? '#dcfce7'
+                    : statusMsg.type === 'error'
+                    ? '#fee2e2'
+                    : '#eff6ff',
+                color:
+                  statusMsg.type === 'success'
+                    ? '#166534'
+                    : statusMsg.type === 'error'
+                    ? '#b91c1c'
+                    : '#1e40af',
+                border: `1px solid ${
+                  statusMsg.type === 'success'
+                    ? '#86efac'
+                    : statusMsg.type === 'error'
+                    ? '#fca5a5'
+                    : '#bfdbfe'
+                }`
+              }}
             >
-              {messageText}
-            </pre>
+              {statusMsg.text}
+            </div>
+          )}
+
+          {/* Unified Primary WhatsApp Send CTA */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+            <button
+              type="button"
+              onClick={handleSendWhatsAppWithPdfAndText}
+              disabled={isSharing || isPreparingPdf}
+              style={{
+                width: '100%',
+                background: isPreparingPdf
+                  ? '#94a3b8'
+                  : 'linear-gradient(135deg, #16a34a 0%, #059669 100%)',
+                color: '#ffffff',
+                border: 'none',
+                fontWeight: 800,
+                padding: '0.85rem 1rem',
+                fontSize: '0.94rem',
+                borderRadius: '10px',
+                cursor: isPreparingPdf ? 'wait' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.25)',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {isPreparingPdf
+                ? '⏳ Preparing PDF & Text...'
+                : isSharing
+                ? '⏳ Opening WhatsApp...'
+                : '📲 Send PDF & Text Together on WhatsApp'}
+            </button>
+
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleDownloadPdfOnly}
+                disabled={isSharing || isPreparingPdf}
+                style={{ flex: 1, fontSize: '0.83rem', fontWeight: 600 }}
+              >
+                📥 Download PDF Only
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={onClose}
+                style={{ fontSize: '0.83rem', fontWeight: 600 }}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       </div>

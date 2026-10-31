@@ -199,9 +199,9 @@ export default function DashboardPage() {
             marginBottom: '1.5rem'
           }}
         >
-          <div className="stats-card" style={{ borderLeft: '4px solid #2563eb' }}>
-            <span className="stats-label">Total Salary Earned</span>
-            <span className="stats-value" style={{ color: '#2563eb' }}>
+          <div className="stats-card" style={{ borderTop: '3px solid #2563eb', background: 'linear-gradient(180deg, #eff6ff 0%, #ffffff 65%)' }}>
+            <span className="stats-label" style={{ color: '#1d4ed8' }}>Total Salary Earned</span>
+            <span className="stats-value" style={{ color: '#1d4ed8' }}>
               ₹{salarySummary.totalEarned.toLocaleString('en-IN')}
             </span>
             <span className="stats-sub">
@@ -212,8 +212,8 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          <div className="stats-card" style={{ borderLeft: '4px solid #059669' }}>
-            <span className="stats-label">Salary Received</span>
+          <div className="stats-card" style={{ borderTop: '3px solid #059669', background: 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 65%)' }}>
+            <span className="stats-label" style={{ color: '#047857' }}>Salary Received</span>
             <span className="stats-value" style={{ color: '#059669' }}>
               ₹{salarySummary.totalPaid.toLocaleString('en-IN')}
             </span>
@@ -226,11 +226,13 @@ export default function DashboardPage() {
           <div
             className="stats-card"
             style={{
-              borderLeft: `4px solid ${salarySummary.balancePayable > 0 ? '#dc2626' : '#059669'}`,
-              background: salarySummary.balancePayable > 0 ? '#fffafa' : '#ffffff'
+              borderTop: `3px solid ${salarySummary.balancePayable > 0 ? '#e11d48' : '#059669'}`,
+              background: salarySummary.balancePayable > 0
+                ? 'linear-gradient(180deg, #fff1f2 0%, #ffffff 65%)'
+                : 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 65%)'
             }}
           >
-            <span className="stats-label">Pending Salary Balance</span>
+            <span className="stats-label" style={{ color: salarySummary.balancePayable > 0 ? '#be123c' : '#047857' }}>Pending Salary Balance</span>
             <span
               className="stats-value"
               style={{ color: salarySummary.balancePayable > 0 ? '#dc2626' : '#059669' }}
@@ -615,24 +617,24 @@ export default function DashboardPage() {
 
         {/* Manager Operational KPI Cards */}
         <div className="grid-3" style={{ marginBottom: '1.5rem' }}>
-          <div className="stats-card" style={{ borderLeft: '4px solid #2563eb' }}>
-            <span className="stats-label">Upcoming Banquets Scheduled</span>
+          <div className="stats-card" style={{ borderTop: '3px solid #2563eb', background: 'linear-gradient(180deg, #eff6ff 0%, #ffffff 65%)' }}>
+            <span className="stats-label" style={{ color: '#1d4ed8' }}>Upcoming Banquets Scheduled</span>
             <span className="stats-value" style={{ color: '#2563eb' }}>
               {upcomingEvents.length}
             </span>
             <span className="stats-sub">Confirmed &amp; inquiry functions</span>
           </div>
 
-          <div className="stats-card" style={{ borderLeft: '4px solid var(--success)' }}>
-            <span className="stats-label">Total Guests / Pax to Cater</span>
+          <div className="stats-card" style={{ borderTop: '3px solid #059669', background: 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 65%)' }}>
+            <span className="stats-label" style={{ color: '#047857' }}>Total Guests / Pax to Cater</span>
             <span className="stats-value" style={{ color: 'var(--success)' }}>
               {totalUpcomingPax.toLocaleString('en-IN')}
             </span>
             <span className="stats-sub">Across all upcoming banquets</span>
           </div>
 
-          <div className="stats-card" style={{ borderLeft: '4px solid #d97706' }}>
-            <span className="stats-label">Pantry Stock Health</span>
+          <div className="stats-card" style={{ borderTop: '3px solid #d97706', background: 'linear-gradient(180deg, #fffbeb 0%, #ffffff 65%)' }}>
+            <span className="stats-label" style={{ color: '#b45309' }}>Pantry Stock Health</span>
             <span
               className="stats-value"
               style={{ color: lowStockItems.length > 0 ? '#b45309' : 'var(--success)' }}
@@ -875,24 +877,24 @@ export default function DashboardPage() {
 
         {/* Accountant Top Financial KPI Cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-          <div className="stats-card" style={{ borderLeft: '4px solid #e11d48' }}>
-            <span className="stats-label">Total Projected Sales</span>
+          <div className="stats-card" style={{ borderTop: '3px solid #e11d48', background: 'linear-gradient(180deg, #fff1f2 0%, #ffffff 65%)' }}>
+            <span className="stats-label" style={{ color: '#be123c' }}>Total Projected Sales</span>
             <span className="stats-value" style={{ color: '#e11d48' }}>
               ₹{totalSales.toLocaleString('en-IN')}
             </span>
             <span className="stats-sub">From {state.events.length} booked banquet functions</span>
           </div>
 
-          <div className="stats-card" style={{ borderLeft: '4px solid #059669' }}>
-            <span className="stats-label">Client Payments Received</span>
+          <div className="stats-card" style={{ borderTop: '3px solid #059669', background: 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 65%)' }}>
+            <span className="stats-label" style={{ color: '#047857' }}>Client Payments Received</span>
             <span className="stats-value" style={{ color: '#059669' }}>
               ₹{totalPaid.toLocaleString('en-IN')}
             </span>
             <span className="stats-sub">Invoiced: ₹{totalInvoiced.toLocaleString('en-IN')}</span>
           </div>
 
-          <div className="stats-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-            <span className="stats-label">Receivables from Clients</span>
+          <div className="stats-card" style={{ borderTop: '3px solid #d97706', background: 'linear-gradient(180deg, #fffbeb 0%, #ffffff 65%)' }}>
+            <span className="stats-label" style={{ color: '#b45309' }}>Receivables from Clients</span>
             <span
               className="stats-value"
               style={{ color: totalPending > 0 ? '#dc2626' : 'var(--text-main)' }}
@@ -902,8 +904,8 @@ export default function DashboardPage() {
             <span className="stats-sub">Pending client invoice balances</span>
           </div>
 
-          <div className="stats-card" style={{ borderLeft: '4px solid #dc2626' }}>
-            <span className="stats-label">Vendor Dues</span>
+          <div className="stats-card" style={{ borderTop: '3px solid #dc2626', background: 'linear-gradient(180deg, #fef2f2 0%, #ffffff 65%)' }}>
+            <span className="stats-label" style={{ color: '#b91c1c' }}>Vendor Dues</span>
             <span
               className="stats-value"
               style={{ color: totalVendorDues > 0 ? '#dc2626' : 'var(--success)' }}
@@ -915,8 +917,8 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          <div className="stats-card" style={{ borderLeft: '4px solid #7c3aed' }}>
-            <span className="stats-label">Staff Salary Payable</span>
+          <div className="stats-card" style={{ borderTop: '3px solid #7c3aed', background: 'linear-gradient(180deg, #f5f3ff 0%, #ffffff 65%)' }}>
+            <span className="stats-label" style={{ color: '#6d28d9' }}>Staff Salary Payable</span>
             <span
               className="stats-value"
               style={{ color: totalStaffSalaryPayable > 0 ? '#dc2626' : 'var(--success)' }}
@@ -1322,19 +1324,25 @@ export default function DashboardPage() {
       {/* PWA Install Prompt (shows only when installable) */}
       <PWAInstallBanner />
 
-      {/* Row 1: 4 Streamlined KPI Cards */}
+      {/* Row 1: 4 Colourful Streamlined KPI Cards */}
       <div className="owner-kpi-grid">
         {/* 1. Total Revenue */}
-        <div className="owner-kpi-card">
+        <div
+          className="owner-kpi-card"
+          style={{
+            borderTop: '3px solid #e11d48',
+            background: 'linear-gradient(180deg, #fff1f2 0%, #ffffff 60%)'
+          }}
+        >
           <div>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#be123c' }}>
               Total Revenue
             </div>
             <div
               className="tabular-nums"
               style={{
                 fontSize: '1.75rem',
-                fontWeight: 700,
+                fontWeight: 800,
                 color: '#0f172a',
                 letterSpacing: '-0.02em',
                 marginTop: '0.35rem',
@@ -1352,7 +1360,7 @@ export default function DashboardPage() {
               alignItems: 'center',
               gap: '0.5rem',
               fontSize: '0.78rem',
-              color: '#64748b',
+              color: '#475569',
               marginTop: '0.85rem',
               paddingTop: '0.65rem',
               borderTop: '1px solid #f1f5f9'
@@ -1361,7 +1369,7 @@ export default function DashboardPage() {
             <span>Collected ₹{totalPaid.toLocaleString('en-IN')}</span>
             <Link
               href="/invoices"
-              style={{ color: '#0f172a', fontWeight: 600, whiteSpace: 'nowrap' }}
+              style={{ color: '#be123c', fontWeight: 700, whiteSpace: 'nowrap' }}
             >
               Invoices &rarr;
             </Link>
@@ -1369,7 +1377,15 @@ export default function DashboardPage() {
         </div>
 
         {/* 2. Completed Events Profit & Loss (Owner-Only) */}
-        <div className="owner-kpi-card">
+        <div
+          className="owner-kpi-card"
+          style={{
+            borderTop: `3px solid ${isProfitPositive ? '#059669' : '#dc2626'}`,
+            background: isProfitPositive
+              ? 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 60%)'
+              : 'linear-gradient(180deg, #fef2f2 0%, #ffffff 60%)'
+          }}
+        >
           <div>
             <div
               style={{
@@ -1379,10 +1395,10 @@ export default function DashboardPage() {
                 gap: '0.4rem'
               }}
             >
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: isProfitPositive ? '#047857' : '#b91c1c' }}>
                 Net {isProfitPositive ? 'Profit' : 'Loss'} (Completed)
               </span>
-              <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 500 }}>
+              <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>
                 Owner only
               </span>
             </div>
@@ -1390,8 +1406,8 @@ export default function DashboardPage() {
               className="tabular-nums"
               style={{
                 fontSize: '1.75rem',
-                fontWeight: 700,
-                color: isProfitPositive ? '#15803d' : '#dc2626',
+                fontWeight: 800,
+                color: isProfitPositive ? '#059669' : '#dc2626',
                 letterSpacing: '-0.02em',
                 marginTop: '0.35rem',
                 lineHeight: 1.15
@@ -1409,7 +1425,7 @@ export default function DashboardPage() {
               alignItems: 'center',
               gap: '0.5rem',
               fontSize: '0.78rem',
-              color: '#64748b',
+              color: '#475569',
               marginTop: '0.85rem',
               paddingTop: '0.65rem',
               borderTop: '1px solid #f1f5f9'
@@ -1420,7 +1436,7 @@ export default function DashboardPage() {
             </span>
             <Link
               href="/pnl"
-              style={{ color: '#e11d48', fontWeight: 600, whiteSpace: 'nowrap' }}
+              style={{ color: '#059669', fontWeight: 700, whiteSpace: 'nowrap' }}
             >
               P&amp;L report &rarr;
             </Link>
@@ -1428,16 +1444,22 @@ export default function DashboardPage() {
         </div>
 
         {/* 3. Upcoming Events */}
-        <div className="owner-kpi-card">
+        <div
+          className="owner-kpi-card"
+          style={{
+            borderTop: '3px solid #4f46e5',
+            background: 'linear-gradient(180deg, #eef2ff 0%, #ffffff 60%)'
+          }}
+        >
           <div>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#4338ca' }}>
               Upcoming Events
             </div>
             <div
               className="tabular-nums"
               style={{
                 fontSize: '1.75rem',
-                fontWeight: 700,
+                fontWeight: 800,
                 color: '#0f172a',
                 letterSpacing: '-0.02em',
                 marginTop: '0.35rem',
@@ -1455,7 +1477,7 @@ export default function DashboardPage() {
               alignItems: 'center',
               gap: '0.5rem',
               fontSize: '0.78rem',
-              color: '#64748b',
+              color: '#475569',
               marginTop: '0.85rem',
               paddingTop: '0.65rem',
               borderTop: '1px solid #f1f5f9'
@@ -1466,7 +1488,7 @@ export default function DashboardPage() {
             </span>
             <Link
               href="/events"
-              style={{ color: '#0f172a', fontWeight: 600, whiteSpace: 'nowrap' }}
+              style={{ color: '#4338ca', fontWeight: 700, whiteSpace: 'nowrap' }}
             >
               Schedule &rarr;
             </Link>
@@ -1474,16 +1496,22 @@ export default function DashboardPage() {
         </div>
 
         {/* 4. Pending Payables (Vendors + Staff) */}
-        <div className="owner-kpi-card">
+        <div
+          className="owner-kpi-card"
+          style={{
+            borderTop: '3px solid #d97706',
+            background: 'linear-gradient(180deg, #fffbeb 0%, #ffffff 60%)'
+          }}
+        >
           <div>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#b45309' }}>
               Pending Payables
             </div>
             <div
               className="tabular-nums"
               style={{
                 fontSize: '1.75rem',
-                fontWeight: 700,
+                fontWeight: 800,
                 color: totalPayables > 0 ? '#dc2626' : '#0f172a',
                 letterSpacing: '-0.02em',
                 marginTop: '0.35rem',
@@ -1501,7 +1529,7 @@ export default function DashboardPage() {
               alignItems: 'center',
               gap: '0.5rem',
               fontSize: '0.78rem',
-              color: '#64748b',
+              color: '#475569',
               marginTop: '0.85rem',
               paddingTop: '0.65rem',
               borderTop: '1px solid #f1f5f9'
@@ -1513,7 +1541,7 @@ export default function DashboardPage() {
             </span>
             <Link
               href="/staff"
-              style={{ color: '#0f172a', fontWeight: 600, whiteSpace: 'nowrap' }}
+              style={{ color: '#b45309', fontWeight: 700, whiteSpace: 'nowrap' }}
             >
               Payroll &rarr;
             </Link>

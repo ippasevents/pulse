@@ -1,113 +1,95 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { usePWAInstall } from './usePWAInstall';
 import { PWAInstallButton } from './PWAInstallButton';
 
-export function PWAInstallBanner() {
-  const { isInstalled } = usePWAInstall();
+export default function PWAInstallBanner() {
+  const { isInstalled, isInstallable, install } = usePWAInstall();
   const [dismissed, setDismissed] = useState(false);
+  const [installing, setInstalling] = useState(false);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const isDismissed = sessionStorage.getItem('ippas_pwa_banner_dismissed') === 'true';
-      if (isDismissed) setDismissed(true);
-    }
-  }, []);
+  if (isInstalled || dismissed) {
+    return null;
+  }
 
-  // Hide if already running as installed standalone app or dismissed for current session
-  if (isInstalled || dismissed) return null;
+  // When browser 1-tap WebAPK prompt is ready, render ultra-clean 1-tap card
+  if (isInstallable) {
+    return (
+      <div
+        className="no-print"
+        style={{
+          background: 'linear-gradient(135deg, #fff1f2 0%, #eef2ff 55%, #ecfdf5 100%)',
+          border: '1px solid #fecdd3',
+          borderRadius: '12px',
+          padding: '0.85rem 1.1rem',
+          marginBottom: '1.35rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '0.85rem'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+          <img
+            src="/pwa-192x192.png"
+            alt="IPPAS Pulse"
+            referrerPolicy="no-referrer"
+            style={{
+              width: '42px',
+              height: '42px',
+              borderRadius: '10px',
+              border: '1px solid #fda4af',
+              flexShrink: 0
+            }}
+          />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a' }}>
+              Install IPPAS Pulse on Your Phone / Desktop
+            </div>
+            <div style={{ fontSize: '0.78rem', color: '#475569' }}>
+              മറ്റ് ആപ്പുകളുടെ കൂടെ App Drawer-ലും Home Screen-ലും ഒറ്റ ടാപ്പിൽ ആഡ് ചെയ്യാം • പെർമിഷൻ ആവശ്യമില്ല
+            </div>
+          </div>
+        </div>
 
-  const handleDismiss = () => {
-    setDismissed(true);
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('ippas_pwa_banner_dismissed', 'true');
-    }
-  };
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
+          <button
+            type="button"
+            disabled={installing}
+            onClick={async () => {
+              setInstalling(true);
+              await install();
+              setInstalling(false);
+            }}
+            className="btn btn-primary btn-sm"
+            style={{
+              fontWeight: 700,
+              padding: '0.48rem 0.95rem',
+              whiteSpace: 'nowrap',
+              borderRadius: '8px'
+            }}
+          >
+            {installing ? 'Installing...' : '📲 1-Tap Install App'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDismissed(true)}
+            className="btn btn-secondary btn-sm"
+            style={{ padding: '0.42rem 0.6rem' }}
+            title="Hide banner"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div
-      style={{
-        background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-        color: '#ffffff',
-        borderRadius: '12px',
-        padding: '1rem 1.25rem',
-        marginBottom: '1.5rem',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '1rem',
-        border: '1px solid #334155',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flex: 1, minWidth: '260px' }}>
-        <div
-          style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: '12px',
-            background: '#ffffff',
-            border: '1px solid rgba(225, 29, 72, 0.4)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '4px',
-            flexShrink: 0,
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-          }}
-        >
-          <img
-            src="/favicon.png"
-            alt="IPPAS Icon"
-            style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }}
-          />
-        </div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-            <span>Install IPPAS Pulse as a Mobile App</span>
-            <span
-              style={{
-                fontSize: '0.68rem',
-                background: '#e11d48',
-                color: '#fff',
-                padding: '0.1rem 0.45rem',
-                borderRadius: '4px',
-                fontWeight: 800,
-                letterSpacing: '0.5px'
-              }}
-            >
-              PWA APP
-            </span>
-          </div>
-          <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: '0.2rem 0 0 0', lineHeight: 1.4 }}>
-            Install on your phone or computer for fast, one-tap access to catering events, quotes, and bills.
-          </p>
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-        <PWAInstallButton variant="banner" />
-        <button
-          type="button"
-          onClick={handleDismiss}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: '#64748b',
-            cursor: 'pointer',
-            padding: '0.4rem',
-            fontSize: '1rem',
-            lineHeight: 1
-          }}
-          title="Dismiss banner"
-        >
-          ✕
-        </button>
-      </div>
+    <div className="no-print" style={{ marginBottom: '1.25rem' }}>
+      <PWAInstallButton variant="banner" />
     </div>
   );
 }
-
-export default PWAInstallBanner;

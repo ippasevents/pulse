@@ -11,10 +11,11 @@ import {
   buildManualWhatsAppCaption,
   downloadAllFourUserManualPdfs,
   downloadRoleUserManualPdf,
+  generateRoleUserManualPdfBlob,
   printRoleUserManual,
   shareRoleUserManualOnWhatsApp
 } from '@/lib/userManualPdfGenerator';
-import { isDesktopWebView } from '@/lib/whatsappDeviceShare';
+import { isDesktopWebView, triggerPdfBlobDownload } from '@/lib/whatsappDeviceShare';
 
 const ML_FONT_FAMILY = `'Noto Sans Malayalam', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif`;
 
@@ -24,6 +25,11 @@ export default function MalayalamUserManualsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [downloadingKey, setDownloadingKey] = useState<ManualRoleKey | null>(null);
   const [sharingKey, setSharingKey] = useState<ManualRoleKey | null>(null);
+  const [waModalRoleKey, setWaModalRoleKey] = useState<ManualRoleKey | null>(null);
+  const [waPhoneInput, setWaPhoneInput] = useState('');
+  const [waMessageText, setWaMessageText] = useState('');
+  const [waPreparedPdf, setWaPreparedPdf] = useState<{ blob: Blob; file: File; filename: string } | null>(null);
+  const [waPreparingPdf, setWaPreparingPdf] = useState(false);
   const [batchProgress, setBatchProgress] = useState<string>('');
   const [statusBanner, setStatusBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
@@ -101,20 +107,43 @@ export default function MalayalamUserManualsPage() {
     printRoleUserManual(key, businessName, businessPhone);
   };
 
-  const handleShareWhatsApp = async (key: ManualRoleKey) => {
-    if (sharingKey) return;
-    setSharingKey(key);
-    const manual = MALAYALAM_USER_MANUALS[key];
-    const ok = await shareRoleUserManualOnWhatsApp({
-      roleKey: key,
+  const handleShareWhatsApp = (key: ManualRoleKey) => {
+    setWaModalRoleKey(key);
+    setWaPhoneInput('');
+    setWaMessageText(buildManualWhatsAppCaption(key, businessName));
+    setWaPreparedPdf(null);
+    setWaPreparingPdf(true);
+    generateRoleUserManualPdfBlob(key, businessName, businessPhone)
+      .then((res) => {
+        setWaPreparedPdf(res);
+        setWaPreparingPdf(false);
+      })
+      .catch(() => {
+        setWaPreparingPdf(false);
+      });
+  };
+
+  const handleConfirmSendManualWhatsApp = async () => {
+    if (!waModalRoleKey || !waPreparedPdf || sharingKey) return;
+    setSharingKey(waModalRoleKey);
+    const manual = MALAYALAM_USER_MANUALS[waModalRoleKey];
+    const outcome = await shareRoleUserManualOnWhatsApp({
+      roleKey: waModalRoleKey,
+      recipientPhone: waPhoneInput,
       businessName,
-      businessPhone
+      businessPhone,
+      prebuiltPdf: waPreparedPdf,
+      customMessage: waMessageText
     });
     setSharingKey(null);
-    if (ok) {
-      showToast('success', `${manual.titleMl} വാട്സാപ്പിൽ പങ്കിടാനായി തയ്യാറാക്കി.`);
+    if (outcome.success) {
+      setWaModalRoleKey(null);
+      showToast(
+        'success',
+        `${manual.titleMl} PDF ഫയലും സന്ദേശവും ഒരുമിച്ച് വാട്സാപ്പിലേക്ക് അയച്ചു.`
+      );
     } else {
-      showToast('error', 'വാട്സാപ്പ് ഷെയർ പൂർത്തിയാക്കാൻ സാധിച്ചില്ല.');
+      showToast('error', outcome.error || 'വാട്സാപ്പ് ഷെയർ പൂർത്തിയാക്കാൻ സാധിച്ചില്ല.');
     }
   };
 
@@ -287,12 +316,14 @@ export default function MalayalamUserManualsPage() {
                 style={{
                   background: '#ffffff',
                   border: isSelected ? `1.5px solid ${m.accentColor}` : '1px solid #e2e8f0',
-                  borderRadius: '10px',
+                  borderTop: `4px solid ${m.accentColor}`,
+                  borderRadius: '12px',
                   padding: '1.15rem 1.2rem',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
-                  gap: '0.9rem'
+                  gap: '0.9rem',
+                  boxShadow: isSelected ? '0 8px 20px -6px rgba(15, 23, 42, 0.1)' : '0 1px 3px rgba(15, 23, 42, 0.04)'
                 }}
               >
                 <div>
@@ -422,9 +453,9 @@ export default function MalayalamUserManualsPage() {
                       disabled={Boolean(sharingKey)}
                       style={{
                         flex: 1,
-                        background: '#f0fdf4',
-                        color: '#166534',
-                        border: '1px solid #bbf7d0',
+                        background: '#ecfdf5',
+                        color: '#047857',
+                        border: '1px solid #6ee7b7',
                         borderRadius: '6px',
                         padding: '0.38rem 0.6rem',
                         fontSize: '0.76rem',
@@ -433,7 +464,7 @@ export default function MalayalamUserManualsPage() {
                         whiteSpace: 'nowrap'
                       }}
                     >
-                      {isSharing ? 'ഷെയർ ചെയ്യുന്നു...' : '💬 WhatsApp'}
+                      {isSharing ? 'ഷെയർ ചെയ്യുന്നു...' : '💬 WA (PDF + Text)'}
                     </button>
 
                     {isDesktop && (
@@ -562,12 +593,12 @@ export default function MalayalamUserManualsPage() {
               style={{
                 whiteSpace: 'nowrap',
                 fontWeight: 700,
-                background: '#f0fdf4',
-                color: '#166534',
-                borderColor: '#bbf7d0'
+                background: '#ecfdf5',
+                color: '#047857',
+                borderColor: '#6ee7b7'
               }}
             >
-              {sharingKey === activeManual.key ? 'ഷെയർ ചെയ്യുന്നു...' : '💬 WhatsApp PDF'}
+              {sharingKey === activeManual.key ? 'ഷെയർ ചെയ്യുന്നു...' : '💬 WhatsApp (PDF + Text)'}
             </button>
 
             <button
@@ -785,6 +816,182 @@ export default function MalayalamUserManualsPage() {
           </div>
         </div>
       </div>
+
+      {/* Unified Malayalam Manual PDF + Text WhatsApp Modal */}
+      {waModalRoleKey && (() => {
+        const targetManual = MALAYALAM_USER_MANUALS[waModalRoleKey];
+        return (
+          <div className="modal-overlay" onClick={() => setWaModalRoleKey(null)}>
+            <div
+              className="modal-content"
+              style={{ maxWidth: '540px', width: '96%', padding: 0, overflow: 'hidden' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #059669 0%, #0d9488 100%)',
+                  color: '#ffffff',
+                  padding: '1.1rem 1.35rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem'
+                }}
+              >
+                <div>
+                  <h2 style={{ fontSize: '1.08rem', fontWeight: 800, margin: 0 }}>
+                    💬 WhatsApp-ലേക്ക് PDF + Text അയക്കുക
+                  </h2>
+                  <p style={{ fontSize: '0.78rem', opacity: 0.92, marginTop: '0.2rem' }}>
+                    {targetManual.titleMl} ({targetManual.pdfFilename})
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWaModalRoleKey(null)}
+                  style={{
+                    background: 'rgba(255,255,255,0.18)',
+                    color: '#ffffff',
+                    border: '1px solid rgba(255,255,255,0.3)',
+                    borderRadius: '8px',
+                    padding: '0.3rem 0.6rem',
+                    cursor: 'pointer',
+                    fontWeight: 700
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ padding: '1.25rem 1.35rem' }}>
+                <div
+                  style={{
+                    background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfeff 100%)',
+                    border: '1px solid #a7f3d0',
+                    borderRadius: '10px',
+                    padding: '0.85rem 1rem',
+                    marginBottom: '1rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                    flexWrap: 'wrap'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 800, color: '#065f46', fontSize: '0.9rem' }}>
+                      📎 {targetManual.pdfFilename}
+                    </div>
+                    <div style={{ fontSize: '0.76rem', color: '#047857', marginTop: '0.15rem' }}>
+                      PDF ഫയലും മലയാളം വിവരണവും ഒരുമിച്ച് അറ്റാച്ച് ആകും
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      color: waPreparingPdf ? '#b45309' : '#065f46',
+                      background: waPreparingPdf ? '#fef3c7' : '#d1fae5',
+                      padding: '0.25rem 0.65rem',
+                      borderRadius: '6px',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {waPreparingPdf ? '⏳ PDF തയ്യാറാക്കുന്നു...' : '✓ PDF + Text Ready'}
+                  </span>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '0.9rem' }}>
+                  <label className="form-label">WhatsApp നമ്പർ (Optional)</label>
+                  <input
+                    type="tel"
+                    className="form-control"
+                    placeholder="ഉദാ: +91 98470 11111"
+                    value={waPhoneInput}
+                    onChange={(e) => setWaPhoneInput(e.target.value)}
+                  />
+                </div>
+
+                <div style={{ marginBottom: '1.1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155' }}>
+                      PDF-നൊപ്പം ചേർക്കുന്ന സന്ദേശം:
+                    </span>
+                    {isDesktop && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleCopyCaptionDesktop(waModalRoleKey)}
+                        style={{ padding: '0.18rem 0.55rem', fontSize: '0.73rem' }}
+                      >
+                        {copiedKey === waModalRoleKey ? '✓ Copied' : '📋 Copy Text'}
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    className="form-control"
+                    rows={5}
+                    value={waMessageText}
+                    onChange={(e) => setWaMessageText(e.target.value)}
+                    style={{ fontSize: '0.82rem', lineHeight: 1.55, background: '#f8fafc' }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                  <button
+                    type="button"
+                    disabled={waPreparingPdf || !waPreparedPdf || Boolean(sharingKey)}
+                    onClick={handleConfirmSendManualWhatsApp}
+                    style={{
+                      width: '100%',
+                      background: waPreparingPdf
+                        ? '#94a3b8'
+                        : 'linear-gradient(135deg, #16a34a 0%, #059669 100%)',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontWeight: 800,
+                      padding: '0.85rem 1rem',
+                      fontSize: '0.92rem',
+                      borderRadius: '10px',
+                      cursor: waPreparingPdf ? 'wait' : 'pointer',
+                      whiteSpace: 'nowrap',
+                      boxShadow: '0 4px 12px rgba(22, 163, 74, 0.25)'
+                    }}
+                  >
+                    {waPreparingPdf
+                      ? '⏳ PDF തയ്യാറാക്കുന്നു...'
+                      : '📲 WhatsApp-ലേക്ക് അയക്കുക (PDF + Text)'}
+                  </button>
+
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={waPreparingPdf || !waPreparedPdf}
+                      onClick={() => {
+                        if (waPreparedPdf) {
+                          triggerPdfBlobDownload(waPreparedPdf.blob, waPreparedPdf.filename);
+                        }
+                      }}
+                      style={{ flex: 1, fontSize: '0.82rem', fontWeight: 600 }}
+                    >
+                      ⬇ PDF മാത്രം ഡൗൺലോഡ് ചെയ്യുക
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setWaModalRoleKey(null)}
+                      style={{ fontSize: '0.82rem', fontWeight: 600 }}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

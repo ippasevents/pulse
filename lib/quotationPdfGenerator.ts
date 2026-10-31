@@ -403,10 +403,12 @@ export function formatWhatsAppQuotationMessage(
 export async function shareQuotationPdfToWhatsApp(
   event: EventRecord,
   state: AppState,
-  prebuiltPdf?: { blob: Blob; file: File; quoteNumber: string }
+  prebuiltPdf?: { blob: Blob; file: File; quoteNumber: string },
+  customMessage?: string
 ): Promise<{
   success: boolean;
   sharedDirectlyWithFile: boolean;
+  gestureExpired?: boolean;
   quoteNumber: string;
   file?: File;
   error?: string;
@@ -414,10 +416,30 @@ export async function shareQuotationPdfToWhatsApp(
   const liveEvent = state.events.find((e) => e.id === event.id) || event;
   const client = state.clients.find((c) => c.id === liveEvent.client_id);
   const quoteNumber = prebuiltPdf?.quoteNumber || store.getQuotationNumber(liveEvent);
-  const messageText = formatWhatsAppQuotationMessage(liveEvent, state);
+  const messageText =
+    customMessage && customMessage.trim()
+      ? customMessage.trim()
+      : formatWhatsAppQuotationMessage(liveEvent, state);
   const cleanPhone = normalizeWhatsAppPhone(client?.phone);
 
-  const pdfResult = prebuiltPdf || (await generateQuotationPdfBlob(liveEvent, state));
+  if (prebuiltPdf) {
+    const shareOutcome = await sharePdfWithCaptionToWhatsApp({
+      file: prebuiltPdf.file,
+      blob: prebuiltPdf.blob,
+      filename: `${quoteNumber}.pdf`,
+      messageText,
+      cleanPhone
+    });
+    if (shareOutcome.success && liveEvent.status === 'inquiry') {
+      store.updateEvent(liveEvent.id, { status: 'quoted' });
+    }
+    return {
+      ...shareOutcome,
+      quoteNumber
+    };
+  }
+
+  const pdfResult = await generateQuotationPdfBlob(liveEvent, state);
   if (!pdfResult) {
     return {
       success: false,
@@ -435,8 +457,7 @@ export async function shareQuotationPdfToWhatsApp(
     cleanPhone
   });
 
-  // Mark inquiry as 'quoted' after initiating client quotation share
-  if (liveEvent.status === 'inquiry') {
+  if (shareOutcome.success && liveEvent.status === 'inquiry') {
     store.updateEvent(liveEvent.id, { status: 'quoted' });
   }
 

@@ -1,11 +1,31 @@
 /**
- * Device detection & native WhatsApp PDF + Text sharing utilities.
+ * Device detection & unified WhatsApp Document (PDF) + Text sharing utilities.
  *
- * - On Smartphones (Android / iOS): Uses Web Share API Level 2 (`navigator.share({ files: [file], text: messageText })`)
- *   so BOTH the PDF document AND its formatted caption text attach automatically in WhatsApp.
- * - Copy Text buttons are shown ONLY on Desktop / Laptop Web Views (`isDesktopWebView() === true`).
+ * - On Smartphones & Tablets (Android / iOS, including "Desktop site" mode):
+ *   Uses Web Share API Level 2 (`navigator.share({ files: [file], text: messageText })`)
+ *   so BOTH the PDF document AND its message text attach together in WhatsApp in a single send action.
+ * - Preserves synchronous browser user activation (`navigator.userActivation`) when a pre-built PDF is passed,
+ *   and returns `gestureExpired: true` if an async PDF build preceded the share so the UI can trigger a 1-tap share.
+ * - "Copy Text" buttons are shown ONLY on Desktop / Laptop Web Views (`isDesktopWebView() === true`).
  * - Never calls `window.open`; uses safe programmatic `<a target="_blank" rel="noopener noreferrer">` clicks.
  */
+
+export interface PreparedWhatsAppSharePayload {
+  file: File;
+  blob: Blob;
+  filename: string;
+  messageText: string;
+  cleanPhone: string;
+}
+
+export interface WhatsAppShareOutcome {
+  success: boolean;
+  sharedDirectlyWithFile: boolean;
+  gestureExpired?: boolean;
+  file: File;
+  payload?: PreparedWhatsAppSharePayload;
+  error?: string;
+}
 
 export function isDesktopWebView(): boolean {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') {
@@ -26,7 +46,6 @@ export function isDesktopWebView(): boolean {
     return false;
   }
 
-  // iPadOS / touch-primary tablets
   const isIPad =
     /iPad/i.test(ua) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -34,7 +53,6 @@ export function isDesktopWebView(): boolean {
     return false;
   }
 
-  // Narrow touch viewport (e.g. mobile browser / responsive smartphone mode)
   if (
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(pointer: coarse)').matches &&
@@ -44,6 +62,24 @@ export function isDesktopWebView(): boolean {
   }
 
   return true;
+}
+
+/**
+ * True on any smartphone or touch device (even when mobile Chrome has "Desktop site" checked).
+ */
+export function isTouchCapableOrMobile(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+  if (!isDesktopWebView()) return true;
+  if ((navigator.maxTouchPoints || 0) > 0) return true;
+  if (
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(pointer: coarse)').matches
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function openExternalUrlSafe(url: string): void {
@@ -71,30 +107,27 @@ export function triggerPdfBlobDownload(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-export async function sharePdfWithCaptionToWhatsApp(params: {
-  file: File;
-  blob: Blob;
-  filename: string;
-  messageText: string;
-  cleanPhone: string;
-}): Promise<{
-  success: boolean;
-  sharedDirectlyWithFile: boolean;
-  file: File;
-  error?: string;
-}> {
+export async function sharePdfWithCaptionToWhatsApp(
+  params: PreparedWhatsAppSharePayload
+): Promise<WhatsAppShareOutcome> {
   const { file, blob, filename, messageText, cleanPhone } = params;
 
   const canUseWebShareFiles =
     typeof navigator !== 'undefined' &&
     typeof navigator.share === 'function' &&
     typeof navigator.canShare === 'function' &&
-    navigator.canShare({ files: [file] });
+    (() => {
+      try {
+        return navigator.canShare({ files: [file] });
+      } catch {
+        return false;
+      }
+    })();
 
-  // Prefer native OS Share Sheet on smartphones / mobile browsers so PDF + Text attach together
-  if (canUseWebShareFiles && !isDesktopWebView()) {
+  // IMPORTANT: Call navigator.share BEFORE any await (like clipboard) so transient user activation stays active!
+  if (canUseWebShareFiles && isTouchCapableOrMobile()) {
     try {
-      // Omit `title` so Android/iOS share intents map `messageText` directly to EXTRA_TEXT (WhatsApp document caption)
+      // Omit `title` so Android/iOS map `text` directly to WhatsApp's document caption (PDF + Text together)
       await navigator.share({
         files: [file],
         text: messageText
@@ -104,11 +137,24 @@ export async function sharePdfWithCaptionToWhatsApp(params: {
       if (shareErr?.name === 'AbortError') {
         return { success: true, sharedDirectlyWithFile: true, file };
       }
-      // If a browser rejects combined files + text with TypeError, copy text and share file
+
+      // If async PDF generation expired user activation, return payload for immediate 1-tap synchronous retry
+      if (shareErr?.name === 'NotAllowedError') {
+        return {
+          success: false,
+          sharedDirectlyWithFile: false,
+          gestureExpired: true,
+          file,
+          payload: params,
+          error: 'Tap once more to open WhatsApp with PDF & Text attached together.'
+        };
+      }
+
+      // If an older browser rejects combined files + text with TypeError, copy caption & share PDF file
       if (shareErr?.name === 'TypeError') {
         try {
           if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(messageText);
+            navigator.clipboard.writeText(messageText).catch(() => {});
           }
           await navigator.share({ files: [file] });
           return { success: true, sharedDirectlyWithFile: true, file };
@@ -118,14 +164,10 @@ export async function sharePdfWithCaptionToWhatsApp(params: {
           }
         }
       }
-      console.warn(
-        'Native smartphone share failed, falling back to download + WhatsApp link:',
-        shareErr
-      );
     }
   }
 
-  // Desktop / Laptop Web View (or fallback): copy caption, download PDF, and open WhatsApp chat with text pre-attached
+  // Desktop / Laptop Web View fallback: copy text, download PDF, and open WhatsApp Web/App with text pre-filled
   try {
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(messageText);

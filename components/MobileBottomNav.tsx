@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { store } from '@/lib/store';
@@ -40,38 +40,32 @@ export default function MobileBottomNav() {
     return unsub;
   }, []);
 
-  const handleLogout = () => {
-    if (confirm('Are you sure you want to log out?')) {
-      store.logout();
-    }
-  };
-
   const isStaff = role === 'staff';
 
   const getNavItems = () => {
     if (isStaff) {
       return [
-        { label: 'Duty & Salary', href: '/dashboard', icon: '📍' },
-        { label: 'Manual (മലയാളം)', href: '/manuals', icon: '📘' },
-        { label: 'Install App', href: '#install', icon: '📲', isInstall: true },
+        { label: 'My Duty', href: '/dashboard', icon: '📍' },
+        { label: 'മാനുവൽ', href: '/manuals', icon: '📘' },
+        { label: 'Install', href: '#install', icon: '📲', isInstall: true },
         { label: 'Password', href: '#password', icon: '🔑', isPassword: true },
-        { label: 'Logout', href: '#logout', icon: '🚪', isLogout: true }
+        { label: 'Sign Out', href: '#logout', icon: '🚪', isLogout: true }
       ];
     }
 
     if (role === 'accountant') {
       return [
-        { label: 'Dashboard', href: '/dashboard', icon: '📊' },
+        { label: 'Home', href: '/dashboard', icon: '📊' },
         { label: 'Invoices', href: '/invoices', icon: '🧾' },
         { label: 'Events', href: '/events', icon: '📅' },
-        { label: 'Clients', href: '/clients', icon: '👥' },
+        { label: 'Staff', href: '/staff', icon: '🧑‍🍳' },
         { label: 'More', href: '#more', icon: '☰', isMore: true }
       ];
     }
 
     if (role === 'manager') {
       return [
-        { label: 'Dashboard', href: '/dashboard', icon: '📅' },
+        { label: 'Home', href: '/dashboard', icon: '📅' },
         { label: 'Events', href: '/events', icon: '📋' },
         { label: 'Menu', href: '/menu', icon: '🍽️' },
         { label: 'Stock', href: '/stock', icon: '📦' },
@@ -79,56 +73,50 @@ export default function MobileBottomNav() {
       ];
     }
 
-    // Owner & Super Admin (all)
+    // Owner & Super Admin
     return [
-      { label: 'Dashboard', href: '/dashboard', icon: '📊' },
+      { label: 'Home', href: '/dashboard', icon: '📊' },
       { label: 'Events', href: '/events', icon: '📅' },
-      { label: 'Menu', href: '/menu', icon: '🍽️' },
       { label: 'Invoices', href: '/invoices', icon: '🧾' },
+      { label: 'Staff', href: '/staff', icon: '🧑‍🍳' },
       { label: 'More', href: '#more', icon: '☰', isMore: true }
     ];
   };
 
   const navItems = getNavItems();
 
-  const allMoreLinks = [
-    { label: 'Events & Quotes', href: '/events', icon: '📅', desc: 'Banquet bookings & quotations', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
-    { label: 'Clients Directory', href: '/clients', icon: '👥', desc: 'Customer profiles & past history', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
-    { label: 'Menu & Recipes', href: '/menu', icon: '🍽️', desc: 'Dishes (per guest & per kg)', roles: ['super_admin', 'owner', 'manager'] },
-    { label: 'Stock & Inventory', href: '/stock', icon: '📦', desc: 'Pantry ingredients & stock purchases', roles: ['super_admin', 'owner', 'manager'] },
-    { label: 'Staff & Salary Management', href: '/staff', icon: '🧑‍🍳', desc: 'Crew wages, paid salary & pending balances', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
-    { label: 'Invoices & Receipts', href: '/invoices', icon: '🧾', desc: 'Billing, A4 prints & payments', roles: ['super_admin', 'owner', 'accountant'] },
+  const allMoreTiles = [
+    { label: 'Menu & Recipes', href: '/menu', icon: '🍽️', bg: '#fff1f2', border: '#fecdd3', color: '#be123c', roles: ['super_admin', 'owner', 'manager'] },
+    { label: 'Stock & Inventory', href: '/stock', icon: '📦', bg: '#fffbeb', border: '#fde68a', color: '#b45309', roles: ['super_admin', 'owner', 'manager'] },
+    { label: 'Clients', href: '/clients', icon: '👥', bg: '#eff6ff', border: '#bfdbfe', color: '#1d4ed8', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
+    { label: 'Profit & Loss', href: '/pnl', icon: '📈', bg: '#ecfdf5', border: '#a7f3d0', color: '#047857', roles: ['super_admin', 'owner'] },
+    { label: 'Staff & Payroll', href: '/staff', icon: '🧑‍🍳', bg: '#f5f3ff', border: '#ddd6fe', color: '#6d28d9', roles: ['super_admin', 'owner', 'manager', 'accountant'] },
     {
-      label: 'Profit & Loss (P&L)',
-      href: '/pnl',
-      icon: '📈',
-      desc: 'Event expenditure, allowances & net profit (Owner Only)',
-      roles: ['super_admin', 'owner']
-    },
-    {
-      label: unreadAuditCount > 0 ? `Notifications (${unreadAuditCount} Unread)` : 'Notifications & Edit History',
+      label: unreadAuditCount > 0 ? `Activity (${unreadAuditCount})` : 'Activity Log',
       href: '/activity',
       icon: '🔔',
-      desc: 'Check edited fields (Previous → New data) anytime',
+      bg: '#eef2ff',
+      border: '#c7d2fe',
+      color: '#4338ca',
       roles: ['super_admin', 'owner']
     },
-    { label: 'User Roles & Passwords', href: '/users', icon: '🛡️', desc: 'System user accounts & passwords', roles: ['super_admin', 'owner'] },
-    { label: 'Business Settings', href: '/settings', icon: '⚙️', desc: 'Bank details & payment terms', roles: ['super_admin', 'owner'] },
-    { label: 'User Manuals (മലയാളം PDF)', href: '/manuals', icon: '📘', desc: 'Malayalam PDF manuals for Owner, Manager, Accountant & Staff', roles: ['super_admin', 'owner', 'manager', 'accountant'] }
+    { label: 'Team Logins', href: '/users', icon: '🛡️', bg: '#fdf4ff', border: '#f5d0fe', color: '#a21caf', roles: ['super_admin', 'owner'] },
+    { label: 'Settings', href: '/settings', icon: '⚙️', bg: '#f0fdfa', border: '#99f6e4', color: '#0f766e', roles: ['super_admin', 'owner'] },
+    { label: 'മലയാളം മാനുവൽ', href: '/manuals', icon: '📘', bg: '#f0fdf4', border: '#bbf7d0', color: '#15803d', roles: ['super_admin', 'owner', 'manager', 'accountant'] }
   ];
 
-  const visibleMoreLinks = allMoreLinks.filter((l) => l.roles.includes(role));
+  const visibleMoreTiles = allMoreTiles.filter((t) => t.roles.includes(role));
 
   return (
     <>
-      <nav className="mobile-bottom-nav">
+      <nav className="mobile-bottom-nav" aria-label="Mobile Navigation">
         {navItems.map((item: any) => {
           if (item.isLogout) {
             return (
               <button
                 key="logout-btn"
                 type="button"
-                onClick={handleLogout}
+                onClick={() => store.logout()}
                 className="mobile-nav-item"
               >
                 <span className="mobile-nav-icon">{item.icon}</span>
@@ -163,7 +151,9 @@ export default function MobileBottomNav() {
                 onClick={() => setIsMoreOpen(true)}
                 className={`mobile-nav-item ${isMoreOpen ? 'active' : ''}`}
               >
-                <span className="mobile-nav-icon">{item.icon}</span>
+                <span className="mobile-nav-icon-wrap">
+                  <span className="mobile-nav-icon">{item.icon}</span>
+                </span>
                 <span className="mobile-nav-label">{item.label}</span>
               </button>
             );
@@ -180,34 +170,124 @@ export default function MobileBottomNav() {
               href={item.href}
               className={`mobile-nav-item ${isActive ? 'active' : ''}`}
             >
-              <span className="mobile-nav-icon">{item.icon}</span>
+              <span className="mobile-nav-icon-wrap">
+                <span className="mobile-nav-icon">{item.icon}</span>
+              </span>
               <span className="mobile-nav-label">{item.label}</span>
             </Link>
           );
         })}
       </nav>
 
-      {/* Mobile Drawer (Only for non-staff) */}
+      {/* Simplified Colourful Mobile Drawer */}
       {!isStaff && isMoreOpen && (
         <div className="modal-overlay" onClick={() => setIsMoreOpen(false)}>
           <div className="mobile-bottom-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="bottom-sheet-handle" />
-            <div className="modal-header" style={{ marginBottom: '1rem', paddingBottom: '0.5rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '0.9rem',
+                paddingBottom: '0.65rem',
+                borderBottom: '1px solid #f1f5f9'
+              }}
+            >
               <div>
-                <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0 }}>
-                  IPPAS Navigation
+                <h3 style={{ fontSize: '1.08rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                  All Modules
                 </h3>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                  Logged in as: <strong>{currentUser?.full_name}</strong> ({role.toUpperCase()})
-                </p>
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.1rem' }}>
+                  {currentUser?.full_name} &middot; {role === 'super_admin' ? 'Admin' : role}
+                </div>
               </div>
-              <button className="btn btn-secondary btn-sm" onClick={() => setIsMoreOpen(false)}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setIsMoreOpen(false)}
+              >
                 ✕
               </button>
             </div>
 
-            {/* Quick Actions in Mobile Drawer */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1rem' }}>
+            {lowStockCount > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMoreOpen(false);
+                  setIsNotifOpen(true);
+                }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.65rem 0.85rem',
+                  marginBottom: '0.85rem',
+                  borderRadius: '10px',
+                  background: '#fff1f2',
+                  border: '1px solid #fecdd3',
+                  color: '#be123c',
+                  fontWeight: 700,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer'
+                }}
+              >
+                <span>📦 Low Stock Alert ({lowStockCount} items)</span>
+                <span>View &rarr;</span>
+              </button>
+            )}
+
+            {/* Colourful 2-Column Module Grid */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '0.6rem',
+                marginBottom: '0.95rem'
+              }}
+            >
+              {visibleMoreTiles.map((tile) => {
+                const active = pathname.startsWith(tile.href);
+                return (
+                  <Link
+                    key={tile.href}
+                    href={tile.href}
+                    onClick={() => setIsMoreOpen(false)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.6rem',
+                      padding: '0.75rem 0.8rem',
+                      borderRadius: '12px',
+                      background: tile.bg,
+                      border: `1.5px solid ${active ? tile.color : tile.border}`,
+                      color: '#0f172a',
+                      minHeight: '54px'
+                    }}
+                  >
+                    <span style={{ fontSize: '1.25rem', flexShrink: 0 }}>{tile.icon}</span>
+                    <span
+                      style={{
+                        fontWeight: 700,
+                        fontSize: '0.83rem',
+                        color: tile.color,
+                        lineHeight: 1.25
+                      }}
+                    >
+                      {tile.label}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+
+            <div style={{ marginBottom: '0.85rem' }}>
+              <PWAInstallButton variant="banner" />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.55rem' }}>
               <button
                 type="button"
                 onClick={() => {
@@ -215,93 +295,21 @@ export default function MobileBottomNav() {
                   setIsChangePasswordOpen(true);
                 }}
                 className="btn btn-secondary btn-sm"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.35rem',
-                  fontWeight: 600,
-                  background: '#f8fafc',
-                  color: 'var(--text-main)'
-                }}
+                style={{ fontWeight: 600 }}
               >
-                🔑 Change Password
+                🔑 Password
               </button>
-
               <button
                 type="button"
-                onClick={handleLogout}
-                className="btn btn-secondary btn-sm"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.35rem',
-                  fontWeight: 600,
-                  color: '#dc2626'
+                onClick={() => {
+                  setIsMoreOpen(false);
+                  store.logout();
                 }}
+                className="btn btn-danger btn-sm"
+                style={{ fontWeight: 700 }}
               >
-                🚪 Logout
+                🚪 Sign Out
               </button>
-            </div>
-
-            {/* Stock Alerts button if items are low */}
-            {lowStockCount > 0 && (
-              <div style={{ marginBottom: '1rem' }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMoreOpen(false);
-                    setIsNotifOpen(true);
-                  }}
-                  className="btn btn-sm"
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '0.35rem',
-                    fontWeight: 600,
-                    background: '#fff1f2',
-                    color: '#e11d48',
-                    border: '1px solid #fecaca'
-                  }}
-                >
-                  🔔 Stock Alerts ({lowStockCount} Items Low)
-                </button>
-              </div>
-            )}
-
-            {/* Links list */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
-              {visibleMoreLinks.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  onClick={() => setIsMoreOpen(false)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.75rem',
-                    padding: '0.75rem',
-                    borderRadius: '8px',
-                    background: pathname.startsWith(link.href) ? 'var(--primary-light)' : '#ffffff',
-                    border: '1px solid var(--border)',
-                    color: 'var(--text-main)'
-                  }}
-                >
-                  <span style={{ fontSize: '1.25rem' }}>{link.icon}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{link.label}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{link.desc}</div>
-                  </div>
-                  <span style={{ color: 'var(--text-muted)' }}>&rarr;</span>
-                </Link>
-              ))}
-            </div>
-
-            <div style={{ paddingTop: '0.5rem', borderTop: '1px solid var(--border)' }}>
-              <PWAInstallButton variant="banner" showAlways={true} />
             </div>
           </div>
         </div>

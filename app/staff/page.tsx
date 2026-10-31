@@ -6,6 +6,7 @@ import { store } from '@/lib/store';
 import { EventRecord, Shift, ShiftAttendanceStatus, StaffMember, StaffSalaryRecordType } from '@/lib/types';
 import OwnerAuditBadge from '@/components/OwnerAuditBadge';
 import StaffWhatsAppModal from '@/components/StaffWhatsAppModal';
+import SalarySlipWhatsAppModal from '@/components/SalarySlipWhatsAppModal';
 import {
   computeStaffPeriodReport,
   downloadBatchStaffSalarySlipsPdf,
@@ -47,6 +48,7 @@ export default function StaffPage() {
   const [reportSearch, setReportSearch] = useState<string>('');
   const [reportActiveInPeriodOnly, setReportActiveInPeriodOnly] = useState<boolean>(false);
   const [previewSlipStaffId, setPreviewSlipStaffId] = useState<string | null>(null);
+  const [waSlipRow, setWaSlipRow] = useState<StaffPeriodReportRow | null>(null);
   const [pdfBusyKey, setPdfBusyKey] = useState<string | null>(null);
 
   // Salary Payment / Extra Wage Modal
@@ -731,9 +733,9 @@ export default function StaffPage() {
               marginBottom: '1.5rem'
             }}
           >
-            <div className="stats-card" style={{ borderLeft: '4px solid #475569' }}>
-              <span className="stats-label">Total Hours Worked</span>
-              <span className="stats-value" style={{ color: '#0f172a' }}>
+            <div className="stats-card" style={{ borderTop: '3px solid #6366f1', background: 'linear-gradient(180deg, #eef2ff 0%, #ffffff 65%)' }}>
+              <span className="stats-label" style={{ color: '#4338ca' }}>Total Hours Worked</span>
+              <span className="stats-value" style={{ color: '#1e1b4b' }}>
                 {visibleReportTotals.totalHoursWorked} hrs
               </span>
               <span className="stats-sub">
@@ -741,9 +743,9 @@ export default function StaffPage() {
               </span>
             </div>
 
-            <div className="stats-card" style={{ borderLeft: '4px solid #2563eb' }}>
-              <span className="stats-label">Total Earnings (Period)</span>
-              <span className="stats-value" style={{ color: '#2563eb' }}>
+            <div className="stats-card" style={{ borderTop: '3px solid #2563eb', background: 'linear-gradient(180deg, #eff6ff 0%, #ffffff 65%)' }}>
+              <span className="stats-label" style={{ color: '#1d4ed8' }}>Total Earnings (Period)</span>
+              <span className="stats-value" style={{ color: '#1d4ed8' }}>
                 ₹{visibleReportTotals.totalEarnings.toLocaleString('en-IN')}
               </span>
               <span className="stats-sub">
@@ -751,8 +753,8 @@ export default function StaffPage() {
               </span>
             </div>
 
-            <div className="stats-card" style={{ borderLeft: '4px solid #059669' }}>
-              <span className="stats-label">Payments Received (Period)</span>
+            <div className="stats-card" style={{ borderTop: '3px solid #059669', background: 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 65%)' }}>
+              <span className="stats-label" style={{ color: '#047857' }}>Payments Received (Period)</span>
               <span className="stats-value" style={{ color: '#059669' }}>
                 ₹{visibleReportTotals.paymentsReceived.toLocaleString('en-IN')}
               </span>
@@ -761,8 +763,8 @@ export default function StaffPage() {
               </span>
             </div>
 
-            <div className="stats-card" style={{ borderLeft: '4px solid #dc2626' }}>
-              <span className="stats-label">Net Period Payable</span>
+            <div className="stats-card" style={{ borderTop: '3px solid #e11d48', background: 'linear-gradient(180deg, #fff1f2 0%, #ffffff 65%)' }}>
+              <span className="stats-label" style={{ color: '#be123c' }}>Net Period Payable</span>
               <span
                 className="stats-value"
                 style={{ color: visibleReportTotals.periodPayable > 0 ? '#dc2626' : '#059669' }}
@@ -927,6 +929,15 @@ export default function StaffPage() {
                             >
                               {pdfBusyKey === `slip-${row.staff.id}` ? '⏳...' : '📥 PDF'}
                             </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ background: '#ecfdf5', borderColor: '#6ee7b7', color: '#047857', fontWeight: 700, whiteSpace: 'nowrap' }}
+                              onClick={() => setWaSlipRow(row)}
+                              title="Send Salary Slip PDF & Summary Text together on WhatsApp"
+                            >
+                              💬 WA
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1080,24 +1091,24 @@ export default function StaffPage() {
           marginBottom: '1.5rem'
         }}
       >
-        <div className="stats-card" style={{ borderLeft: '4px solid #2563eb' }}>
-          <span className="stats-label">Total Staff Salary Earned</span>
-          <span className="stats-value" style={{ color: '#2563eb' }}>
+        <div className="stats-card" style={{ borderTop: '3px solid #2563eb', background: 'linear-gradient(180deg, #eff6ff 0%, #ffffff 65%)' }}>
+          <span className="stats-label" style={{ color: '#1d4ed8' }}>Total Staff Salary Earned</span>
+          <span className="stats-value" style={{ color: '#1d4ed8' }}>
             ₹{totalEarnedAll.toLocaleString('en-IN')}
           </span>
           <span className="stats-sub">Attended shifts only + allowances</span>
         </div>
 
-        <div className="stats-card" style={{ borderLeft: '4px solid #059669' }}>
-          <span className="stats-label">Total Salary Paid (Received)</span>
+        <div className="stats-card" style={{ borderTop: '3px solid #059669', background: 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 65%)' }}>
+          <span className="stats-label" style={{ color: '#047857' }}>Total Salary Paid (Received)</span>
           <span className="stats-value" style={{ color: '#059669' }}>
             ₹{totalPaidAll.toLocaleString('en-IN')}
           </span>
           <span className="stats-sub">Disbursed via Cash, UPI &amp; Bank</span>
         </div>
 
-        <div className="stats-card" style={{ borderLeft: '4px solid #dc2626' }}>
-          <span className="stats-label">Pending Salary Payable</span>
+        <div className="stats-card" style={{ borderTop: '3px solid #e11d48', background: 'linear-gradient(180deg, #fff1f2 0%, #ffffff 65%)' }}>
+          <span className="stats-label" style={{ color: '#be123c' }}>Pending Salary Payable</span>
           <span
             className="stats-value"
             style={{ color: totalPendingAll > 0 ? '#dc2626' : '#059669' }}
@@ -1107,8 +1118,8 @@ export default function StaffPage() {
           <span className="stats-sub">Remaining salary balance to pay staff</span>
         </div>
 
-        <div className="stats-card" style={{ borderLeft: '4px solid #7c3aed' }}>
-          <span className="stats-label">Active Crew Roster</span>
+        <div className="stats-card" style={{ borderTop: '3px solid #7c3aed', background: 'linear-gradient(180deg, #f5f3ff 0%, #ffffff 65%)' }}>
+          <span className="stats-label" style={{ color: '#6d28d9' }}>Active Crew Roster</span>
           <span className="stats-value" style={{ color: '#7c3aed' }}>
             {activeCrewCount} / {state.staff.length}
           </span>
@@ -1962,6 +1973,14 @@ export default function StaffPage() {
                 </button>
                 <button
                   type="button"
+                  className="btn btn-secondary"
+                  style={{ background: '#ecfdf5', borderColor: '#6ee7b7', color: '#047857', fontWeight: 700, whiteSpace: 'nowrap' }}
+                  onClick={() => setWaSlipRow(previewSlipRow)}
+                >
+                  💬 Send WA (PDF + Text)
+                </button>
+                <button
+                  type="button"
                   className="btn btn-primary"
                   style={{ fontWeight: 700 }}
                   disabled={pdfBusyKey !== null}
@@ -2592,6 +2611,15 @@ export default function StaffPage() {
         event={whatsAppModalEvent}
         targetShift={whatsAppModalShift}
         initialNote={whatsAppModalShift?.duty_note || ''}
+      />
+
+      {/* Staff Salary Slip PDF + Text WhatsApp Modal */}
+      <SalarySlipWhatsAppModal
+        row={waSlipRow}
+        startDate={reportStartDate}
+        endDate={reportEndDate}
+        state={state}
+        onClose={() => setWaSlipRow(null)}
       />
     </div>
   );

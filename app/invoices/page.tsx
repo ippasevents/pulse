@@ -359,11 +359,11 @@ export default function InvoicesPage() {
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"
-                            style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
-                            title="Share Invoice PDF directly to Client's WhatsApp"
+                            style={{ background: '#ecfdf5', borderColor: '#6ee7b7', color: '#047857', fontWeight: 700, whiteSpace: 'nowrap' }}
+                            title="Send Invoice PDF & Text together on WhatsApp"
                             onClick={() => setSelectedInvoiceForWhatsApp(inv)}
                           >
-                            💬 WA PDF
+                            💬 WA (PDF + Text)
                           </button>
                         </div>
                       </td>
@@ -555,10 +555,10 @@ export default function InvoicesPage() {
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d', fontWeight: 600 }}
+                        style={{ background: '#ecfdf5', borderColor: '#6ee7b7', color: '#047857', fontWeight: 700, whiteSpace: 'nowrap' }}
                         onClick={() => setSelectedInvoiceForWhatsApp(livePrintInv)}
                       >
-                        💬 Share WA PDF
+                        💬 Send WA (PDF + Text)
                       </button>
                       <button className="btn btn-secondary btn-sm" onClick={() => setSelectedInvoiceForPrint(null)}>
                         Close

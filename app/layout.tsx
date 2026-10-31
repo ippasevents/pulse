@@ -20,9 +20,9 @@ export const metadata: Metadata = {
     title: 'IPPAS Pulse'
   },
   icons: {
-    icon: '/favicon.png?v=3',
-    shortcut: '/favicon.png?v=3',
-    apple: '/apple-touch-icon.png?v=3'
+    icon: '/favicon.png?v=4',
+    shortcut: '/favicon.png?v=4',
+    apple: '/apple-touch-icon.png?v=4'
   },
   openGraph: {
     title: 'IPPAS Pulse - Catering Manager',
@@ -39,7 +39,7 @@ export default function RootLayout({
     <html lang="en">
       <head>
         <link rel="manifest" href="/manifest.json" />
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />

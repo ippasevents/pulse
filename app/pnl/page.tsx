@@ -479,7 +479,13 @@ export default function ProfitAndLossPage() {
             marginBottom: '1.25rem'
           }}
         >
-          <div className="stats-card" style={{ borderLeft: '4px solid #2563eb' }}>
+          <div
+            className="stats-card"
+            style={{
+              borderTop: '3px solid #2563eb',
+              background: 'linear-gradient(180deg, #eff6ff 0%, #ffffff 70%)'
+            }}
+          >
             <span className="stats-label">Total Event Revenue</span>
             <span className="stats-value" style={{ color: '#0f172a' }}>
               ₹{totals.contractRevenue.toLocaleString('en-IN')}
@@ -490,7 +496,13 @@ export default function ProfitAndLossPage() {
             </span>
           </div>
 
-          <div className="stats-card" style={{ borderLeft: '4px solid #e11d48' }}>
+          <div
+            className="stats-card"
+            style={{
+              borderTop: '3px solid #e11d48',
+              background: 'linear-gradient(180deg, #fff1f2 0%, #ffffff 70%)'
+            }}
+          >
             <span className="stats-label">Total Expenditure (incl. Allowances)</span>
             <span className="stats-value" style={{ color: '#be123c' }}>
               ₹{totals.totalExpenditure.toLocaleString('en-IN')}
@@ -503,8 +515,11 @@ export default function ProfitAndLossPage() {
           <div
             className="stats-card"
             style={{
-              borderLeft: `4px solid ${totals.netProfit >= 0 ? '#16a34a' : '#dc2626'}`,
-              background: totals.netProfit >= 0 ? '#f0fdf4' : '#fef2f2'
+              borderTop: `3px solid ${totals.netProfit >= 0 ? '#10b981' : '#dc2626'}`,
+              background:
+                totals.netProfit >= 0
+                  ? 'linear-gradient(180deg, #ecfdf5 0%, #ffffff 75%)'
+                  : 'linear-gradient(180deg, #fef2f2 0%, #ffffff 75%)'
             }}
           >
             <span className="stats-label">
@@ -512,7 +527,7 @@ export default function ProfitAndLossPage() {
             </span>
             <span
               className="stats-value"
-              style={{ color: totals.netProfit >= 0 ? '#15803d' : '#dc2626' }}
+              style={{ color: totals.netProfit >= 0 ? '#059669' : '#dc2626' }}
             >
               {totals.netProfit >= 0 ? '+' : '-'}₹
               {Math.abs(totals.netProfit).toLocaleString('en-IN')}
@@ -522,7 +537,13 @@ export default function ProfitAndLossPage() {
             </span>
           </div>
 
-          <div className="stats-card" style={{ borderLeft: '4px solid #7c3aed' }}>
+          <div
+            className="stats-card"
+            style={{
+              borderTop: '3px solid #7c3aed',
+              background: 'linear-gradient(180deg, #f5f3ff 0%, #ffffff 70%)'
+            }}
+          >
             <span className="stats-label">Overall Profit Margin</span>
             <span
               className="stats-value"
