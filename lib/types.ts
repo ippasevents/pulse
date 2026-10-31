@@ -5,6 +5,7 @@ export type PricingType = 'per_guest' | 'per_kg';
 export type StaffSalaryType = 'hourly' | 'per_event' | 'monthly';
 export type StaffSalaryRecordType = 'payment' | 'advance' | 'earning';
 export type ShiftRateUpdateMode = 'keep_existing' | 'update_upcoming' | 'update_all_unsettled';
+export type PasswordResetFactor = 'unique_id' | 'phone' | 'dob';
 
 export interface Profile {
   id: string;
@@ -12,6 +13,8 @@ export interface Profile {
   password?: string;
   full_name: string;
   phone?: string;
+  unique_id?: string;
+  dob?: string;
   role: UserRole;
   role_title?: string;
   hourly_rate?: number;
@@ -143,6 +146,8 @@ export interface StaffMember {
   id: string;
   name: string;
   phone: string;
+  unique_id?: string;
+  dob?: string;
   password?: string;
   role_title?: string;
   salary_type?: StaffSalaryType;

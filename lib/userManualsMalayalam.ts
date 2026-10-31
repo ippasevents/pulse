@@ -61,15 +61,15 @@ export const ENGLISH_USER_MANUALS: Record<ManualRoleKey, RoleUserManual> = {
         chapters: [
           {
             number: '01',
-            titleMl: 'Sign-In, 1-Tap Smartphone App Install & Streamlined Navigation',
-            menuLabel: 'Login / Install App / Top & Bottom Navigation',
+            titleMl: 'Sign-In, 2-of-3 Forgot Password Reset & 1-Tap App Install',
+            menuLabel: 'Login / Forgot Password? / Install App',
             summaryMl:
-              'Install IPPAS Pulse directly alongside your smartphone apps and navigate every executive module in a single tap without extra device permissions.',
+              'Sign in securely, recover forgotten passwords using 2-of-3 verification, and install IPPAS Pulse on your smartphone in one tap.',
             stepsMl: [
-              'Open IPPAS Pulse, enter your Owner username and password on the Sign-In screen, and click "Sign In".',
+              'Open IPPAS Pulse, enter your Owner username (or Unique ID / registered phone) and password on the Sign-In screen, and click "Sign In".',
+              'If any user (Owner, Manager, Accountant, or Staff) forgets their password, click "Forgot Password?" on the Sign-In screen, select ANY TWO (2) of the three verification options — (1) Unique ID, (2) Phone Number, or (3) Date of Birth — enter the matching details, and set a new password immediately.',
               'Tap "Install App" once on Android or Desktop Chrome/Edge to add the IPPAS Pulse icon directly to both your App Drawer and Home Screen with zero extra permissions required (on iPhone/iPad Safari, tap Share -> "Add to Home Screen").',
-              'Use the single-row top navigation bar on desktop (with secondary modules neatly grouped under "More") or the 5-tab bottom bar and "Menu" sheet on mobile devices.',
-              'Click your profile button in the top-right corner anytime to change your password or sign out securely.'
+              'Use the single-row top navigation bar on desktop (with secondary modules neatly grouped under "More") or the 5-tab bottom bar and "Menu" sheet on mobile devices.'
             ],
             importantNoteMl:
               'Each of the four user roles (Owner, Manager, Accountant, and Staff) sees only the screens and financial figures authorized for their responsibilities.'
@@ -136,18 +136,18 @@ export const ENGLISH_USER_MANUALS: Record<ManualRoleKey, RoleUserManual> = {
         chapters: [
           {
             number: '06',
-            titleMl: 'Staff Salary Plans, Shift Rate Policy (Keep vs Switch) & Salary Advances',
-            menuLabel: 'Staff -> Crew & Shifts / Payroll Report',
+            titleMl: 'Staff Unique ID & DOB, 3 Salary Plans, Shift Rate Policy & Advances',
+            menuLabel: 'Staff -> + Add Staff / Crew & Shifts / Payroll Report',
             summaryMl:
-              'Configure Per-Hour, Per-Event, or Monthly pay, protect historical shift rates while offering 1-click switching to new rates, and keep Salary Advances separated.',
+              'Assign a Unique ID and Date of Birth to every crew member, select Per-Hour, Per-Event, or Monthly pay, protect historical shift rates, and separate Salary Advances.',
             stepsMl: [
-              'Open "Staff -> + Add Staff" to select each crew member’s salary structure upfront: Per Hour (₹/hr), Per Event (₹/event), or Monthly Fixed Salary (₹/month).',
+              'Open "Staff -> + Add Staff" to enter the staff member’s Full Name, Unique ID (auto-generated via "Auto ID" or custom unique code), Date of Birth, and Mobile Number, and select their salary structure upfront: Per Hour (₹/hr), Per Event (₹/event), or Monthly Fixed Salary (₹/month).',
               'When editing a staff member’s salary rate, choose your "Existing Event Shifts Rate Policy": by default, all previously assigned shifts keep their original locked rate, while newly assigned shifts use the new rate—or explicitly opt to switch upcoming shifts (or click "Switch to New Pricing" on any individual shift/event).',
               'Click the amber "Salary Advance" button to record mid-month advances separately from Standard Salary Payouts across KPIs, ledgers, and A4 Salary Slips.',
               'Open "Payroll Report & Salary Slips" to export date-range Payroll Summary PDFs or individual A4 Staff Salary Slips.'
             ],
             importantNoteMl:
-              'If a staff member forgets their password, click the "Reset Password" key icon on their profile or let them use "Forgot Staff Password?" on the Sign-In screen.'
+              'If a staff member or user forgets their password, they can click "Forgot Password?" on the Sign-In screen and verify ANY TWO (2) of: Unique ID, Phone Number, or Date of Birth—or an admin can click "Reset PW" on their profile.'
           },
           {
             number: '07',
@@ -181,13 +181,13 @@ export const ENGLISH_USER_MANUALS: Record<ManualRoleKey, RoleUserManual> = {
           },
           {
             number: '09',
-            titleMl: 'Activity Notifications, User Credentials & English/Malayalam Manuals',
-            menuLabel: 'Bell Icon / More -> Users / More -> Manuals',
+            titleMl: 'Activity Notifications, User Unique IDs & English/Malayalam Manuals',
+            menuLabel: 'Bell Icon / More -> Users / Settings / Manuals',
             summaryMl:
-              'Inspect team edits quietly inside the Notification Bell, manage role logins, and download official User Manuals in English or Malayalam.',
+              'Inspect team edits quietly inside the Notification Bell, manage role Unique IDs & DOBs, and download official User Manuals in English or Malayalam.',
             stepsMl: [
               'Click the Notification Bell in the top bar whenever an unread badge appears to review exact "Previous Data -> Updated Data" edit logs without intrusive popups.',
-              'Open "More -> Users" to manage Manager, Accountant, and Staff login accounts, or open "More -> Manuals" to download the 4 official role-based A4 PDF User Manuals in either English or Malayalam.'
+              'Open "More -> Users" to create or edit Manager, Accountant, and Staff accounts complete with Unique ID, Date of Birth, and Phone Number (or update your own 2-of-3 recovery details in "Settings"), and open "More -> Manuals" to download the 4 official role-based A4 PDF User Manuals in English or Malayalam.'
             ]
           }
         ]
@@ -226,12 +226,12 @@ export const ENGLISH_USER_MANUALS: Record<ManualRoleKey, RoleUserManual> = {
         chapters: [
           {
             number: '01',
-            titleMl: 'Sign-In, 1-Tap Smartphone App Install & Operations Dashboard',
-            menuLabel: 'Login / Install App / Dashboard',
+            titleMl: 'Sign-In, 2-of-3 Password Reset, App Install & Operations Dashboard',
+            menuLabel: 'Login / Forgot Password? / Install App / Dashboard',
             summaryMl:
-              'Access live event schedules, guest counts, and warehouse alerts from your phone or desktop.',
+              'Sign in, recover forgotten passwords using any 2 of Unique ID, Phone, or Date of Birth, and access live event schedules.',
             stepsMl: [
-              'Sign in using your Manager username and password provided by the Owner.',
+              'Sign in using your Manager username (or Unique ID) and password. If you ever forget your password, click "Forgot Password?" on the Sign-In screen and verify ANY TWO (2) of your Unique ID, Phone Number, or Date of Birth to set a new password.',
               'Tap "Install App" once to add IPPAS Pulse to your phone’s App Drawer and Home Screen without needing any special device permissions (on iPhone Safari, tap Share -> "Add to Home Screen").',
               'Use the Operations Dashboard to review confirmed upcoming bookings, total guest pax, low-stock ingredients, and items approaching expiry.'
             ]
@@ -284,14 +284,14 @@ export const ENGLISH_USER_MANUALS: Record<ManualRoleKey, RoleUserManual> = {
         chapters: [
           {
             number: '05',
-            titleMl: 'Staff Salary Plans, Shift Rate Switching, Attendance & Event Expenses',
-            menuLabel: 'Staff / Event -> Crew Shifts',
+            titleMl: 'Staff Unique ID & DOB Registration, Salary Plans & Shift Rate Control',
+            menuLabel: 'Staff -> + Add Staff / Event -> Crew Shifts',
             summaryMl:
-              'Select Per-Hour, Per-Event, or Monthly pay, keep or switch shift rates when staff pay changes, and mark attendance.',
+              'Assign a Unique ID and Date of Birth when adding staff, choose Per-Hour, Per-Event, or Monthly pay, and manage shift rates and attendance.',
             stepsMl: [
-              'In "Staff -> + Add Staff", select the staff member’s salary plan upfront: Per Hour (₹/hr), Per Event (₹/event), or Monthly Fixed Salary (₹/month).',
-              'Each assigned event shift locks the staff member’s rate active at assignment time. If a staff member’s pay rate is later updated, existing shifts stay at their historical assigned rate by default—or you can choose to switch upcoming/specific shifts to the new pricing using the Edit Staff rate policy or the 1-click "Switch to New Pricing" button on the shift row.',
-              'After each function, mark crew shifts "Present" or "Absent", log actual event expenses under the Expenses tab, and use the key icon ("Reset Password") anytime a staff member needs password help.'
+              'In "Staff -> + Add Staff", enter the crew member’s Full Name, Unique ID (auto-generated via "Auto ID" or custom unique code), Date of Birth, and Mobile Number, and select their salary plan upfront: Per Hour (₹/hr), Per Event (₹/event), or Monthly Fixed Salary (₹/month).',
+              'Each assigned event shift locks the staff member’s rate active at assignment time. If a staff member’s pay rate is later updated, existing shifts stay at their historical assigned rate by default—or you can switch upcoming/specific shifts to the new pricing using the Edit Staff rate policy or the 1-click "Switch to New Pricing" button on the shift row.',
+              'After each function, mark crew shifts "Present" or "Absent", log actual event expenses under the Expenses tab, and remind crew members they can reset a forgotten password anytime on the Sign-In screen using any 2 of their Unique ID, Phone Number, or Date of Birth.'
             ],
             importantNoteMl:
               'Only shifts marked "Present" count toward final Per-Hour and Per-Event payroll—always verify attendance right after every event.'
@@ -332,12 +332,12 @@ export const ENGLISH_USER_MANUALS: Record<ManualRoleKey, RoleUserManual> = {
         chapters: [
           {
             number: '01',
-            titleMl: 'Sign-In, 1-Tap App Install, Treasury Holdings & Top Clients',
-            menuLabel: 'Dashboard / More -> Clients',
+            titleMl: 'Sign-In, 2-of-3 Password Reset, Treasury Holdings & Top Clients',
+            menuLabel: 'Login / Forgot Password? / Dashboard / More -> Clients',
             summaryMl:
-              'Track total invoiced revenue, pending client dues, bank vs cash balances, and highest-paying clients.',
+              'Sign in securely, recover forgotten passwords using 2-of-3 verification, and track bank vs cash balances and top clients.',
             stepsMl: [
-              'Sign in with your Accountant credentials and tap "Install App" once to add IPPAS Pulse to your desktop or smartphone without extra permissions.',
+              'Sign in with your Accountant credentials (or Unique ID) and tap "Install App" once to add IPPAS Pulse to your desktop or smartphone. If you ever forget your password, click "Forgot Password?" on the Sign-In screen and verify ANY TWO (2) of your Unique ID, Phone Number, or Date of Birth.',
               'Review "Account-wise Invoice Collections" on the Dashboard to reconcile exact amounts received in each Bank/UPI account versus Cash in Hand.',
               'Open "More -> Clients" to inspect the "Top Clients Leaderboard" ("Highest Paying Clients" and "Most Events Conducted") and monitor client-wise pending receivables.'
             ]
@@ -435,17 +435,17 @@ export const ENGLISH_USER_MANUALS: Record<ManualRoleKey, RoleUserManual> = {
         chapters: [
           {
             number: '01',
-            titleMl: 'Signing In with Your Mobile Number & Self-Service Password Reset',
-            menuLabel: 'Sign In / Forgot Staff Password?',
+            titleMl: 'Signing In & 2-of-3 Self-Service Forgot Password Reset',
+            menuLabel: 'Sign In / Forgot Password? (Select Any 2 of 3)',
             summaryMl:
-              'Log in effortlessly using your registered 10-digit mobile number and reset your password anytime if forgotten.',
+              'Log in with your registered mobile number or Unique ID, and reset a forgotten password by verifying any 2 of your Unique ID, Phone Number, or Date of Birth.',
             stepsMl: [
-              'Open IPPAS Pulse on your smartphone and enter your registered 10-digit mobile number in the "Username or Phone Number" field.',
-              'Enter your password and tap "Sign In" to open your personal Staff Duty & Salary Portal.',
-              'If you ever forget your password, tap "Forgot Staff Password?" right on the Sign-In screen, verify your registered mobile number and full name, and set a new password immediately (or ask your Manager/Owner for a 1-click reset).'
+              'Open IPPAS Pulse on your smartphone and enter your registered 10-digit mobile number (or your assigned Staff Unique ID, e.g., STF-001) in the Sign-In field.',
+              'Enter your password and tap "Sign In" to open your personal Staff Duty & Salary Portal, where your Unique ID, Phone Number, and Date of Birth are displayed in your header banner.',
+              'If you ever forget your password, tap "Forgot Password?" on the Sign-In screen, select ANY TWO (2) out of the THREE (3) verification options — (1) Unique ID, (2) Phone Number, or (3) Date of Birth — enter those two matching details, and save your new password immediately.'
             ],
             importantNoteMl:
-              'Keep Mobile Data or Wi-Fi turned on when opening the app so your latest shift assignments and salary updates sync automatically.'
+              'Password recovery strictly requires matching any 2 of your 3 personal identifiers (Unique ID, Phone Number, or Date of Birth). Keep Mobile Data or Wi-Fi turned on so your latest shifts and salary updates sync automatically.'
           },
           {
             number: '02',
@@ -543,15 +543,15 @@ export const MALAYALAM_EDITION_USER_MANUALS: Record<ManualRoleKey, RoleUserManua
         chapters: [
           {
             number: '01',
-            titleMl: 'സൈൻ-ഇൻ, സ്മാർട്ട്‌ഫോൺ ആപ്പ് ഇൻസ്റ്റാളേഷൻ & നാവിഗേഷൻ',
-            menuLabel: 'Login / Install App / Navigation',
+            titleMl: 'സൈൻ-ഇൻ, 2-of-3 പാസ്‌വേഡ് റീസെറ്റ് & സ്മാർട്ട്‌ഫോൺ ആപ്പ് ഇൻസ്റ്റാളേഷൻ',
+            menuLabel: 'Login / Forgot Password? / Install App',
             summaryMl:
-              'മറ്റ് ആപ്പുകൾക്കൊപ്പം ഫോണിൽ ഒരു ടാപ്പിലൂടെ IPPAS Pulse ഇൻസ്റ്റാൾ ചെയ്യാനും എളുപ്പത്തിൽ ഉപയോഗിക്കാനുമുള്ള വിധം.',
+              'സുരക്ഷിതമായി ലോഗിൻ ചെയ്യാനും, പാസ്‌വേഡ് മറന്നാൽ 3 ഓപ്ഷനുകളിൽ ഏതെങ്കിലും 2 എണ്ണം നൽകി സ്വയം റീസെറ്റ് ചെയ്യാനും, ഫോണിൽ ആപ്പ് ഇൻസ്റ്റാൾ ചെയ്യാനുമുള്ള വിധം.',
             stepsMl: [
-              'IPPAS Pulse തുറന്ന് നിങ്ങളുടെ Owner യൂസർനെയിമും പാസ്‌വേഡും നൽകി "Sign In" ക്ലിക്ക് ചെയ്യുക.',
+              'IPPAS Pulse തുറന്ന് നിങ്ങളുടെ Owner യൂസർനെയിമും (അല്ലെങ്കിൽ Unique ID / ഫോൺ നമ്പറും) പാസ്‌വേഡും നൽകി "Sign In" ക്ലിക്ക് ചെയ്യുക.',
+              'ആപ്പിലെ ഏതൊരു ഉപയോക്താവിനും (Owner, Manager, Accountant, Staff) പാസ്‌വേഡ് മറന്നുപോയാൽ ലോഗിൻ സ്ക്രീനിലെ "Forgot Password?" ക്ലിക്ക് ചെയ്ത് Unique ID, Phone Number, Date of Birth (ജനനത്തീയതി) എന്നിവയിൽ ഏതെങ്കിലും രണ്ട് (2) ഓപ്ഷനുകൾ തിരഞ്ഞെടുത്ത് വിവരങ്ങൾ നൽകി ഉടൻ പുതിയ പാസ്‌വേഡ് സെറ്റ് ചെയ്യാം.',
               'ആൻഡ്രോയിഡ് ഫോണിലോ കമ്പ്യൂട്ടറിലോ "Install App" ബട്ടൺ അമർത്തിയാൽ ഫോണിലെ മറ്റ് ആപ്പുകളുടെ കൂടെയും ഹോം സ്ക്രീനിലും IPPAS Pulse ഐക്കൺ ഉടൻ വരുന്നതാണ്—ഇതിന് പ്രത്യേക പെർമിഷനുകളുടെ ആവശ്യമില്ല (iPhone Safari-യിൽ Share -> "Add to Home Screen" തിരഞ്ഞെടുക്കുക).',
-              'ഡെസ്ക്ടോപ്പിൽ മുകളിലെ നാവിഗേഷൻ ബാറും ("More" മെനു സഹിതം), ഫോണിൽ താഴെയുള്ള 5 ടാബുകളും "Menu" ബട്ടണും ഉപയോഗിച്ച് എല്ലാ പേജുകളിലേക്കും വേഗത്തിൽ എത്താം.',
-              'പാസ്‌വേഡ് മാറ്റുന്നതിനോ സുരക്ഷിതമായി പുറത്തിറങ്ങുന്നതിനോ മുകളിൽ വലതുവശത്തുള്ള പ്രൊഫൈൽ ബട്ടൺ ഉപയോഗിക്കുക.'
+              'ഡെസ്ക്ടോപ്പിൽ മുകളിലെ നാവിഗേഷൻ ബാറും ("More" മെനു സഹിതം), ഫോണിൽ താഴെയുള്ള 5 ടാബുകളും "Menu" ബട്ടണും ഉപയോഗിച്ച് എല്ലാ പേജുകളിലേക്കും വേഗത്തിൽ എത്താം.'
             ],
             importantNoteMl:
               'Owner, Manager, Accountant, Staff എന്നീ നാല് വിഭാഗം ഉപയോക്താക്കൾക്കും അവരവരുടെ ചുമതലകൾക്ക് അനുസരിച്ചുള്ള വിവരങ്ങൾ മാത്രമേ കാണാൻ സാധിക്കൂ.'
@@ -618,13 +618,13 @@ export const MALAYALAM_EDITION_USER_MANUALS: Record<ManualRoleKey, RoleUserManua
         chapters: [
           {
             number: '06',
-            titleMl: '3 തരം സ്റ്റാഫ് ശമ്പളം, ഷിഫ്റ്റ് നിരക്ക് മാറ്റാനുള്ള ഓപ്ഷൻ & Salary Advance',
-            menuLabel: 'Staff -> Crew & Shifts / Payroll Report',
+            titleMl: 'സ്റ്റാഫ് Unique ID & ജനനത്തീയതി (DOB), 3 തരം ശമ്പളം & Salary Advance',
+            menuLabel: 'Staff -> + Add Staff / Crew & Shifts / Payroll Report',
             summaryMl:
-              'സ്റ്റാഫ് ശമ്പളം പുതുക്കുമ്പോൾ പഴയ ഷിഫ്റ്റുകളിലെ നിരക്ക് നിലനിർത്താനോ പുതിയ നിരക്കിലേക്ക് മാറ്റാനോ ഉള്ള സൗകര്യം.',
+              'സ്റ്റാഫിനെ ചേർക്കുമ്പോൾ Unique ID-യും Date of Birth-ഉം നൽകാനും, ശമ്പള രീതി നിശ്ചയിക്കാനും, പഴയ ഷിഫ്റ്റ് നിരക്ക് സംരക്ഷിക്കാനുമുള്ള സൗകര്യം.',
             stepsMl: [
-              '"Staff -> + Add Staff" വഴി സ്റ്റാഫിനെ ചേർക്കുമ്പോൾ തന്നെ ശമ്പള രീതി തിരഞ്ഞെടുക്കാം: (1) Per Hour (മണിക്കൂർ നിരക്ക്), (2) Per Event (ഓരോ ഇവന്റിനുമുള്ള ശമ്പളം), അല്ലെങ്കിൽ (3) Monthly Salary (മാസ ശമ്പളം).',
-              'പിന്നീട് ഒരു സ്റ്റാഫിന്റെ ശമ്പള നിരക്ക് മാറ്റുമ്പോൾ "Existing Event Shifts Rate Policy" തിരഞ്ഞെടുക്കാം: പഴയതും നിലവിലുള്ളതുമായ ഷിഫ്റ്റുകളിൽ അന്ന് അസൈൻ ചെയ്ത നിരക്ക് തന്നെ തുടരാൻ "Keep Existing Shifts at Original Rate" (ഡിഫോൾട്ട്) ഉപയോഗിക്കാം, അല്ലെങ്കിൽ വരുന്ന ഇവന്റുകളിലെ ഷിഫ്റ്റുകൾ പുതിയ ശമ്പള നിരക്കിലേക്ക് മാറ്റാൻ "Switch to New Pricing" ഓപ്ഷൻ ഉപയോഗിക്കാം.',
+              '"Staff -> + Add Staff" വഴി സ്റ്റാഫിനെ ചേർക്കുമ്പോൾ അവരുടെ പേര്, എല്ലാവർക്കും പ്രത്യേകം Unique ID ("Auto ID" ബട്ടൺ വഴിയോ സ്വന്തമായോ നൽകാം), Date of Birth (ജനനത്തീയതി), ഫോൺ നമ്പർ എന്നിവയും ശമ്പള രീതിയും (Per Hour / Per Event / Monthly Salary) തിരഞ്ഞെടുക്കുക.',
+              'പിന്നീട് ഒരു സ്റ്റാഫിന്റെ ശമ്പള നിരക്ക് മാറ്റുമ്പോൾ "Existing Event Shifts Rate Policy" തിരഞ്ഞെടുക്കാം: പഴയ ഷിഫ്റ്റുകളിൽ അന്ന് അസൈൻ ചെയ്ത നിരക്ക് തന്നെ തുടരാൻ "Keep Existing Shifts at Original Rate" ഉപയോഗിക്കാം, അല്ലെങ്കിൽ വരുന്ന ഇവന്റുകളിലെ ഷിഫ്റ്റുകൾ പുതിയ ശമ്പള നിരക്കിലേക്ക് മാറ്റാൻ "Switch to New Pricing" ഉപയോഗിക്കാം.',
               'അഡ്വാൻസ് തുകകൾ രേഖപ്പെടുത്താൻ മഞ്ഞ നിറത്തിലുള്ള "Salary Advance" ബട്ടൺ ഉപയോഗിക്കുക—ഇത് സാധാരണ ശമ്പളത്തിൽ ("Standard Salary Payout") നിന്ന് പൂർണ്ണമായും വേർതിരിച്ച് കാണിക്കുന്നു.',
               '"Payroll Report & Salary Slips" ടാബിൽ തിരഞ്ഞെടുത്ത തീയതികളിലെ ശമ്പള റിപ്പോർട്ടും A4 PDF സാലറി സ്ലിപ്പും ഡൗൺലോഡ് ചെയ്യാം.'
             ]
@@ -660,13 +660,13 @@ export const MALAYALAM_EDITION_USER_MANUALS: Record<ManualRoleKey, RoleUserManua
           },
           {
             number: '09',
-            titleMl: 'ആക്ടിവിറ്റി നോട്ടിഫിക്കേഷനുകൾ, യൂസർ നിയന്ത്രണം & മാനുവലുകൾ',
-            menuLabel: 'Bell Icon / More -> Users / More -> Manuals',
+            titleMl: 'ആക്ടിവിറ്റി നോട്ടിഫിക്കേഷനുകൾ, യൂസർ Unique ID നിയന്ത്രണം & മാനുവലുകൾ',
+            menuLabel: 'Bell Icon / More -> Users / Settings / Manuals',
             summaryMl:
-              'ടീം അംഗങ്ങൾ വരുത്തുന്ന മാറ്റങ്ങൾ ബെൽ ഐക്കണിൽ ലളിതമായി കാണാനും, ഇംഗ്ലീഷ്/മലയാളം PDF മാനുവലുകൾ ഡൗൺലോഡ് ചെയ്യാനും സാധിക്കുന്നു.',
+              'ടീം അംഗങ്ങൾ വരുത്തുന്ന മാറ്റങ്ങൾ ബെൽ ഐക്കണിൽ കാണാനും, എല്ലാ യൂസർമാർക്കും Unique ID & ജനനത്തീയതി ക്രമീകരിക്കാനും സാധിക്കുന്നു.',
             stepsMl: [
               'മുകളിലെ Notification Bell ഐക്കൺ ക്ലിക്ക് ചെയ്താൽ മറ്റുള്ളവർ വരുത്തിയ എഡിറ്റുകൾ ("പഴയ വിവരം -> പുതിയ വിവരം") ശല്യപ്പെടുത്തുന്ന അലേർട്ടുകൾ ഇല്ലാതെ പരിശോധിക്കാം.',
-              '"More -> Users" വഴി Manager, Accountant, Staff ലോഗിനുകൾ നിയന്ത്രിക്കാം; "More -> Manuals" വഴി 4 റോളുകളുടെയും യൂസർ മാനുവൽ ഇംഗ്ലീഷിലോ മലയാളത്തിലോ PDF ആയി ഡൗൺലോഡ് ചെയ്യാം.'
+              '"More -> Users" വഴി Manager, Accountant, Staff അക്കൗണ്ടുകൾക്ക് Unique ID, Date of Birth, Phone Number എന്നിവ നൽകാം (സ്വന്തം വിവരങ്ങൾ "Settings"-ലും പുതുക്കാം); "More -> Manuals" വഴി 4 റോളുകളുടെയും യൂസർ മാനുവൽ ഇംഗ്ലീഷിലോ മലയാളത്തിലോ PDF ആയി ഡൗൺലോഡ് ചെയ്യാം.'
             ]
           }
         ]
@@ -705,12 +705,12 @@ export const MALAYALAM_EDITION_USER_MANUALS: Record<ManualRoleKey, RoleUserManua
         chapters: [
           {
             number: '01',
-            titleMl: 'സൈൻ-ഇൻ, 1-ടാപ്പ് ആപ്പ് ഇൻസ്റ്റാളേഷൻ & ഓപ്പറേഷൻസ് ഡാഷ്‌ബോർഡ്',
-            menuLabel: 'Login / Install App / Dashboard',
+            titleMl: 'സൈൻ-ഇൻ, 2-of-3 പാസ്‌വേഡ് റീസെറ്റ്, ആപ്പ് ഇൻസ്റ്റാളേഷൻ & ഡാഷ്‌ബോർഡ്',
+            menuLabel: 'Login / Forgot Password? / Install App / Dashboard',
             summaryMl:
-              'ഫോണിലോ കമ്പ്യൂട്ടറിലോ ആപ്പ് ഇൻസ്റ്റാൾ ചെയ്ത് വരാനിരിക്കുന്ന ഇവന്റുകളും സ്റ്റോക്ക് വിവരങ്ങളും തത്സമയം കാണാം.',
+              'ഫോണിലോ കമ്പ്യൂട്ടറിലോ ലോഗിൻ ചെയ്യാനും, പാസ്‌വേഡ് മറന്നാൽ 3 ഓപ്ഷനുകളിൽ ഏതെങ്കിലും 2 എണ്ണം നൽകി റീസെറ്റ് ചെയ്യാനും സാധിക്കുന്നു.',
             stepsMl: [
-              'Owner നൽകിയ Manager യൂസർനെയിമും പാസ്‌വേഡും ഉപയോഗിച്ച് "Sign In" ചെയ്യുക.',
+              'Owner നൽകിയ Manager യൂസർനെയിമും (അല്ലെങ്കിൽ Unique ID-യും) പാസ്‌വേഡും ഉപയോഗിച്ച് "Sign In" ചെയ്യുക. പാസ്‌വേഡ് മറന്നാൽ "Forgot Password?" ക്ലിക്ക് ചെയ്ത് Unique ID, Phone Number, Date of Birth എന്നിവയിൽ ഏതെങ്കിലും രണ്ട് (2) ഓപ്ഷനുകൾ തിരഞ്ഞെടുത്ത് പുതിയ പാസ്‌വേഡ് സെറ്റ് ചെയ്യാം.',
               '"Install App" ബട്ടൺ അമർത്തിയാൽ ഫോണിലെ മറ്റ് ആപ്പുകൾക്കൊപ്പവും ഹോം സ്ക്രീനിലും IPPAS Pulse ഐക്കൺ ഉടൻ ചേർക്കപ്പെടും (iPhone Safari-യിൽ Share -> "Add to Home Screen" ഉപയോഗിക്കുക).',
               'Dashboard-ൽ വരാനിരിക്കുന്ന ബുക്കിംഗുകൾ, ആകെ അതിഥികളുടെ എണ്ണം, സ്റ്റോക്ക് കുറവുള്ള സാധനങ്ങൾ, കാലാവധി കഴിയാറായ (Expiry) സാധനങ്ങൾ എന്നിവ കാണാം.'
             ]
@@ -763,14 +763,14 @@ export const MALAYALAM_EDITION_USER_MANUALS: Record<ManualRoleKey, RoleUserManua
         chapters: [
           {
             number: '05',
-            titleMl: 'സ്റ്റാഫ് ശമ്പള പ്ലാനുകൾ, ഷിഫ്റ്റ് നിരക്ക് നിയന്ത്രണം & ഹാജർ',
-            menuLabel: 'Staff / Event -> Crew Shifts',
+            titleMl: 'സ്റ്റാഫ് Unique ID & ജനനത്തീയതി (DOB), ശമ്പള പ്ലാനുകൾ & ഹാജർ',
+            menuLabel: 'Staff -> + Add Staff / Event -> Crew Shifts',
             summaryMl:
-              'സ്റ്റാഫിനെ ചേർക്കുമ്പോൾ ശമ്പള രീതി നിശ്ചയിക്കാനും, ശമ്പളം മാറുമ്പോൾ പഴയ ഷിഫ്റ്റ് നിരക്ക് നിലനിർത്താനോ മാറ്റാനോ സാധിക്കുന്നു.',
+              'സ്റ്റാഫിനെ ചേർക്കുമ്പോൾ Unique ID-യും Date of Birth-ഉം നൽകാനും, ശമ്പള രീതി നിശ്ചയിക്കാനും, ഹാജർ രേഖപ്പെടുത്താനും സാധിക്കുന്നു.',
             stepsMl: [
-              '"Staff -> + Add Staff"-ൽ Per Hour (മണിക്കൂർ), Per Event (ഇവന്റ് ഒന്നിന്), അല്ലെങ്കിൽ Monthly (മാസ ശമ്പളം) എന്നീ രീതികളിൽ ഒന്ന് തിരഞ്ഞെടുക്കുക.',
-              'ഓരോ ഇവന്റ് ഷിഫ്റ്റിലും അന്ന് അസൈൻ ചെയ്ത ശമ്പള നിരക്ക് ലോക്ക് ചെയ്യപ്പെടുന്നു. പിന്നീട് സ്റ്റാഫിന്റെ ശമ്പളം കൂട്ടിയാലും പഴയ ഷിഫ്റ്റുകൾ പഴയ നിരക്കിൽ തന്നെ നിൽക്കും—ആവശ്യമെങ്കിൽ വരുന്ന ഇവന്റുകളിലെ ഷിഫ്റ്റുകൾ മാത്രം "Switch to New Pricing" വഴി പുതിയ നിരക്കിലേക്ക് മാറ്റാവുന്നതാണ്.',
-              'പരിപാടി കഴിഞ്ഞാലുടൻ സ്റ്റാഫ് ഹാജർ ("Present" / "Absent") രേഖപ്പെടുത്തുകയും, ഇവന്റിലെ ചെലവുകൾ Expenses ടാബിൽ ചേർക്കുകയും ചെയ്യുക. സ്റ്റാഫ് പാസ്‌വേഡ് മറന്നാൽ "Reset Password" ഐക്കൺ വഴി പുതിയ പാസ്‌വേഡ് നൽകാം.'
+              '"Staff -> + Add Staff"-ൽ സ്റ്റാഫിന്റെ പേര്, Unique ID ("Auto ID" വഴിയോ സ്വന്തമായോ), Date of Birth (ജനനത്തീയതി), ഫോൺ നമ്പർ എന്നിവ നൽകി Per Hour (മണിക്കൂർ), Per Event (ഇവന്റ് ഒന്നിന്), അല്ലെങ്കിൽ Monthly (മാസ ശമ്പളം) എന്നീ രീതികളിൽ ഒന്ന് തിരഞ്ഞെടുക്കുക.',
+              'ഓരോ ഇവന്റ് ഷിഫ്റ്റിലും അന്ന് അസൈൻ ചെയ്ത ശമ്പള നിരക്ക് ലോക്ക് ചെയ്യപ്പെടുന്നു. പിന്നീട് സ്റ്റാഫിന്റെ ശമ്പളം കൂട്ടിയാലും പഴയ ഷിഫ്റ്റുകൾ പഴയ നിരക്കിൽ തന്നെ നിൽക്കും—ആവശ്യമെങ്കിൽ വരുന്ന ഇവന്റുകളിലെ ഷിഫ്റ്റുകൾ മാത്രം "Switch to New Pricing" വഴി പുതിയ നിരക്കിലേക്ക് മാറ്റാം.',
+              'പരിപാടി കഴിഞ്ഞാലുടൻ സ്റ്റാഫ് ഹാജർ ("Present" / "Absent") രേഖപ്പെടുത്തുക. സ്റ്റാഫ് പാസ്‌വേഡ് മറന്നാൽ ലോഗിൻ സ്ക്രീനിലെ "Forgot Password?" വഴി Unique ID, Phone Number, Date of Birth എന്നിവയിൽ ഏതെങ്കിലും രണ്ട് (2) വിവരങ്ങൾ നൽകി അവർക്ക് സ്വയം പാസ്‌വേഡ് റീസെറ്റ് ചെയ്യാം.'
             ],
             importantNoteMl:
               '"Present" എന്ന് രേഖപ്പെടുത്തുന്ന ഷിഫ്റ്റുകൾ മാത്രമേ മണിക്കൂർ/ഇവന്റ് ശമ്പള കണക്കിൽ ഉൾപ്പെടുകയുള്ളൂ.'
@@ -811,12 +811,12 @@ export const MALAYALAM_EDITION_USER_MANUALS: Record<ManualRoleKey, RoleUserManua
         chapters: [
           {
             number: '01',
-            titleMl: 'സൈൻ-ഇൻ, ആപ്പ് ഇൻസ്റ്റാളേഷൻ, ബാങ്ക്/ക്യാഷ് ബാലൻസ് & Top Clients',
-            menuLabel: 'Dashboard / More -> Clients',
+            titleMl: 'സൈൻ-ഇൻ, 2-of-3 പാസ്‌വേഡ് റീസെറ്റ്, ബാങ്ക്/ക്യാഷ് ബാലൻസ് & Top Clients',
+            menuLabel: 'Login / Forgot Password? / Dashboard / More -> Clients',
             summaryMl:
-              'ഓരോ ബാങ്ക് അക്കൗണ്ടിലും ക്യാഷിലും വന്ന തുകയും ഏറ്റവും കൂടുതൽ തുക നൽകിയ ക്ലൈന്റ്സിനെയും പരിശോധിക്കാം.',
+              'സുരക്ഷിതമായി ലോഗിൻ ചെയ്യാനും, പാസ്‌വേഡ് മറന്നാൽ 3-ൽ ഏതെങ്കിലും 2 വിവരങ്ങൾ നൽകി റീസെറ്റ് ചെയ്യാനും, ബാങ്ക്/ക്യാഷ് തുക പരിശോധിക്കാനും സാധിക്കുന്നു.',
             stepsMl: [
-              'Accountant യൂസർനെയിമും പാസ്‌വേഡും നൽകി ലോഗിൻ ചെയ്യുക; "Install App" വഴി ഫോണിലോ കമ്പ്യൂട്ടറിലോ ആപ്പ് ഇൻസ്റ്റാൾ ചെയ്യാം.',
+              'Accountant യൂസർനെയിമും (അല്ലെങ്കിൽ Unique ID-യും) പാസ്‌വേഡും നൽകി ലോഗിൻ ചെയ്യുക. പാസ്‌വേഡ് മറന്നാൽ ലോഗിൻ സ്ക്രീനിലെ "Forgot Password?" ക്ലിക്ക് ചെയ്ത് Unique ID, Phone Number, Date of Birth എന്നിവയിൽ ഏതെങ്കിലും രണ്ട് (2) ഓപ്ഷനുകൾ തിരഞ്ഞെടുത്ത് പുതിയ പാസ്‌വേഡ് സെറ്റ് ചെയ്യാം.',
               'Dashboard-ലെ "Account-wise Invoice Collections" വഴി ഓരോ ബാങ്ക്/UPI അക്കൗണ്ടിലും ഓഫീസ് ക്യാഷിലും ലഭിച്ച തുക കൃത്യമായി ഒത്തുനോക്കാം.',
               '"More -> Clients" തുറന്ന് "Top Clients Leaderboard"-ൽ ഏറ്റവും കൂടുതൽ തുക നൽകിയ ക്ലൈന്റ്സിനെയും ബാക്കി കിട്ടാനുള്ള തുകയും പരിശോധിക്കാം.'
             ]
@@ -914,17 +914,17 @@ export const MALAYALAM_EDITION_USER_MANUALS: Record<ManualRoleKey, RoleUserManua
         chapters: [
           {
             number: '01',
-            titleMl: 'മൊബൈൽ നമ്പർ ഉപയോഗിച്ച് സൈൻ-ഇൻ & പാസ്‌വേഡ് മറന്നാൽ റീസെറ്റ് ചെയ്യൽ',
-            menuLabel: 'Sign In / Forgot Staff Password?',
+            titleMl: 'സൈൻ-ഇൻ & പാസ്‌വേഡ് മറന്നാൽ 2-of-3 വെരിഫിക്കേഷൻ വഴി റീസെറ്റ് ചെയ്യൽ',
+            menuLabel: 'Sign In / Forgot Password? (Select Any 2 of 3)',
             summaryMl:
-              'നിങ്ങളുടെ 10 അക്ക മൊബൈൽ നമ്പർ ഉപയോഗിച്ച് ലോഗിൻ ചെയ്യാനും, പാസ്‌വേഡ് മറന്നാൽ സ്വയം മാറ്റാനുമുള്ള സൗകര്യം.',
+              'നിങ്ങളുടെ മൊബൈൽ നമ്പറോ Unique ID-യോ ഉപയോഗിച്ച് ലോഗിൻ ചെയ്യാനും, പാസ്‌വേഡ് മറന്നാൽ 3 ഓപ്ഷനുകളിൽ ഏതെങ്കിലും 2 എണ്ണം തിരഞ്ഞെടുത്ത് റീസെറ്റ് ചെയ്യാനുമുള്ള സൗകര്യം.',
             stepsMl: [
-              'ഫോണിൽ IPPAS Pulse തുറന്ന് "Username or Phone Number" എന്ന ഭാഗത്ത് നിങ്ങളുടെ രജിസ്റ്റർ ചെയ്ത 10 അക്ക മൊബൈൽ നമ്പർ നൽകുക.',
-              'പാസ്‌വേഡ് നൽകി "Sign In" അമർത്തിയാൽ നിങ്ങളുടെ വ്യക്തിഗത Staff Portal തുറന്നുവരും.',
-              'പാസ്‌വേഡ് മറന്നുപോയാൽ ലോഗിൻ സ്ക്രീനിലെ "Forgot Staff Password?" എന്നതിൽ അമർത്തി മൊബൈൽ നമ്പറും പേരും നൽകി ഉടൻ പുതിയ പാസ്‌വേഡ് സെറ്റ് ചെയ്യാം (അല്ലെങ്കിൽ Manager / Owner വഴി റീസെറ്റ് ചെയ്യാം).'
+              'ഫോണിൽ IPPAS Pulse തുറന്ന് നിങ്ങളുടെ രജിസ്റ്റർ ചെയ്ത 10 അക്ക മൊബൈൽ നമ്പറോ അല്ലെങ്കിൽ നിങ്ങൾക്ക് നൽകിയ Staff Unique ID-യോ (ഉദാ: STF-001) നൽകുക.',
+              'പാസ്‌വേഡ് നൽകി "Sign In" അമർത്തിയാൽ നിങ്ങളുടെ വ്യക്തിഗത Staff Portal തുറന്നുവരും; പോർട്ടലിന് മുകളിൽ നിങ്ങളുടെ Unique ID, ഫോൺ നമ്പർ, ജനനത്തീയതി (DOB) എന്നിവ കാണാം.',
+              'പാസ്‌വേഡ് മറന്നുപോയാൽ ലോഗിൻ സ്ക്രീനിലെ "Forgot Password?" അമർത്തുക. തുടർന്ന് (1) Unique ID, (2) Phone Number, (3) Date of Birth (ജനനത്തീയതി) എന്നിവയിൽ ഏതെങ്കിലും രണ്ട് (2) ഓപ്ഷനുകൾ തിരഞ്ഞെടുത്ത് അവയുടെ ശരിയായ വിവരങ്ങൾ നൽകിയാൽ മാത്രമേ പുതിയ പാസ്‌വേഡ് സെറ്റ് ചെയ്യാൻ സാധിക്കുകയുള്ളൂ.'
             ],
             importantNoteMl:
-              'പുതിയ ഡ്യൂട്ടി വിവരങ്ങളും ശമ്പള കണക്കുകളും അപ്‌ഡേറ്റ് ആകുന്നതിനായി ആപ്പ് തുറക്കുമ്പോൾ ഫോണിൽ ഇന്റർനെറ്റ് (Mobile Data / Wi-Fi) ഓൺ ആയിരിക്കണം.'
+              'പാസ്‌വേഡ് റീസെറ്റ് ചെയ്യാൻ മുകളിൽ പറഞ്ഞ മൂന്ന് വിവരങ്ങളിൽ (Unique ID, Phone Number, Date of Birth) ഏതെങ്കിലും രണ്ട് (2) എണ്ണം കൃത്യമായി നൽകേണ്ടതാണ്. ആപ്പ് തുറക്കുമ്പോൾ ഫോണിൽ ഇന്റർനെറ്റ് (Mobile Data / Wi-Fi) ഓൺ ആയിരിക്കണം.'
           },
           {
             number: '02',

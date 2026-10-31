@@ -75,6 +75,8 @@ create table if not exists profiles (
   password text,
   full_name text not null,
   phone text,
+  unique_id text,
+  dob date,
   role user_role not null default 'staff',
   role_title text,
   hourly_rate numeric(8,2)
@@ -85,6 +87,8 @@ alter table profiles alter column id set default gen_random_uuid();
 alter table profiles
   add column if not exists username text unique,
   add column if not exists password text,
+  add column if not exists unique_id text,
+  add column if not exists dob date,
   add column if not exists role_title text,
   add column if not exists hourly_rate numeric(8,2);
 
@@ -234,14 +238,26 @@ create table if not exists staff_members (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   phone text,
+  unique_id text,
+  dob date,
   password text default 'password123',
   role_title text,
+  salary_type text default 'hourly',
   hourly_rate numeric(10,2) not null default 0,
+  event_rate numeric(10,2) default 0,
+  monthly_salary numeric(10,2) default 0,
+  salary_start_date date,
   active boolean not null default true
 );
 
 alter table staff_members
-  add column if not exists password text default 'password123';
+  add column if not exists password text default 'password123',
+  add column if not exists unique_id text,
+  add column if not exists dob date,
+  add column if not exists salary_type text default 'hourly',
+  add column if not exists event_rate numeric(10,2) default 0,
+  add column if not exists monthly_salary numeric(10,2) default 0,
+  add column if not exists salary_start_date date;
 
 create table if not exists shifts (
   id uuid primary key default gen_random_uuid(),

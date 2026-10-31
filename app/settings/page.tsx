@@ -16,6 +16,14 @@ export default function SettingsPage() {
   const [savedNotice, setSavedNotice] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
+  const initialUser = store.getCurrentUser();
+  const [recoveryForm, setRecoveryForm] = useState({
+    unique_id: initialUser?.unique_id || '',
+    phone: initialUser?.phone || '',
+    dob: initialUser?.dob || ''
+  });
+  const [recoveryMsg, setRecoveryMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
   useEffect(() => {
     const unsub = store.subscribe(() => {
       const next = store.getState();
@@ -26,6 +34,17 @@ export default function SettingsPage() {
     return unsub;
   }, []);
 
+  useEffect(() => {
+    const cu = store.getCurrentUser();
+    if (cu) {
+      setRecoveryForm({
+        unique_id: cu.unique_id || '',
+        phone: cu.phone || '',
+        dob: cu.dob || ''
+      });
+    }
+  }, [state.currentUserId]);
+
   const role = state.currentRole;
   const isOwner = role === 'owner' || role === 'super_admin';
 
@@ -34,6 +53,21 @@ export default function SettingsPage() {
     store.updateSettings(form);
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 3000);
+  };
+
+  const handleSaveRecovery = (e: React.FormEvent) => {
+    e.preventDefault();
+    setRecoveryMsg(null);
+    const res = store.updateCurrentUserRecoveryDetails(recoveryForm);
+    if (!res.success) {
+      setRecoveryMsg({ type: 'err', text: res.error || 'Could not update recovery details.' });
+      return;
+    }
+    setRecoveryMsg({
+      type: 'ok',
+      text: '✓ Saved your Unique ID, Phone, and Date of Birth for 2-of-3 password recovery.'
+    });
+    setTimeout(() => setRecoveryMsg(null), 4000);
   };
 
   return (
@@ -321,12 +355,80 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Account Security & Password */}
-          <div className="card" style={{ borderTop: '3px solid #0f172a' }}>
-            <h2 className="card-title">🔐 Account Password &amp; Security</h2>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-              Change the login password for your currently signed-in account. All users can independently update their own passwords.
+          {/* Account Security, 2-of-3 Recovery Details & Password */}
+          <div className="card" style={{ borderTop: '3px solid #0f172a', marginBottom: '1.25rem' }}>
+            <h2 className="card-title">🔐 Account Password &amp; 2-of-3 Recovery Details</h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.9rem', lineHeight: 1.5 }}>
+              Keep your <strong>Unique ID</strong>, <strong>Phone Number</strong>, and <strong>Date of Birth</strong> updated. If you ever forget your password, you can reset it on the Sign-In screen by verifying any <strong>2 of these 3</strong> options.
             </p>
+
+            {recoveryMsg && (
+              <div
+                style={{
+                  background: recoveryMsg.type === 'ok' ? '#dcfce7' : '#fee2e2',
+                  border: `1px solid ${recoveryMsg.type === 'ok' ? '#86efac' : '#fecaca'}`,
+                  color: recoveryMsg.type === 'ok' ? '#15803d' : '#b91c1c',
+                  borderRadius: '6px',
+                  padding: '0.55rem 0.75rem',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  marginBottom: '0.85rem'
+                }}
+              >
+                {recoveryMsg.text}
+              </div>
+            )}
+
+            <form
+              onSubmit={handleSaveRecovery}
+              style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '0.85rem',
+                marginBottom: '1rem'
+              }}
+            >
+              <div className="grid-2">
+                <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                  <label className="form-label">My Unique ID *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    style={{ textTransform: 'uppercase', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+                    value={recoveryForm.unique_id}
+                    onChange={(e) => setRecoveryForm({ ...recoveryForm, unique_id: e.target.value.toUpperCase() })}
+                    placeholder="e.g. OWN-001"
+                    required
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                  <label className="form-label">Date of Birth</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={recoveryForm.dob}
+                    onChange={(e) => setRecoveryForm({ ...recoveryForm, dob: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                <label className="form-label">Registered Recovery Phone</label>
+                <input
+                  type="tel"
+                  className="form-control"
+                  value={recoveryForm.phone}
+                  onChange={(e) => setRecoveryForm({ ...recoveryForm, phone: e.target.value })}
+                  placeholder="e.g. +91 98470 12345"
+                />
+              </div>
+
+              <button type="submit" className="btn btn-primary btn-sm" style={{ fontWeight: 700 }}>
+                Save My Recovery Details
+              </button>
+            </form>
+
             <button
               type="button"
               onClick={() => setIsChangePasswordOpen(true)}

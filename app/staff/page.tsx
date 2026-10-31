@@ -57,8 +57,11 @@ export default function StaffPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
   const [shiftRateUpdateMode, setShiftRateUpdateMode] = useState<ShiftRateUpdateMode>('keep_existing');
+  const [staffFormError, setStaffFormError] = useState<string | null>(null);
   const [formData, setFormData] = useState<{
     name: string;
+    unique_id: string;
+    dob: string;
     phone: string;
     password: string;
     role_title: string;
@@ -70,6 +73,8 @@ export default function StaffPage() {
     active: boolean;
   }>({
     name: '',
+    unique_id: store.generateNextUniqueId('staff'),
+    dob: '',
     phone: '',
     password: 'password123',
     role_title: 'Buffet Server',
@@ -193,6 +198,7 @@ export default function StaffPage() {
     const matchesSearch =
       !q ||
       staff.name.toLowerCase().includes(q) ||
+      (staff.unique_id && staff.unique_id.toLowerCase().includes(q)) ||
       (staff.phone && staff.phone.toLowerCase().includes(q)) ||
       (staff.role_title && staff.role_title.toLowerCase().includes(q));
     if (!matchesSearch) return false;
@@ -218,6 +224,7 @@ export default function StaffPage() {
     if (!q) return true;
     return (
       r.staff.name.toLowerCase().includes(q) ||
+      (r.staff.unique_id && r.staff.unique_id.toLowerCase().includes(q)) ||
       (r.staff.phone && r.staff.phone.toLowerCase().includes(q)) ||
       (r.staff.role_title && r.staff.role_title.toLowerCase().includes(q))
     );
@@ -248,6 +255,8 @@ export default function StaffPage() {
 
   const resetStaffForm = () => ({
     name: '',
+    unique_id: store.generateNextUniqueId('staff'),
+    dob: '',
     phone: '',
     password: 'password123',
     role_title: 'Buffet Server',
@@ -262,10 +271,32 @@ export default function StaffPage() {
   // Handlers
   const handleSubmitStaff = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name.trim()) return;
+    setStaffFormError(null);
+    if (!formData.name.trim()) {
+      setStaffFormError('Full name is required.');
+      return;
+    }
+
+    const normalizedUid = store.normalizeUniqueId(formData.unique_id);
+    if (!normalizedUid) {
+      setStaffFormError('Unique ID is required for every staff member.');
+      return;
+    }
+    if (store.isUniqueIdTaken(normalizedUid, editingStaff?.id)) {
+      setStaffFormError(
+        `Unique ID "${normalizedUid}" is already assigned to another user or staff member. Please enter a unique code or click Auto ID.`
+      );
+      return;
+    }
+    if (!formData.dob) {
+      setStaffFormError('Date of Birth is required (used for 2-of-3 password recovery).');
+      return;
+    }
 
     const payload = {
       name: formData.name.trim(),
+      unique_id: normalizedUid,
+      dob: formData.dob,
       phone: formData.phone.trim(),
       password: formData.password,
       role_title: formData.role_title.trim(),
@@ -286,14 +317,17 @@ export default function StaffPage() {
           ? ' · Switched unsettled shifts to new rate'
           : ' · Existing shifts kept at assigned historical rate';
       showNotice(
-        `✓ Updated staff profile for ${payload.name} (${formatStaffSalaryRate(payload)})${policyNote}.`
+        `✓ Updated staff profile for ${payload.name} [${normalizedUid}] (${formatStaffSalaryRate(payload)})${policyNote}.`
       );
     } else {
       store.addStaff(payload);
-      showNotice(`✓ Registered ${payload.name} on ${formatStaffSalaryTypeLabel(payload.salary_type)} plan (${formatStaffSalaryRate(payload)}).`);
+      showNotice(
+        `✓ Registered ${payload.name} [Unique ID: ${normalizedUid}] on ${formatStaffSalaryTypeLabel(payload.salary_type)} plan (${formatStaffSalaryRate(payload)}).`
+      );
     }
     setIsModalOpen(false);
     setEditingStaff(null);
+    setStaffFormError(null);
     setShiftRateUpdateMode('keep_existing');
     setFormData(resetStaffForm());
   };
@@ -574,6 +608,7 @@ export default function StaffPage() {
             <button
               type="button"
               onClick={() => {
+                setStaffFormError(null);
                 setEditingStaff(null);
                 setFormData(resetStaffForm());
                 setIsModalOpen(true);
@@ -784,7 +819,7 @@ export default function StaffPage() {
             <div style={{ flex: '1 1 260px', maxWidth: '420px' }}>
               <input
                 type="text"
-                placeholder="Search staff by name, mobile number, or role..."
+                placeholder="Search staff by name, Unique ID, mobile number, or role..."
                 className="form-control"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -888,6 +923,24 @@ export default function StaffPage() {
                             <h3 style={{ fontSize: '1.06rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>
                               {staff.name}
                             </h3>
+                            {staff.unique_id && (
+                              <span
+                                style={{
+                                  background: '#eef2ff',
+                                  border: '1px solid #c7d2fe',
+                                  color: '#3730a3',
+                                  borderRadius: '6px',
+                                  padding: '0.12rem 0.45rem',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 800,
+                                  fontVariantNumeric: 'tabular-nums',
+                                  letterSpacing: '0.02em'
+                                }}
+                                title="Staff Unique ID (used for Sign-In & 2-of-3 Password Reset)"
+                              >
+                                ID: {staff.unique_id}
+                              </span>
+                            )}
                             {role === 'owner' && (
                               <OwnerAuditBadge
                                 role={role}
@@ -907,6 +960,7 @@ export default function StaffPage() {
                               {staff.role_title || 'Service Crew'}
                             </span>
                             <span> · 📱 {staff.phone || 'No phone'}</span>
+                            {staff.dob && <span> · 🎂 {formatDisplayDate(staff.dob)}</span>}
                             {!staff.active && (
                               <span style={{ color: '#b45309', fontWeight: 700 }}> · On Leave</span>
                             )}
@@ -1182,10 +1236,13 @@ export default function StaffPage() {
                             style={{ whiteSpace: 'nowrap' }}
                             onClick={() => {
                               const stType = getStaffSalaryType(staff);
+                              setStaffFormError(null);
                               setEditingStaff(staff);
                               setShiftRateUpdateMode('keep_existing');
                               setFormData({
                                 name: staff.name,
+                                unique_id: staff.unique_id || store.generateNextUniqueId('staff'),
+                                dob: staff.dob || '',
                                 phone: staff.phone || '',
                                 password: staff.password || 'password123',
                                 role_title: staff.role_title || 'Buffet Server',
@@ -2073,7 +2130,9 @@ export default function StaffPage() {
                     🧑‍🍳 {statementStaff.name}
                   </h2>
                   <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0.18rem 0 0 0' }}>
-                    {statementStaff.role_title || 'Crew'} · 📱 {statementStaff.phone || '—'} ·{' '}
+                    {statementStaff.unique_id ? `ID: ${statementStaff.unique_id} · ` : ''}
+                    {statementStaff.role_title || 'Crew'} · 📱 {statementStaff.phone || '—'}
+                    {statementStaff.dob ? ` · 🎂 DOB: ${formatDisplayDate(statementStaff.dob)}` : ''} ·{' '}
                     <strong>{formatStaffSalaryTypeLabel(summary.salaryType)}</strong> ({summary.rateDisplay})
                   </p>
                 </div>
@@ -2476,7 +2535,7 @@ export default function StaffPage() {
                   required
                 />
                 <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.35rem' }}>
-                  Staff can also reset their own password anytime using &ldquo;Forgot Staff Password?&rdquo; on the login screen.
+                  All users and staff can also reset a forgotten password on the Sign-In screen by verifying any 2 of: Unique ID, Phone Number, or Date of Birth.
                 </div>
               </div>
 
@@ -2971,13 +3030,30 @@ export default function StaffPage() {
                   {editingStaff ? 'Edit Staff & Salary Structure' : 'Register New Staff Member'}
                 </h2>
                 <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '0.2rem 0 0 0' }}>
-                  Configure personal details and choose Per Hour, Per Event, or Monthly salary.
+                  Configure personal details, Unique ID, Date of Birth, and salary structure.
                 </p>
               </div>
               <button className="btn btn-secondary btn-sm" onClick={() => setIsModalOpen(false)}>
                 ✕
               </button>
             </div>
+
+            {staffFormError && (
+              <div
+                style={{
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  color: '#b91c1c',
+                  borderRadius: '8px',
+                  padding: '0.6rem 0.85rem',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  marginBottom: '0.9rem'
+                }}
+              >
+                ⚠️ {staffFormError}
+              </div>
+            )}
 
             <form onSubmit={handleSubmitStaff}>
               <div className="grid-2">
@@ -3008,6 +3084,69 @@ export default function StaffPage() {
 
               <div className="grid-2">
                 <div className="form-group">
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      marginBottom: '0.35rem'
+                    }}
+                  >
+                    <label className="form-label" style={{ margin: 0 }}>
+                      Unique ID *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          unique_id: store.generateNextUniqueId('staff')
+                        })
+                      }
+                      style={{
+                        background: '#eef2ff',
+                        border: '1px solid #c7d2fe',
+                        color: '#4338ca',
+                        borderRadius: '5px',
+                        padding: '0.1rem 0.45rem',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                      title="Generate next available Unique ID"
+                    >
+                      ↻ Auto ID
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    className="form-control"
+                    style={{ textTransform: 'uppercase', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+                    placeholder="e.g. STF-006"
+                    value={formData.unique_id}
+                    onChange={(e) =>
+                      setFormData({ ...formData, unique_id: e.target.value.toUpperCase() })
+                    }
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Date of Birth *</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    max={todayYmd}
+                    value={formData.dob}
+                    onChange={(e) => setFormData({ ...formData, dob: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid-2">
+                <div className="form-group">
                   <label className="form-label">Mobile Number (Login ID) *</label>
                   <input
                     type="tel"
@@ -3029,6 +3168,20 @@ export default function StaffPage() {
                     required
                   />
                 </div>
+              </div>
+
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.74rem',
+                  color: '#475569',
+                  marginBottom: '0.9rem'
+                }}
+              >
+                🔐 <strong>2-of-3 Password Recovery Enabled:</strong> If a password is forgotten, this staff member can reset it by verifying any <strong>2</strong> of their <strong>Unique ID</strong>, <strong>Mobile Number</strong>, or <strong>Date of Birth</strong>.
               </div>
 
               {/* Salary Structure Selector */}

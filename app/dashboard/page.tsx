@@ -201,7 +201,9 @@ export default function DashboardPage() {
           >
             <div>
               <div style={{ fontSize: '0.78rem', fontWeight: 600, opacity: 0.9, marginBottom: '0.2rem' }}>
-                Staff Duty &amp; Salary Portal · {currentUser?.phone || 'Crew'}
+                Staff Duty &amp; Salary Portal
+                {staffRecord?.unique_id ? ` · ID: ${staffRecord.unique_id}` : ''} · {currentUser?.phone || 'Crew'}
+                {staffRecord?.dob ? ` · DOB: ${staffRecord.dob}` : ''}
                 {staffRecord
                   ? ` · ${formatStaffSalaryTypeLabel(staffRecord.salary_type)} (${formatStaffSalaryRate(staffRecord)})`
                   : ''}

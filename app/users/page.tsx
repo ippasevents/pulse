@@ -17,6 +17,8 @@ export default function UsersPage() {
   const [addForm, setAddForm] = useState({
     full_name: '',
     role: 'manager' as UserRole,
+    unique_id: '',
+    dob: '',
     username: '',
     password: '',
     phone: '',
@@ -29,6 +31,8 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState<Profile | null>(null);
   const [editForm, setEditForm] = useState({
     full_name: '',
+    unique_id: '',
+    dob: '',
     username: '',
     password: '',
     phone: '',
@@ -40,10 +44,13 @@ export default function UsersPage() {
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
   const [staffEditForm, setStaffEditForm] = useState({
     name: '',
+    unique_id: '',
+    dob: '',
     phone: '',
     password: '',
     role_title: ''
   });
+  const [staffEditError, setStaffEditError] = useState('');
 
   // Delete Confirmation State
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -105,6 +112,8 @@ export default function UsersPage() {
     setAddForm({
       full_name: '',
       role: 'manager',
+      unique_id: store.generateNextUniqueId('manager'),
+      dob: '',
       username: '',
       password: '',
       phone: '',
@@ -123,6 +132,20 @@ export default function UsersPage() {
       return;
     }
 
+    const normalizedUid = store.normalizeUniqueId(addForm.unique_id);
+    if (!normalizedUid) {
+      setAddError('Unique ID is required.');
+      return;
+    }
+    if (store.isUniqueIdTaken(normalizedUid)) {
+      setAddError(`Unique ID "${normalizedUid}" is already assigned to another account. Click Auto ID or enter a unique code.`);
+      return;
+    }
+    if (!addForm.dob) {
+      setAddError('Date of Birth is required (used for 2-of-3 password recovery).');
+      return;
+    }
+
     if (addForm.role === 'staff') {
       if (!addForm.phone.trim()) {
         setAddError('Phone number is required for Staff login.');
@@ -130,6 +153,8 @@ export default function UsersPage() {
       }
       store.addStaff({
         name: addForm.full_name.trim(),
+        unique_id: normalizedUid,
+        dob: addForm.dob,
         phone: addForm.phone.trim(),
         password: addForm.password.trim() || 'password123',
         role_title: addForm.role_title.trim() || 'Service Crew',
@@ -137,7 +162,9 @@ export default function UsersPage() {
         active: true
       });
       setIsAddModalOpen(false);
-      notifySuccess(`Added staff login for ${addForm.full_name.trim()} (Username: ${addForm.phone.trim()})`);
+      notifySuccess(
+        `Added staff login for ${addForm.full_name.trim()} (Unique ID: ${normalizedUid} · Phone: ${addForm.phone.trim()})`
+      );
       return;
     }
 
@@ -148,6 +175,8 @@ export default function UsersPage() {
 
     const res = store.addProfile({
       full_name: addForm.full_name,
+      unique_id: normalizedUid,
+      dob: addForm.dob,
       username: addForm.username,
       password: addForm.password,
       phone: addForm.phone,
@@ -160,7 +189,7 @@ export default function UsersPage() {
     }
 
     setIsAddModalOpen(false);
-    notifySuccess(`Created ${addForm.role.toUpperCase()} account for ${addForm.full_name.trim()}!`);
+    notifySuccess(`Created ${addForm.role.toUpperCase()} account for ${addForm.full_name.trim()} (Unique ID: ${normalizedUid})!`);
   };
 
   const handleOpenEdit = (profile: Profile) => {
@@ -168,6 +197,8 @@ export default function UsersPage() {
     setEditingUser(profile);
     setEditForm({
       full_name: profile.full_name,
+      unique_id: profile.unique_id || store.generateNextUniqueId(profile.role),
+      dob: profile.dob || '',
       username: profile.username || '',
       password: profile.password || '',
       phone: profile.phone || '',
@@ -182,15 +213,24 @@ export default function UsersPage() {
       setEditError('Username and password are required.');
       return;
     }
+    const normalizedUid = store.normalizeUniqueId(editForm.unique_id);
+    if (!normalizedUid) {
+      setEditError('Unique ID is required.');
+      return;
+    }
 
-    const res = store.updateProfile(editingUser.id, editForm);
+    const res = store.updateProfile(editingUser.id, {
+      ...editForm,
+      unique_id: normalizedUid,
+      dob: editForm.dob || undefined
+    });
     if (!res.success) {
       setEditError(res.error || 'Could not update profile.');
       return;
     }
 
     setEditingUser(null);
-    notifySuccess(`Updated credentials for ${editForm.full_name}!`);
+    notifySuccess(`Updated credentials & recovery details for ${editForm.full_name} (${normalizedUid})!`);
   };
 
   const handleDeleteUser = (profile: Profile) => {
@@ -205,9 +245,12 @@ export default function UsersPage() {
   };
 
   const handleOpenStaffEdit = (staff: StaffMember) => {
+    setStaffEditError('');
     setEditingStaff(staff);
     setStaffEditForm({
       name: staff.name,
+      unique_id: staff.unique_id || store.generateNextUniqueId('staff'),
+      dob: staff.dob || '',
       phone: staff.phone || '',
       password: staff.password || 'password123',
       role_title: staff.role_title || 'Service Crew'
@@ -217,14 +260,26 @@ export default function UsersPage() {
   const handleSaveStaffEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStaff || !staffEditForm.phone.trim()) return;
+    setStaffEditError('');
+    const normalizedUid = store.normalizeUniqueId(staffEditForm.unique_id);
+    if (!normalizedUid) {
+      setStaffEditError('Unique ID is required.');
+      return;
+    }
+    if (store.isUniqueIdTaken(normalizedUid, editingStaff.id)) {
+      setStaffEditError(`Unique ID "${normalizedUid}" is already assigned to another user or staff member.`);
+      return;
+    }
     store.updateStaff(editingStaff.id, {
       name: staffEditForm.name.trim(),
+      unique_id: normalizedUid,
+      dob: staffEditForm.dob || undefined,
       phone: staffEditForm.phone.trim(),
       password: staffEditForm.password.trim() || 'password123',
       role_title: staffEditForm.role_title.trim()
     });
     setEditingStaff(null);
-    notifySuccess(`Updated staff login credentials for ${staffEditForm.name.trim()}!`);
+    notifySuccess(`Updated staff login & Unique ID (${normalizedUid}) for ${staffEditForm.name.trim()}!`);
   };
 
   const handleDeleteStaffLogin = (staff: StaffMember) => {
@@ -379,7 +434,7 @@ export default function UsersPage() {
               Authorized User Credentials ({visibleProfiles.length})
             </h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-              Username and password login credentials for system accounts
+              Username, Unique ID, Date of Birth, and Phone credentials — any 2 of Unique ID, Phone, or Date of Birth can be used to reset a forgotten password
             </p>
           </div>
           {canManageUsers && (
@@ -394,10 +449,11 @@ export default function UsersPage() {
             <thead>
               <tr>
                 <th>Profile &amp; Name</th>
+                <th>Unique ID</th>
                 <th>Role</th>
                 <th>Username</th>
                 <th>Password</th>
-                <th>Phone</th>
+                <th>Phone &amp; DOB</th>
                 <th style={{ textAlign: 'center' }}>Action</th>
               </tr>
             </thead>
@@ -422,6 +478,22 @@ export default function UsersPage() {
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                         ID: {profile.id}
                       </div>
+                    </td>
+                    <td>
+                      <code
+                        style={{
+                          background: '#eef2ff',
+                          border: '1px solid #c7d2fe',
+                          color: '#3730a3',
+                          padding: '0.18rem 0.48rem',
+                          borderRadius: '5px',
+                          fontWeight: 800,
+                          fontSize: '0.78rem',
+                          fontVariantNumeric: 'tabular-nums'
+                        }}
+                      >
+                        {profile.unique_id || '—'}
+                      </code>
                     </td>
                     <td>
                       <span
@@ -478,7 +550,14 @@ export default function UsersPage() {
                         </button>
                       </div>
                     </td>
-                    <td>{profile.phone || '—'}</td>
+                    <td>
+                      <div style={{ fontSize: '0.84rem', fontVariantNumeric: 'tabular-nums' }}>
+                        {profile.phone || '—'}
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                        DOB: {profile.dob || 'Not set'}
+                      </div>
+                    </td>
                     <td style={{ textAlign: 'center' }}>
                       {canManageUsers ? (
                         confirmDeleteId === profile.id ? (
@@ -550,6 +629,8 @@ export default function UsersPage() {
                 setAddForm({
                   full_name: '',
                   role: 'staff',
+                  unique_id: store.generateNextUniqueId('staff'),
+                  dob: '',
                   username: '',
                   password: 'password123',
                   phone: '',
@@ -570,8 +651,10 @@ export default function UsersPage() {
             <thead>
               <tr>
                 <th>Staff Member</th>
+                <th>Unique ID</th>
+                <th>Date of Birth</th>
                 <th>Role / Designation</th>
-                <th>Login Username (Phone Number)</th>
+                <th>Login Username (Phone)</th>
                 <th>Password</th>
                 <th>Status</th>
                 {canManageUsers && <th style={{ textAlign: 'center' }}>Action</th>}
@@ -581,6 +664,25 @@ export default function UsersPage() {
               {state.staff.map((staff) => (
                 <tr key={staff.id}>
                   <td style={{ fontWeight: 600 }}>{staff.name}</td>
+                  <td>
+                    <code
+                      style={{
+                        background: '#eef2ff',
+                        border: '1px solid #c7d2fe',
+                        color: '#3730a3',
+                        padding: '0.18rem 0.45rem',
+                        borderRadius: '5px',
+                        fontWeight: 800,
+                        fontSize: '0.78rem',
+                        fontVariantNumeric: 'tabular-nums'
+                      }}
+                    >
+                      {staff.unique_id || '—'}
+                    </code>
+                  </td>
+                  <td style={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.84rem' }}>
+                    {staff.dob || '—'}
+                  </td>
                   <td>{staff.role_title || 'Service Crew'}</td>
                   <td>
                     <code style={{ background: '#f1f5f9', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 700, color: '#0f172a' }}>
@@ -641,7 +743,7 @@ export default function UsersPage() {
               ))}
               {state.staff.length === 0 && (
                 <tr>
-                  <td colSpan={canManageUsers ? 6 : 5} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
+                  <td colSpan={canManageUsers ? 8 : 7} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
                     No staff members registered.
                   </td>
                 </tr>
@@ -691,7 +793,14 @@ export default function UsersPage() {
                 <select
                   className="form-control"
                   value={addForm.role}
-                  onChange={(e) => setAddForm({ ...addForm, role: e.target.value as UserRole })}
+                  onChange={(e) => {
+                    const nextRole = e.target.value as UserRole;
+                    setAddForm({
+                      ...addForm,
+                      role: nextRole,
+                      unique_id: store.generateNextUniqueId(nextRole === 'staff' ? 'staff' : nextRole)
+                    });
+                  }}
                 >
                   {isSuperAdmin && (
                     <option value="super_admin">Super Admin (Master System Control &amp; Stealth)</option>
@@ -713,6 +822,59 @@ export default function UsersPage() {
                   onChange={(e) => setAddForm({ ...addForm, full_name: e.target.value })}
                   required
                 />
+              </div>
+
+              <div className="grid-2">
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <label className="form-label" style={{ margin: 0 }}>
+                      Unique ID *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAddForm({
+                          ...addForm,
+                          unique_id: store.generateNextUniqueId(
+                            addForm.role === 'staff' ? 'staff' : addForm.role
+                          )
+                        })
+                      }
+                      style={{
+                        background: '#eef2ff',
+                        border: '1px solid #c7d2fe',
+                        color: '#4338ca',
+                        borderRadius: '5px',
+                        padding: '0.1rem 0.45rem',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      ↻ Auto ID
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    className="form-control"
+                    style={{ textTransform: 'uppercase', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+                    placeholder="e.g. STF-006"
+                    value={addForm.unique_id}
+                    onChange={(e) => setAddForm({ ...addForm, unique_id: e.target.value.toUpperCase() })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <label className="form-label">Date of Birth *</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={addForm.dob}
+                    onChange={(e) => setAddForm({ ...addForm, dob: e.target.value })}
+                    required
+                  />
+                </div>
               </div>
 
               {addForm.role === 'staff' ? (
@@ -793,13 +955,14 @@ export default function UsersPage() {
                   </div>
 
                   <div className="form-group" style={{ marginBottom: '1rem' }}>
-                    <label className="form-label">Contact Phone</label>
+                    <label className="form-label">Contact Phone *</label>
                     <input
                       type="text"
                       className="form-control"
                       placeholder="+91 98470 00000"
                       value={addForm.phone}
                       onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })}
+                      required
                     />
                   </div>
                 </>
@@ -821,14 +984,14 @@ export default function UsersPage() {
       {/* Edit User Credentials Modal */}
       {editingUser && (
         <div className="modal-overlay" onClick={() => setEditingUser(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
             <div className="modal-header">
               <div>
                 <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
                   Edit Credentials for {editingUser.full_name}
                 </h2>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                  Update role, username, password, or contact phone
+                  Update role, Unique ID, Date of Birth, username, password, or phone
                 </p>
               </div>
               <button className="btn btn-secondary btn-sm" onClick={() => setEditingUser(null)}>
@@ -864,6 +1027,55 @@ export default function UsersPage() {
                 />
               </div>
 
+              <div className="grid-2">
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <label className="form-label" style={{ margin: 0 }}>
+                      Unique ID *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditForm({
+                          ...editForm,
+                          unique_id: store.generateNextUniqueId(editForm.role)
+                        })
+                      }
+                      style={{
+                        background: '#eef2ff',
+                        border: '1px solid #c7d2fe',
+                        color: '#4338ca',
+                        borderRadius: '5px',
+                        padding: '0.1rem 0.45rem',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      ↻ Auto ID
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    className="form-control"
+                    style={{ textTransform: 'uppercase', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+                    value={editForm.unique_id}
+                    onChange={(e) => setEditForm({ ...editForm, unique_id: e.target.value.toUpperCase() })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <label className="form-label">Date of Birth</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={editForm.dob}
+                    onChange={(e) => setEditForm({ ...editForm, dob: e.target.value })}
+                  />
+                </div>
+              </div>
+
               <div className="form-group" style={{ marginBottom: '1rem' }}>
                 <label className="form-label">Role *</label>
                 <select
@@ -879,28 +1091,30 @@ export default function UsersPage() {
                 </select>
               </div>
 
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label className="form-label">Username *</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={editForm.username}
-                  onChange={(e) => setEditForm({ ...editForm, username: e.target.value.toLowerCase().trim() })}
-                  required
-                  placeholder="e.g. owner, manager, accountant"
-                />
-              </div>
+              <div className="grid-2">
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <label className="form-label">Username *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={editForm.username}
+                    onChange={(e) => setEditForm({ ...editForm, username: e.target.value.toLowerCase().trim() })}
+                    required
+                    placeholder="e.g. owner, manager, accountant"
+                  />
+                </div>
 
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label className="form-label">Password *</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={editForm.password}
-                  onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
-                  required
-                  placeholder="Enter new password"
-                />
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <label className="form-label">Password *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={editForm.password}
+                    onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                    required
+                    placeholder="Enter new password"
+                  />
+                </div>
               </div>
 
               <div className="form-group" style={{ marginBottom: '1rem' }}>
@@ -930,20 +1144,36 @@ export default function UsersPage() {
       {/* Edit Staff Login Modal */}
       {editingStaff && (
         <div className="modal-overlay" onClick={() => setEditingStaff(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '460px' }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
             <div className="modal-header">
               <div>
                 <h2 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0 }}>
                   Edit Staff Login: {editingStaff.name}
                 </h2>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                  Staff members sign in using their phone number as username
+                  Update Unique ID, Date of Birth, mobile login number, or password
                 </p>
               </div>
               <button className="btn btn-secondary btn-sm" onClick={() => setEditingStaff(null)}>
                 ✕
               </button>
             </div>
+
+            {staffEditError && (
+              <div
+                style={{
+                  background: '#fee2e2',
+                  border: '1px solid #fecaca',
+                  color: '#dc2626',
+                  padding: '0.6rem 0.8rem',
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  marginBottom: '1rem'
+                }}
+              >
+                {staffEditError}
+              </div>
+            )}
 
             <form onSubmit={handleSaveStaffEdit}>
               <div className="form-group" style={{ marginBottom: '1rem' }}>
@@ -957,26 +1187,77 @@ export default function UsersPage() {
                 />
               </div>
 
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label className="form-label">Phone Number (Login Username) *</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={staffEditForm.phone}
-                  onChange={(e) => setStaffEditForm({ ...staffEditForm, phone: e.target.value })}
-                  required
-                />
+              <div className="grid-2">
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <label className="form-label" style={{ margin: 0 }}>
+                      Unique ID *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setStaffEditForm({
+                          ...staffEditForm,
+                          unique_id: store.generateNextUniqueId('staff')
+                        })
+                      }
+                      style={{
+                        background: '#eef2ff',
+                        border: '1px solid #c7d2fe',
+                        color: '#4338ca',
+                        borderRadius: '5px',
+                        padding: '0.1rem 0.45rem',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      ↻ Auto ID
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    className="form-control"
+                    style={{ textTransform: 'uppercase', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+                    value={staffEditForm.unique_id}
+                    onChange={(e) => setStaffEditForm({ ...staffEditForm, unique_id: e.target.value.toUpperCase() })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <label className="form-label">Date of Birth</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={staffEditForm.dob}
+                    onChange={(e) => setStaffEditForm({ ...staffEditForm, dob: e.target.value })}
+                  />
+                </div>
               </div>
 
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label className="form-label">Login Password *</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={staffEditForm.password}
-                  onChange={(e) => setStaffEditForm({ ...staffEditForm, password: e.target.value })}
-                  required
-                />
+              <div className="grid-2">
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <label className="form-label">Phone Number (Login Username) *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={staffEditForm.phone}
+                    onChange={(e) => setStaffEditForm({ ...staffEditForm, phone: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '1rem' }}>
+                  <label className="form-label">Login Password *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={staffEditForm.password}
+                    onChange={(e) => setStaffEditForm({ ...staffEditForm, password: e.target.value })}
+                    required
+                  />
+                </div>
               </div>
 
               <div className="form-group" style={{ marginBottom: '1rem' }}>

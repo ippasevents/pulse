@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { store } from '@/lib/store';
-import { UserRole } from '@/lib/types';
+import { UserRole, PasswordResetFactor } from '@/lib/types';
 import Navbar from '@/components/Navbar';
 import MobileBottomNav from '@/components/MobileBottomNav';
 import { PWAInstallButton } from '@/components/PWAInstallButton';
@@ -57,10 +57,15 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [loginSuccessMsg, setLoginSuccessMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Staff Forgot Password Self-Service Reset State
+  // All-Users Forgot Password 2-of-3 Verification State
   const [isResetMode, setIsResetMode] = useState(false);
+  const [selectedFactors, setSelectedFactors] = useState<PasswordResetFactor[]>([
+    'unique_id',
+    'phone'
+  ]);
+  const [resetUniqueId, setResetUniqueId] = useState('');
   const [resetPhone, setResetPhone] = useState('');
-  const [resetName, setResetName] = useState('');
+  const [resetDob, setResetDob] = useState('');
   const [resetNewPass, setResetNewPass] = useState('');
   const [resetConfirmPass, setResetConfirmPass] = useState('');
   const [resetError, setResetError] = useState('');
@@ -152,7 +157,21 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const handleStaffResetPassword = async (e: React.FormEvent) => {
+  const toggleVerificationFactor = (factor: PasswordResetFactor) => {
+    setResetError('');
+    setSelectedFactors((prev) => {
+      if (prev.includes(factor)) {
+        return prev.filter((f) => f !== factor);
+      }
+      if (prev.length < 2) {
+        return [...prev, factor];
+      }
+      // When 2 are already selected and user taps the 3rd option, swap out the earliest one cleanly
+      return [prev[1], factor];
+    });
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setIsOnline(false);
@@ -160,6 +179,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     setResetError('');
+    if (selectedFactors.length !== 2) {
+      setResetError(
+        'Please select exactly two (2) verification options from Unique ID, Phone Number, and Date of Birth.'
+      );
+      return;
+    }
     if (resetNewPass.trim().length < 4) {
       setResetError('New password must be at least 4 characters long.');
       return;
@@ -177,11 +202,13 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const res = store.resetStaffPasswordSelfService(
-      resetPhone,
-      resetName,
-      resetNewPass.trim()
-    );
+    const res = store.resetPasswordWithTwoFactors({
+      factors: selectedFactors,
+      uniqueId: resetUniqueId,
+      phone: resetPhone,
+      dob: resetDob,
+      newPassword: resetNewPass.trim()
+    });
     setIsResetting(false);
 
     if (!res.success) {
@@ -190,15 +217,16 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     // Pre-fill login form and return to Sign In with confirmation message
-    setUsername(res.loginPhone || resetPhone.trim());
+    setUsername(res.loginId || '');
     setPassword(resetNewPass.trim());
     setIsResetMode(false);
     setError('');
     setLoginSuccessMsg(
-      `✓ Password reset for ${res.staffName || 'Staff'}! Tap Sign In below to continue.`
+      `✓ Password reset for ${res.accountName || 'Account'}! Tap Sign In below to continue.`
     );
+    setResetUniqueId('');
     setResetPhone('');
-    setResetName('');
+    setResetDob('');
     setResetNewPass('');
     setResetConfirmPass('');
   };
@@ -373,14 +401,14 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                     border: '1px solid #ddd6fe',
                     borderRadius: '10px',
                     padding: '0.75rem 0.9rem',
-                    marginBottom: '1rem'
+                    marginBottom: '0.95rem'
                   }}
                 >
                   <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#5b21b6' }}>
-                    🔑 Staff Password Reset
+                    🔑 Reset Forgotten Password
                   </div>
-                  <div style={{ fontSize: '0.76rem', color: '#6d28d9', marginTop: '0.2rem', lineHeight: 1.4 }}>
-                    Enter your registered mobile number and full name to set a new login password.
+                  <div style={{ fontSize: '0.76rem', color: '#6d28d9', marginTop: '0.2rem', lineHeight: 1.45 }}>
+                    Available for all users. Select <strong>any 2 of the 3 options</strong> below to verify your account and set a new password.
                   </div>
                 </div>
 
@@ -392,45 +420,146 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                       color: '#dc2626',
                       padding: '0.65rem 0.85rem',
                       borderRadius: '8px',
-                      fontSize: '0.82rem',
-                      marginBottom: '1rem',
-                      fontWeight: 600
+                      fontSize: '0.8rem',
+                      marginBottom: '0.95rem',
+                      fontWeight: 600,
+                      lineHeight: 1.4
                     }}
                   >
                     {resetError}
                   </div>
                 )}
 
-                <form onSubmit={handleStaffResetPassword}>
-                  <div className="form-group" style={{ marginBottom: '0.9rem' }}>
-                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.82rem' }}>
-                      Registered Staff Mobile Number *
-                    </label>
-                    <input
-                      type="tel"
-                      className="form-control"
-                      placeholder="e.g. 9745111001"
-                      value={resetPhone}
-                      onChange={(e) => setResetPhone(e.target.value)}
-                      required
-                    />
+                <form onSubmit={handleResetPassword}>
+                  {/* 2-of-3 Verification Method Selector */}
+                  <div style={{ marginBottom: '0.95rem' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: '0.45rem',
+                        gap: '0.5rem'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.79rem', fontWeight: 700, color: '#334155' }}>
+                        Choose Any 2 Verification Options *
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          padding: '2px 7px',
+                          borderRadius: '6px',
+                          fontVariantNumeric: 'tabular-nums',
+                          background: selectedFactors.length === 2 ? '#dcfce7' : '#fef3c7',
+                          color: selectedFactors.length === 2 ? '#166534' : '#b45309'
+                        }}
+                      >
+                        {selectedFactors.length} / 2 Selected
+                      </span>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(3, 1fr)',
+                        gap: '0.4rem'
+                      }}
+                    >
+                      {(
+                        [
+                          { id: 'unique_id' as PasswordResetFactor, label: 'Unique ID', icon: '🆔' },
+                          { id: 'phone' as PasswordResetFactor, label: 'Phone No.', icon: '📱' },
+                          { id: 'dob' as PasswordResetFactor, label: 'Birth Date', icon: '🎂' }
+                        ] as const
+                      ).map((opt) => {
+                        const isChecked = selectedFactors.includes(opt.id);
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => toggleVerificationFactor(opt.id)}
+                            style={{
+                              padding: '0.55rem 0.35rem',
+                              borderRadius: '8px',
+                              border: `1.5px solid ${isChecked ? '#7c3aed' : '#cbd5e1'}`,
+                              background: isChecked ? '#f5f3ff' : '#ffffff',
+                              color: isChecked ? '#5b21b6' : '#334155',
+                              cursor: 'pointer',
+                              textAlign: 'center',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <div style={{ fontSize: '0.95rem', lineHeight: 1.1 }}>{opt.icon}</div>
+                            <div
+                              style={{
+                                fontSize: '0.74rem',
+                                fontWeight: 700,
+                                marginTop: '0.2rem',
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              {isChecked ? `✓ ${opt.label}` : opt.label}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  <div className="form-group" style={{ marginBottom: '0.9rem' }}>
-                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.82rem' }}>
-                      Full Name (as registered) *
-                    </label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="e.g. Shyam Kumar"
-                      value={resetName}
-                      onChange={(e) => setResetName(e.target.value)}
-                      required
-                    />
-                  </div>
+                  {selectedFactors.includes('unique_id') && (
+                    <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.82rem' }}>
+                        Registered Unique ID *
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="e.g. STF-001, OWN-001, MGR-001"
+                        value={resetUniqueId}
+                        onChange={(e) => setResetUniqueId(e.target.value.toUpperCase())}
+                        style={{ textTransform: 'uppercase', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}
+                        required
+                      />
+                    </div>
+                  )}
 
-                  <div className="grid-2" style={{ gap: '0.65rem', marginBottom: '1.15rem' }}>
+                  {selectedFactors.includes('phone') && (
+                    <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.82rem' }}>
+                        Registered Phone Number *
+                      </label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        placeholder="e.g. 9745111001"
+                        value={resetPhone}
+                        onChange={(e) => setResetPhone(e.target.value)}
+                        style={{ fontVariantNumeric: 'tabular-nums' }}
+                        required
+                      />
+                    </div>
+                  )}
+
+                  {selectedFactors.includes('dob') && (
+                    <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+                      <label className="form-label" style={{ fontWeight: 600, fontSize: '0.82rem' }}>
+                        Registered Date of Birth *
+                      </label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        max={new Date().toISOString().slice(0, 10)}
+                        value={resetDob}
+                        onChange={(e) => setResetDob(e.target.value)}
+                        style={{ fontVariantNumeric: 'tabular-nums' }}
+                        required
+                      />
+                    </div>
+                  )}
+
+                  <div className="grid-2" style={{ gap: '0.65rem', marginBottom: '1.1rem' }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label" style={{ fontWeight: 600, fontSize: '0.8rem' }}>
                         New Password *
@@ -462,7 +591,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                   <button
                     type="submit"
                     className="btn btn-primary"
-                    disabled={isResetting}
+                    disabled={isResetting || selectedFactors.length !== 2}
                     style={{
                       width: '100%',
                       padding: '0.75rem',
@@ -470,10 +599,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                       fontWeight: 700,
                       borderRadius: '8px',
                       background: '#7c3aed',
-                      borderColor: '#7c3aed'
+                      borderColor: '#7c3aed',
+                      opacity: selectedFactors.length === 2 ? 1 : 0.65
                     }}
                   >
-                    {isResetting ? 'Resetting Password...' : 'Save New Password'}
+                    {isResetting ? 'Verifying & Resetting...' : 'Verify & Save New Password'}
                   </button>
 
                   <button
@@ -537,12 +667,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                 <form onSubmit={handleLogin}>
                   <div className="form-group" style={{ marginBottom: '1.15rem' }}>
                     <label className="form-label" style={{ fontWeight: 600, fontSize: '0.85rem' }}>
-                      Username or Phone Number
+                      Username, Phone Number, or Unique ID
                     </label>
                     <input
                       type="text"
                       className="form-control"
-                      placeholder="Username or Staff Phone"
+                      placeholder="Username, Staff Phone, or Unique ID"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       required
@@ -570,7 +700,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                     <button
                       type="button"
                       onClick={() => {
-                        setResetPhone(username);
+                        const trimmed = username.trim();
+                        if (/^\+?\d[\d\s-]{6,}$/.test(trimmed)) {
+                          setResetPhone(trimmed);
+                        } else if (trimmed.includes('-')) {
+                          setResetUniqueId(trimmed.toUpperCase());
+                        }
                         setResetError('');
                         setIsResetMode(true);
                       }}
@@ -579,13 +714,13 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                         border: 'none',
                         padding: 0,
                         color: '#7c3aed',
-                        fontSize: '0.8rem',
+                        fontSize: '0.82rem',
                         fontWeight: 700,
                         cursor: 'pointer',
                         textDecoration: 'underline'
                       }}
                     >
-                      Forgot Staff Password?
+                      Forgot Password?
                     </button>
                   </div>
 

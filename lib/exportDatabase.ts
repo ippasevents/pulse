@@ -319,7 +319,9 @@ function buildDatasetSheets() {
   const staffSalarySummaryRows = state.staff.map((st) => {
     const sum = store.getStaffSalarySummary(st.id);
     return {
+      'Unique ID': st.unique_id || '',
       'Staff Name': st.name,
+      'Date of Birth': st.dob || '',
       'Phone (Login)': st.phone,
       Role: st.role_title || '',
       'Salary Structure': formatStaffSalaryTypeLabel(sum.salaryType),

@@ -23,6 +23,7 @@ import {
   StaffSalaryType,
   StaffSalaryRatePeriod,
   ShiftRateUpdateMode,
+  PasswordResetFactor,
   Shift,
   ShiftAttendanceStatus,
   StaffSalaryRecord,
@@ -81,6 +82,7 @@ export const EVENT_EXPENSE_CATEGORY_LABELS: Record<
 
 const STAFF_SALARY_STRUCTURES_CACHE_KEY = 'ippas_staff_salary_structures_v1';
 const HISTORICAL_PRICING_LOCKS_CACHE_KEY = 'ippas_historical_pricing_locks_v1';
+const IDENTITY_META_CACHE_KEY = 'ippas_identity_meta_v1';
 const LAST_BACKUP_STORAGE_KEY = 'ippas_last_backup_downloaded_at';
 export const BACKUP_REMINDER_INTERVAL_DAYS = 15;
 const BACKUP_REMINDER_INTERVAL_MS = BACKUP_REMINDER_INTERVAL_DAYS * 24 * 60 * 60 * 1000;
@@ -425,7 +427,9 @@ const INITIAL_PROFILES: Profile[] = [
     password: 'superadmin123',
     full_name: 'Super Admin',
     role: 'super_admin',
-    phone: '+91 99999 00000'
+    phone: '+91 99999 00000',
+    unique_id: 'ADM-001',
+    dob: '1985-01-01'
   },
   {
     id: '00000000-0000-4000-8000-000000000001',
@@ -433,7 +437,9 @@ const INITIAL_PROFILES: Profile[] = [
     password: 'owner123',
     full_name: 'Fazil (Owner)',
     role: 'owner',
-    phone: '+91 98470 11111'
+    phone: '+91 98470 11111',
+    unique_id: 'OWN-001',
+    dob: '1988-05-15'
   },
   {
     id: '00000000-0000-4000-8000-000000000002',
@@ -441,7 +447,9 @@ const INITIAL_PROFILES: Profile[] = [
     password: 'manager123',
     full_name: 'Aisha (Manager)',
     role: 'manager',
-    phone: '+91 98470 22222'
+    phone: '+91 98470 22222',
+    unique_id: 'MGR-001',
+    dob: '1992-08-20'
   },
   {
     id: '00000000-0000-4000-8000-000000000003',
@@ -449,7 +457,9 @@ const INITIAL_PROFILES: Profile[] = [
     password: 'accountant123',
     full_name: 'Rahul (Accountant)',
     role: 'accountant',
-    phone: '+91 98470 33333'
+    phone: '+91 98470 33333',
+    unique_id: 'ACC-001',
+    dob: '1994-11-10'
   }
 ];
 
@@ -639,11 +649,11 @@ const INITIAL_EVENT_EXTRAS: EventExtra[] = [
 ];
 
 const INITIAL_STAFF: StaffMember[] = [
-  { id: '00000000-0000-4000-8000-000000000701', name: 'Shyam Kumar', phone: '9745111001', password: 'password123', role_title: 'Senior Banquet Captain', hourly_rate: 350, active: true },
-  { id: '00000000-0000-4000-8000-000000000702', name: 'Abdul Rasheed', phone: '9745111002', password: 'password123', role_title: 'Lead Chef', hourly_rate: 450, active: true },
-  { id: '00000000-0000-4000-8000-000000000703', name: 'Manoj Pillai', phone: '9745111003', password: 'password123', role_title: 'Buffet Server', hourly_rate: 200, active: true },
-  { id: '00000000-0000-4000-8000-000000000704', name: 'Rubeena K', phone: '9745111004', password: 'password123', role_title: 'Buffet Server', hourly_rate: 200, active: true },
-  { id: '00000000-0000-4000-8000-000000000705', name: 'Jithesh P', phone: '9745111005', password: 'password123', role_title: 'Dish Steward / Utility', hourly_rate: 180, active: true }
+  { id: '00000000-0000-4000-8000-000000000701', name: 'Shyam Kumar', phone: '9745111001', unique_id: 'STF-001', dob: '1990-03-14', password: 'password123', role_title: 'Senior Banquet Captain', hourly_rate: 350, active: true },
+  { id: '00000000-0000-4000-8000-000000000702', name: 'Abdul Rasheed', phone: '9745111002', unique_id: 'STF-002', dob: '1987-07-22', password: 'password123', role_title: 'Lead Chef', hourly_rate: 450, active: true },
+  { id: '00000000-0000-4000-8000-000000000703', name: 'Manoj Pillai', phone: '9745111003', unique_id: 'STF-003', dob: '1995-11-05', password: 'password123', role_title: 'Buffet Server', hourly_rate: 200, active: true },
+  { id: '00000000-0000-4000-8000-000000000704', name: 'Rubeena K', phone: '9745111004', unique_id: 'STF-004', dob: '1996-04-18', password: 'password123', role_title: 'Buffet Server', hourly_rate: 200, active: true },
+  { id: '00000000-0000-4000-8000-000000000705', name: 'Jithesh P', phone: '9745111005', unique_id: 'STF-005', dob: '1998-09-30', password: 'password123', role_title: 'Dish Steward / Utility', hourly_rate: 180, active: true }
 ];
 
 const INITIAL_SHIFTS: Shift[] = [
@@ -1949,6 +1959,78 @@ class DataStore {
     return null;
   }
 
+  private readIdentityMetaCache(): Record<string, { unique_id?: string; dob?: string }> {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem(IDENTITY_META_CACHE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private writeIdentityMetaCacheEntry(entityId: string, meta: { unique_id?: string; dob?: string }) {
+    if (typeof window === 'undefined' || !entityId) return;
+    try {
+      const current = this.readIdentityMetaCache();
+      current[entityId] = {
+        unique_id: meta.unique_id ? this.normalizeUniqueId(meta.unique_id) : undefined,
+        dob: meta.dob ? String(meta.dob).slice(0, 10) : undefined
+      };
+      localStorage.setItem(IDENTITY_META_CACHE_KEY, JSON.stringify(current));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  private buildIdentityMetaAuditTag(meta: { unique_id?: string; dob?: string }): string {
+    return `IdentityMetaJSON:${JSON.stringify({
+      unique_id: meta.unique_id ? this.normalizeUniqueId(meta.unique_id) : null,
+      dob: meta.dob ? String(meta.dob).slice(0, 10) : null
+    })}`;
+  }
+
+  private extractIdentityMetaFromLogs(
+    entityId: string,
+    rawLogs: any[]
+  ): { unique_id?: string; dob?: string } | null {
+    for (const al of rawLogs) {
+      if (String(al.entity_id || '') === String(entityId) && al.details) {
+        const det = String(al.details);
+        const match = det.match(/IdentityMetaJSON:(\{[^\n•]+\})/);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[1]);
+            if (parsed && typeof parsed === 'object') {
+              return {
+                unique_id: parsed.unique_id ? this.normalizeUniqueId(String(parsed.unique_id)) : undefined,
+                dob: parsed.dob ? String(parsed.dob).slice(0, 10) : undefined
+              };
+            }
+          } catch {
+            // ignore malformed JSON
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  private toProfileSqlRow(p: Profile) {
+    return {
+      id: p.id,
+      username: p.username,
+      password: p.password || null,
+      full_name: p.full_name,
+      phone: p.phone || null,
+      unique_id: p.unique_id ? this.normalizeUniqueId(p.unique_id) : null,
+      dob: p.dob ? String(p.dob).slice(0, 10) : null,
+      role: p.role
+    };
+  }
+
   private toStaffSqlRow(s: StaffMember) {
     const sType = getStaffSalaryType(s);
     const primaryRate = getStaffPrimaryRate(s);
@@ -1956,6 +2038,8 @@ class DataStore {
       id: s.id,
       name: s.name,
       phone: s.phone || null,
+      unique_id: s.unique_id ? this.normalizeUniqueId(s.unique_id) : null,
+      dob: s.dob ? String(s.dob).slice(0, 10) : null,
       password: s.password || 'password123',
       role_title: s.role_title || null,
       salary_type: sType,
@@ -2710,14 +2794,7 @@ class DataStore {
           {
             type: 'upsert',
             table: 'profiles',
-            values: INITIAL_PROFILES.map((p) => ({
-              id: p.id,
-              username: p.username,
-              password: p.password,
-              full_name: p.full_name,
-              role: p.role,
-              phone: p.phone || null
-            })),
+            values: INITIAL_PROFILES.map((p) => this.toProfileSqlRow(p)),
             onConflict: 'id'
           }
         ]);
@@ -2735,14 +2812,74 @@ class DataStore {
         ]);
       }
 
+      const rawActivityLogsForSync = !activityLogsRes?.error
+        ? ((activityLogsRes?.data || []) as any[])
+        : [];
+      const identityCache = this.readIdentityMetaCache();
+      const usedUniqueIdsInSync = new Set<string>();
+      const claimFallbackUniqueId = (prefix: string): string => {
+        let seq = 1;
+        while (seq < 10000) {
+          const candidate = `${prefix}-${String(seq).padStart(3, '0')}`;
+          if (!usedUniqueIdsInSync.has(candidate)) {
+            usedUniqueIdsInSync.add(candidate);
+            return candidate;
+          }
+          seq += 1;
+        }
+        return `${prefix}-${Date.now().toString().slice(-4)}`;
+      };
+
       let loadedProfiles: Profile[] = usableProfiles.map((p: any) => {
         const fallbackRole = (p.role as UserRole) || 'manager';
+        const existingLocal = this.state.profiles.find((old) => old.id === p.id);
+        const seededDefault = INITIAL_PROFILES.find(
+          (ip) => ip.id === p.id || (ip.username && ip.username === p.username)
+        );
+        const fromIdLogs = this.extractIdentityMetaFromLogs(p.id, rawActivityLogsForSync);
+        const fromIdCache = identityCache[p.id];
+
+        const rawUid =
+          (p.unique_id ? this.normalizeUniqueId(String(p.unique_id)) : undefined) ||
+          fromIdLogs?.unique_id ||
+          fromIdCache?.unique_id ||
+          existingLocal?.unique_id ||
+          seededDefault?.unique_id;
+
+        const rolePrefix =
+          fallbackRole === 'super_admin'
+            ? 'ADM'
+            : fallbackRole === 'owner'
+            ? 'OWN'
+            : fallbackRole === 'manager'
+            ? 'MGR'
+            : fallbackRole === 'accountant'
+            ? 'ACC'
+            : 'USR';
+
+        let resolvedUid = rawUid ? this.normalizeUniqueId(rawUid) : '';
+        if (!resolvedUid || usedUniqueIdsInSync.has(resolvedUid)) {
+          resolvedUid = claimFallbackUniqueId(rolePrefix);
+        } else {
+          usedUniqueIdsInSync.add(resolvedUid);
+        }
+
+        const resolvedDob =
+          (p.dob ? String(p.dob).slice(0, 10) : undefined) ||
+          fromIdLogs?.dob ||
+          fromIdCache?.dob ||
+          existingLocal?.dob ||
+          seededDefault?.dob ||
+          undefined;
+
         return {
           id: p.id,
           username: p.username || fallbackRole,
           password: p.password || `${fallbackRole}123`,
           full_name: p.full_name || fallbackRole,
           phone: p.phone || '',
+          unique_id: resolvedUid,
+          dob: resolvedDob,
           role: fallbackRole,
           role_title: p.role_title || undefined,
           hourly_rate: p.hourly_rate != null ? Number(p.hourly_rate) : undefined
@@ -2750,7 +2887,17 @@ class DataStore {
       });
 
       if (!loadedProfiles.some((p) => p.role === 'super_admin')) {
-        loadedProfiles = [INITIAL_PROFILES[0], ...loadedProfiles];
+        const superLocal = this.state.profiles.find((p) => p.role === 'super_admin');
+        const superCache = identityCache[INITIAL_PROFILES[0].id];
+        const superSeed: Profile = {
+          ...INITIAL_PROFILES[0],
+          password: superLocal?.password || INITIAL_PROFILES[0].password,
+          phone: superLocal?.phone || INITIAL_PROFILES[0].phone,
+          unique_id: superCache?.unique_id || superLocal?.unique_id || INITIAL_PROFILES[0].unique_id || 'ADM-001',
+          dob: superCache?.dob || superLocal?.dob || INITIAL_PROFILES[0].dob
+        };
+        if (superSeed.unique_id) usedUniqueIdsInSync.add(this.normalizeUniqueId(superSeed.unique_id));
+        loadedProfiles = [superSeed, ...loadedProfiles];
       }
 
       const purchaseItemsData = purchaseItemsRes?.data || [];
@@ -2798,16 +2945,38 @@ class DataStore {
           }))
         : [];
 
-      const rawActivityLogsForSync = !activityLogsRes?.error
-        ? ((activityLogsRes?.data || []) as any[])
-        : [];
       const staffCache = this.readStaffStructureCache();
       const pricingLocks = this.extractPricingLocksFromLogs(rawActivityLogsForSync);
 
       const loadedStaff: StaffMember[] = (staffRes?.data || []).map((s: any) => {
         const existingLocal = this.state.staff.find((old) => old.id === s.id);
+        const seededStaffDefault = INITIAL_STAFF.find((is) => is.id === s.id);
         const fromLogs = this.extractStaffStructureFromLogs(s.id, rawActivityLogsForSync);
         const fromCache = staffCache[s.id];
+        const fromIdLogs = this.extractIdentityMetaFromLogs(s.id, rawActivityLogsForSync);
+        const fromIdCache = identityCache[s.id];
+
+        const rawStaffUid =
+          (s.unique_id ? this.normalizeUniqueId(String(s.unique_id)) : undefined) ||
+          fromIdLogs?.unique_id ||
+          fromIdCache?.unique_id ||
+          existingLocal?.unique_id ||
+          seededStaffDefault?.unique_id;
+
+        let resolvedStaffUid = rawStaffUid ? this.normalizeUniqueId(rawStaffUid) : '';
+        if (!resolvedStaffUid || usedUniqueIdsInSync.has(resolvedStaffUid)) {
+          resolvedStaffUid = claimFallbackUniqueId('STF');
+        } else {
+          usedUniqueIdsInSync.add(resolvedStaffUid);
+        }
+
+        const resolvedStaffDob =
+          (s.dob ? String(s.dob).slice(0, 10) : undefined) ||
+          fromIdLogs?.dob ||
+          fromIdCache?.dob ||
+          existingLocal?.dob ||
+          seededStaffDefault?.dob ||
+          undefined;
 
         const dbSalaryType: StaffSalaryType | undefined =
           s.salary_type === 'per_event' || s.salary_type === 'monthly' || s.salary_type === 'hourly'
@@ -2875,6 +3044,8 @@ class DataStore {
           id: s.id,
           name: s.name,
           phone: s.phone || '',
+          unique_id: resolvedStaffUid,
+          dob: resolvedStaffDob,
           password: s.password || 'password123',
           role_title: s.role_title || 'Service Crew',
           salary_type: resolvedType,
@@ -3534,6 +3705,8 @@ class DataStore {
           username: staffMember.phone,
           full_name: staffMember.name,
           phone: staffMember.phone,
+          unique_id: staffMember.unique_id,
+          dob: staffMember.dob,
           role: 'staff',
           role_title: staffMember.role_title
         };
@@ -3546,15 +3719,62 @@ class DataStore {
     );
   }
 
-  // Authentication - supports Owner, Manager, Accountant, and Staff by phone
+  public normalizeUniqueId(raw?: string | null): string {
+    return (raw || '')
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, '-');
+  }
+
+  public isUniqueIdTaken(uniqueId?: string | null, excludeEntityId?: string): boolean {
+    const norm = this.normalizeUniqueId(uniqueId);
+    if (!norm) return false;
+    const inProfiles = this.state.profiles.some(
+      (p) => p.id !== excludeEntityId && this.normalizeUniqueId(p.unique_id) === norm
+    );
+    if (inProfiles) return true;
+    const inStaff = this.state.staff.some(
+      (s) => s.id !== excludeEntityId && this.normalizeUniqueId(s.unique_id) === norm
+    );
+    return inStaff;
+  }
+
+  public generateNextUniqueId(roleOrKind: UserRole | 'staff' = 'staff'): string {
+    const prefix =
+      roleOrKind === 'staff'
+        ? 'STF'
+        : roleOrKind === 'owner'
+        ? 'OWN'
+        : roleOrKind === 'manager'
+        ? 'MGR'
+        : roleOrKind === 'accountant'
+        ? 'ACC'
+        : roleOrKind === 'super_admin'
+        ? 'ADM'
+        : 'USR';
+    let seq = 1;
+    while (seq < 10000) {
+      const candidate = `${prefix}-${String(seq).padStart(3, '0')}`;
+      if (!this.isUniqueIdTaken(candidate)) {
+        return candidate;
+      }
+      seq += 1;
+    }
+    return `${prefix}-${Date.now().toString().slice(-4)}`;
+  }
+
+  // Authentication - supports Owner, Manager, Accountant, and Staff by username, phone, or Unique ID
   public login(username: string, password: string): { success: boolean; error?: string; user?: Profile } {
     const rawUser = username.trim();
     const trimmedUser = rawUser.toLowerCase();
+    const upperUser = this.normalizeUniqueId(rawUser);
     const trimmedPass = password.trim();
 
-    // 1. Check management profiles (owner, manager, accountant)
+    // 1. Check management profiles (owner, manager, accountant, super_admin) by username or unique_id
     const profile = this.state.profiles.find(
-      (p) => (p.username || '').toLowerCase() === trimmedUser
+      (p) =>
+        (p.username || '').toLowerCase() === trimmedUser ||
+        (upperUser && this.normalizeUniqueId(p.unique_id) === upperUser)
     );
 
     if (profile) {
@@ -3572,16 +3792,17 @@ class DataStore {
       return { success: true, user: profile };
     }
 
-    // 2. Check staff members by phone number
+    // 2. Check staff members by phone number or Unique ID
     const cleanDigits = (s: string) => (s || '').replace(/\D/g, '').replace(/^91/, '');
     const userDigits = cleanDigits(rawUser);
 
     const staffMember = this.state.staff.find((s) => {
       const sDigits = cleanDigits(s.phone);
-      return (
+      const matchesPhone =
         (userDigits.length >= 7 && sDigits === userDigits) ||
-        (s.phone && s.phone.replace(/\s+/g, '') === rawUser.replace(/\s+/g, ''))
-      );
+        (s.phone && s.phone.replace(/\s+/g, '') === rawUser.replace(/\s+/g, ''));
+      const matchesUniqueId = Boolean(upperUser) && this.normalizeUniqueId(s.unique_id) === upperUser;
+      return Boolean(matchesPhone || matchesUniqueId);
     });
 
     if (staffMember) {
@@ -3603,6 +3824,8 @@ class DataStore {
         username: staffMember.phone,
         full_name: staffMember.name,
         phone: staffMember.phone,
+        unique_id: staffMember.unique_id,
+        dob: staffMember.dob,
         role: 'staff',
         role_title: staffMember.role_title
       };
@@ -3617,7 +3840,10 @@ class DataStore {
       return { success: true, user: staffProfile };
     }
 
-    return { success: false, error: 'User not found. Please enter a valid username or staff phone number.' };
+    return {
+      success: false,
+      error: 'User not found. Please enter a valid username, staff phone number, or Unique ID.'
+    };
   }
 
   public logout() {
@@ -3689,7 +3915,7 @@ class DataStore {
       return { success: true };
     }
 
-    // 2. If signed in as management user (owner, manager, accountant)
+    // 2. If signed in as management user (owner, manager, accountant, super_admin)
     const profile =
       this.state.profiles.find((p) => p.id === this.state.currentUserId) ||
       this.state.profiles.find((p) => p.role === this.state.currentRole) ||
@@ -3723,14 +3949,7 @@ class DataStore {
         {
           type: 'upsert',
           table: 'profiles',
-          values: {
-            id: profile.id,
-            username: profile.username,
-            password: profile.password,
-            full_name: profile.full_name,
-            phone: profile.phone || null,
-            role: profile.role
-          },
+          values: this.toProfileSqlRow(profile),
           onConflict: 'id'
         }
       ]);
@@ -3740,80 +3959,266 @@ class DataStore {
     return { success: true };
   }
 
-  // Self-service Staff Forgot Password Reset (verifies registered phone + full name)
-  public resetStaffPasswordSelfService(
-    phone: string,
-    fullName: string,
-    newPassword: string
-  ): { success: boolean; error?: string; staffName?: string; loginPhone?: string } {
-    const cleanDigits = (s: string) => (s || '').replace(/\D/g, '').replace(/^91/, '');
-    const normalizeName = (s: string) => (s || '').trim().replace(/\s+/g, ' ').toLowerCase();
-
-    const phoneDigits = cleanDigits(phone);
-    const inputName = normalizeName(fullName);
-    const nextPass = (newPassword || '').trim();
-
-    if (phoneDigits.length < 7) {
-      return { success: false, error: 'Please enter your registered mobile phone number.' };
+  /**
+   * Update recovery details (Unique ID, Phone Number, Date of Birth) for the currently signed-in account.
+   */
+  public updateCurrentUserRecoveryDetails(updates: {
+    unique_id?: string;
+    phone?: string;
+    dob?: string;
+  }): { success: boolean; error?: string } {
+    if (!this.state.isAuthenticated) {
+      return { success: false, error: 'User is not authenticated.' };
     }
-    if (!inputName) {
-      return { success: false, error: 'Please enter your registered full name.' };
+
+    if (this.state.currentRole === 'staff') {
+      const staffMember = this.state.staff.find((s) => s.id === this.state.currentUserId);
+      if (!staffMember) {
+        return { success: false, error: 'Staff profile not found.' };
+      }
+      const nextPhone = updates.phone !== undefined ? updates.phone.trim() : staffMember.phone;
+      if (!nextPhone) {
+        return { success: false, error: 'Phone number is required for Staff login.' };
+      }
+      const nextDob = updates.dob !== undefined ? updates.dob.trim().slice(0, 10) : staffMember.dob;
+      let nextUid = staffMember.unique_id || this.generateNextUniqueId('staff');
+      if (updates.unique_id !== undefined && updates.unique_id.trim()) {
+        const candidateUid = this.normalizeUniqueId(updates.unique_id);
+        if (this.isUniqueIdTaken(candidateUid, staffMember.id)) {
+          return { success: false, error: `Unique ID "${candidateUid}" is already assigned to another user.` };
+        }
+        nextUid = candidateUid;
+      }
+      this.updateStaff(staffMember.id, {
+        phone: nextPhone,
+        dob: nextDob || undefined,
+        unique_id: nextUid
+      });
+      this.flushPendingSqlWrites();
+      return { success: true };
+    }
+
+    const profile =
+      this.state.profiles.find((p) => p.id === this.state.currentUserId) ||
+      this.state.profiles.find((p) => p.role === this.state.currentRole);
+    if (!profile) {
+      return { success: false, error: 'User profile not found.' };
+    }
+
+    let nextUid = profile.unique_id || this.generateNextUniqueId(profile.role);
+    if (updates.unique_id !== undefined && updates.unique_id.trim()) {
+      const candidateUid = this.normalizeUniqueId(updates.unique_id);
+      if (this.isUniqueIdTaken(candidateUid, profile.id)) {
+        return { success: false, error: `Unique ID "${candidateUid}" is already assigned to another user.` };
+      }
+      nextUid = candidateUid;
+    }
+
+    const res = this.updateProfile(profile.id, {
+      unique_id: nextUid,
+      phone: updates.phone !== undefined ? updates.phone.trim() : profile.phone,
+      dob: updates.dob !== undefined ? (updates.dob.trim().slice(0, 10) || undefined) : profile.dob
+    });
+    if (res.success) {
+      this.flushPendingSqlWrites();
+    }
+    return res;
+  }
+
+  /**
+   * Self-service Forgot Password Reset for ALL users (Owner, Manager, Accountant, Staff, Super Admin).
+   * Strictly requires selecting and verifying ANY TWO (2) out of THREE (3) factors:
+   *   1. Unique ID ('unique_id')
+   *   2. Phone Number ('phone')
+   *   3. Date of Birth ('dob')
+   */
+  public resetPasswordWithTwoFactors(params: {
+    factors: PasswordResetFactor[];
+    uniqueId?: string;
+    phone?: string;
+    dob?: string;
+    newPassword: string;
+  }): {
+    success: boolean;
+    error?: string;
+    accountName?: string;
+    loginId?: string;
+    role?: UserRole;
+  } {
+    const allowedFactors: PasswordResetFactor[] = ['unique_id', 'phone', 'dob'];
+    const selected = Array.from(
+      new Set((params.factors || []).filter((f): f is PasswordResetFactor => allowedFactors.includes(f)))
+    );
+
+    if (selected.length !== 2) {
+      return {
+        success: false,
+        error: 'Please select any two (2) options out of Unique ID, Phone Number, and Date of Birth to reset your password.'
+      };
+    }
+
+    const cleanDigits = (s?: string | null) =>
+      (s || '').replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+
+    const normUid = this.normalizeUniqueId(params.uniqueId);
+    const rawPhone = (params.phone || '').trim();
+    const phoneDigits = cleanDigits(rawPhone);
+    const normDob = (params.dob || '').trim().slice(0, 10);
+    const nextPass = (params.newPassword || '').trim();
+
+    if (selected.includes('unique_id') && !normUid) {
+      return { success: false, error: 'Please enter your registered Unique ID.' };
+    }
+    if (selected.includes('phone') && phoneDigits.length < 7) {
+      return { success: false, error: 'Please enter your registered Phone Number.' };
+    }
+    if (selected.includes('dob') && !/^\d{4}-\d{2}-\d{2}$/.test(normDob)) {
+      return { success: false, error: 'Please select your registered Date of Birth.' };
     }
     if (!nextPass || nextPass.length < 4) {
       return { success: false, error: 'New password must be at least 4 characters long.' };
     }
 
-    const staffMember = this.state.staff.find((s) => {
-      const sDigits = cleanDigits(s.phone);
-      return (
-        (phoneDigits.length >= 7 && sDigits === phoneDigits) ||
-        (s.phone && s.phone.replace(/\s+/g, '') === (phone || '').replace(/\s+/g, ''))
+    const matchesSelectedFactors = (candidate: {
+      unique_id?: string;
+      phone?: string;
+      dob?: string;
+    }): boolean => {
+      for (const factor of selected) {
+        if (factor === 'unique_id') {
+          const candUid = this.normalizeUniqueId(candidate.unique_id);
+          if (!candUid || candUid !== normUid) return false;
+        } else if (factor === 'phone') {
+          const candPhone = (candidate.phone || '').trim();
+          const candDigits = cleanDigits(candPhone);
+          const phoneMatch =
+            (candDigits.length >= 7 && candDigits === phoneDigits) ||
+            (Boolean(candPhone) && candPhone.replace(/\s+/g, '') === rawPhone.replace(/\s+/g, ''));
+          if (!phoneMatch) return false;
+        } else if (factor === 'dob') {
+          const candDob = (candidate.dob || '').trim().slice(0, 10);
+          if (!candDob || candDob !== normDob) return false;
+        }
+      }
+      return true;
+    };
+
+    type ResetMatch =
+      | { kind: 'profile'; profile: Profile }
+      | { kind: 'staff'; staff: StaffMember };
+
+    const matches: ResetMatch[] = [];
+
+    for (const p of this.state.profiles) {
+      if (matchesSelectedFactors(p)) {
+        matches.push({ kind: 'profile', profile: p });
+      }
+    }
+
+    for (const s of this.state.staff) {
+      if (matchesSelectedFactors(s)) {
+        matches.push({ kind: 'staff', staff: s });
+      }
+    }
+
+    if (matches.length === 0) {
+      return {
+        success: false,
+        error:
+          'Verification failed: No user account matched both selected details. Please check your Unique ID, Phone Number, or Date of Birth and try again.'
+      };
+    }
+
+    if (matches.length > 1) {
+      return {
+        success: false,
+        error:
+          'Multiple accounts matched these details. Please select Unique ID as one of the two verification options to uniquely identify your account.'
+      };
+    }
+
+    const matched = matches[0];
+    const verifiedLabels = selected
+      .map((f) =>
+        f === 'unique_id' ? 'Unique ID' : f === 'phone' ? 'Phone Number' : 'Date of Birth'
+      )
+      .join(' + ');
+
+    if (matched.kind === 'profile') {
+      const updatedProfile: Profile = {
+        ...matched.profile,
+        password: nextPass
+      };
+      this.state.profiles = this.state.profiles.map((p) =>
+        p.id === updatedProfile.id ? updatedProfile : p
       );
-    });
 
-    if (!staffMember) {
+      // Stealth protection: never create visible audit logs when Super Admin resets password
+      if (updatedProfile.role !== 'super_admin') {
+        this.logMutation({
+          entity_type: 'user',
+          entity_id: updatedProfile.id,
+          action: 'update',
+          summary: `User "${updatedProfile.username}" (${updatedProfile.role.toUpperCase()}) reset forgotten password via ${verifiedLabels}`,
+          details: `Full Name: ${updatedProfile.full_name} • ${this.buildIdentityMetaAuditTag(updatedProfile)}`
+        });
+      }
+      this.save();
+
+      if (isValidUUID(updatedProfile.id)) {
+        this.enqueueSqlOperations('Self-Service Reset User Password', [
+          {
+            type: 'upsert',
+            table: 'profiles',
+            values: this.toProfileSqlRow(updatedProfile),
+            onConflict: 'id'
+          }
+        ]);
+        this.flushPendingSqlWrites();
+      }
+
       return {
-        success: false,
-        error: 'No staff account found with this mobile number. Please check your number or contact the Manager.'
+        success: true,
+        accountName: updatedProfile.full_name,
+        loginId: updatedProfile.username,
+        role: updatedProfile.role
       };
     }
 
-    const storedName = normalizeName(staffMember.name);
-    if (storedName !== inputName) {
-      return {
-        success: false,
-        error: 'Registered name does not match this mobile number. Please enter your exact registered name.'
-      };
-    }
-
-    const updatedStaff: StaffMember = { ...staffMember, password: nextPass };
+    const updatedStaff: StaffMember = {
+      ...matched.staff,
+      password: nextPass
+    };
     this.state.staff = this.state.staff.map((s) =>
-      s.id === staffMember.id ? updatedStaff : s
+      s.id === updatedStaff.id ? updatedStaff : s
     );
 
     this.logMutation({
       entity_type: 'staff',
-      entity_id: staffMember.id,
+      entity_id: updatedStaff.id,
       action: 'update',
-      summary: `Staff member "${staffMember.name}" reset forgotten password`,
-      details: `Staff Phone: ${staffMember.phone}`
+      summary: `Staff member "${updatedStaff.name}" reset forgotten password via ${verifiedLabels}`,
+      details: `Staff Phone: ${updatedStaff.phone} • ${this.buildIdentityMetaAuditTag(updatedStaff)}`
     });
     this.save();
 
-    this.enqueueSqlOperations('Self-Service Reset Staff Password', [
-      {
-        type: 'upsert',
-        table: 'staff_members',
-        values: this.toStaffSqlRow(updatedStaff),
-        onConflict: 'id'
-      }
-    ]);
-    this.flushPendingSqlWrites();
+    if (isValidUUID(updatedStaff.id)) {
+      this.enqueueSqlOperations('Self-Service Reset Staff Password', [
+        {
+          type: 'upsert',
+          table: 'staff_members',
+          values: this.toStaffSqlRow(updatedStaff),
+          onConflict: 'id'
+        }
+      ]);
+      this.flushPendingSqlWrites();
+    }
 
     return {
       success: true,
-      staffName: staffMember.name,
-      loginPhone: staffMember.phone
+      accountName: updatedStaff.name,
+      loginId: updatedStaff.phone,
+      role: 'staff'
     };
   }
 
@@ -3842,7 +4247,7 @@ class DataStore {
       entity_id: staffMember.id,
       action: 'update',
       summary: `Reset login password for staff "${staffMember.name}"`,
-      details: `Staff Phone: ${staffMember.phone}`
+      details: `Staff Phone: ${staffMember.phone} • ${this.buildIdentityMetaAuditTag(updatedStaff)}`
     });
     this.save();
 
@@ -3864,6 +4269,8 @@ class DataStore {
     username: string;
     password: string;
     phone?: string;
+    unique_id?: string;
+    dob?: string;
     role: UserRole;
   }): { success: boolean; error?: string; profile?: Profile } {
     if (profileData.role === 'super_admin' && this.state.currentRole !== 'super_admin') {
@@ -3882,22 +4289,37 @@ class DataStore {
       return { success: false, error: `Username "${cleanUsername}" is already in use.` };
     }
 
+    const cleanUid = profileData.unique_id?.trim()
+      ? this.normalizeUniqueId(profileData.unique_id)
+      : this.generateNextUniqueId(profileData.role);
+    if (this.isUniqueIdTaken(cleanUid)) {
+      return { success: false, error: `Unique ID "${cleanUid}" is already assigned to another user or staff member.` };
+    }
+
+    const cleanDob = profileData.dob ? profileData.dob.trim().slice(0, 10) : undefined;
+
     const newProfile: Profile = {
       id: generateUUID(),
       full_name: profileData.full_name.trim(),
       username: cleanUsername,
       password: profileData.password.trim(),
       phone: (profileData.phone || '').trim(),
+      unique_id: cleanUid,
+      dob: cleanDob || undefined,
       role: profileData.role
     };
 
     this.state.profiles.push(newProfile);
+    this.writeIdentityMetaCacheEntry(newProfile.id, {
+      unique_id: newProfile.unique_id,
+      dob: newProfile.dob
+    });
     this.logMutation({
       entity_type: 'user',
       entity_id: newProfile.id,
       action: 'create',
-      summary: `Created user login "${newProfile.username}" (${newProfile.role.toUpperCase()})`,
-      details: `Name: ${newProfile.full_name}`
+      summary: `Created user login "${newProfile.username}" (${newProfile.role.toUpperCase()}, ID: ${newProfile.unique_id})`,
+      details: `Name: ${newProfile.full_name} • ${this.buildIdentityMetaAuditTag(newProfile)}`
     });
     this.save();
 
@@ -3905,14 +4327,7 @@ class DataStore {
       {
         type: 'upsert',
         table: 'profiles',
-        values: {
-          id: newProfile.id,
-          username: newProfile.username,
-          password: newProfile.password,
-          full_name: newProfile.full_name,
-          phone: newProfile.phone || null,
-          role: newProfile.role
-        },
+        values: this.toProfileSqlRow(newProfile),
         onConflict: 'id'
       }
     ]);
@@ -3946,6 +4361,23 @@ class DataStore {
       updates = { ...updates, username: cleanUsername };
     }
 
+    if (updates.unique_id !== undefined) {
+      const cleanUid = updates.unique_id.trim()
+        ? this.normalizeUniqueId(updates.unique_id)
+        : target.unique_id || this.generateNextUniqueId(updates.role || target.role);
+      if (this.isUniqueIdTaken(cleanUid, profileId)) {
+        return {
+          success: false,
+          error: `Unique ID "${cleanUid}" is already assigned to another user or staff member.`
+        };
+      }
+      updates = { ...updates, unique_id: cleanUid };
+    }
+
+    if (updates.dob !== undefined) {
+      updates = { ...updates, dob: updates.dob ? updates.dob.trim().slice(0, 10) : undefined };
+    }
+
     const prevSnapshot = { ...target };
     let updatedRecord: Profile | undefined;
     this.state.profiles = this.state.profiles.map((p) => {
@@ -3959,9 +4391,15 @@ class DataStore {
     }
 
     if (updatedRecord) {
+      this.writeIdentityMetaCacheEntry(updatedRecord.id, {
+        unique_id: updatedRecord.unique_id,
+        dob: updatedRecord.dob
+      });
       const diffs = buildRecordDiffs(prevSnapshot, updatedRecord, [
         { key: 'full_name', label: 'Full Name' },
         { key: 'username', label: 'Username' },
+        { key: 'unique_id', label: 'Unique ID' },
+        { key: 'dob', label: 'Date of Birth' },
         { key: 'role', label: 'Role', format: (v) => String(v || '').toUpperCase() },
         { key: 'phone', label: 'Phone' }
       ]);
@@ -3975,7 +4413,7 @@ class DataStore {
         summary: `Updated user account "${updatedRecord.username}" (${updatedRecord.role.toUpperCase()})`,
         details: encodeAuditDetails({
           changes: diffs,
-          note: `Full Name: ${updatedRecord.full_name}`
+          note: `Full Name: ${updatedRecord.full_name} • ${this.buildIdentityMetaAuditTag(updatedRecord)}`
         })
       });
     }
@@ -3986,14 +4424,7 @@ class DataStore {
         {
           type: 'upsert',
           table: 'profiles',
-          values: {
-            id: updatedRecord.id,
-            username: updatedRecord.username,
-            password: updatedRecord.password || null,
-            full_name: updatedRecord.full_name,
-            phone: updatedRecord.phone || null,
-            role: updatedRecord.role
-          },
+          values: this.toProfileSqlRow(updatedRecord),
           onConflict: 'id'
         }
       ]);
@@ -4528,9 +4959,19 @@ class DataStore {
         isAuthenticated: true
       };
 
-      // Cache staff salary structures and historical pricing locks locally as well
+      // Cache staff salary structures, identity metadata, and historical pricing locks locally as well
+      for (const prof of mergedProfiles) {
+        this.writeIdentityMetaCacheEntry(prof.id, {
+          unique_id: prof.unique_id,
+          dob: prof.dob
+        });
+      }
       for (const st of restoredStaff) {
         this.writeStaffStructureCacheEntry(st);
+        this.writeIdentityMetaCacheEntry(st.id, {
+          unique_id: st.unique_id,
+          dob: st.dob
+        });
       }
       this.writePricingLocksCache((cache) => {
         cache.eventStockLocks = {};
@@ -4601,14 +5042,7 @@ class DataStore {
           ops.push({
             type: 'upsert',
             table: 'profiles',
-            values: {
-              id: prof.id,
-              username: prof.username,
-              password: prof.password || null,
-              full_name: prof.full_name,
-              phone: prof.phone || null,
-              role: prof.role
-            },
+            values: this.toProfileSqlRow(prof),
             onConflict: 'id'
           });
         }
@@ -6629,9 +7063,19 @@ class DataStore {
     const eventVal = Number(staff.event_rate || 0);
     const monthlyVal = Number(staff.monthly_salary || 0);
 
+    let resolvedUniqueId = staff.unique_id?.trim()
+      ? this.normalizeUniqueId(staff.unique_id)
+      : this.generateNextUniqueId('staff');
+    if (this.isUniqueIdTaken(resolvedUniqueId)) {
+      resolvedUniqueId = this.generateNextUniqueId('staff');
+    }
+    const resolvedDob = staff.dob ? staff.dob.trim().slice(0, 10) : undefined;
+
     const newStaff: StaffMember = {
       ...staff,
       id: generateUUID(),
+      unique_id: resolvedUniqueId,
+      dob: resolvedDob || undefined,
       salary_type: sType,
       hourly_rate: hourlyVal,
       event_rate: eventVal,
@@ -6652,12 +7096,16 @@ class DataStore {
     };
     this.state.staff.push(newStaff);
     this.writeStaffStructureCacheEntry(newStaff);
+    this.writeIdentityMetaCacheEntry(newStaff.id, {
+      unique_id: newStaff.unique_id,
+      dob: newStaff.dob
+    });
     this.logMutation({
       entity_type: 'staff',
       entity_id: newStaff.id,
       action: 'create',
-      summary: `Registered staff member "${newStaff.name}" (${formatStaffSalaryTypeLabel(sType)}: ${formatStaffSalaryRate(newStaff)})`,
-      details: `${newStaff.role_title || 'Crew'} • ${formatStaffSalaryRate(newStaff)} • ${this.buildStaffStructureAuditTag(newStaff)}`
+      summary: `Registered staff member "${newStaff.name}" (ID: ${newStaff.unique_id}, ${formatStaffSalaryTypeLabel(sType)}: ${formatStaffSalaryRate(newStaff)})`,
+      details: `${newStaff.role_title || 'Crew'} • ${formatStaffSalaryRate(newStaff)} • ${this.buildStaffStructureAuditTag(newStaff)} • ${this.buildIdentityMetaAuditTag(newStaff)}`
     });
     this.save();
 
@@ -6676,6 +7124,21 @@ class DataStore {
     const prevStaff = this.state.staff.find((s) => s.id === id);
     const prevSnapshot = prevStaff ? { ...prevStaff } : undefined;
     const shiftLockMetaTags: string[] = [];
+
+    if (updates.unique_id !== undefined) {
+      const candidateUid = updates.unique_id.trim()
+        ? this.normalizeUniqueId(updates.unique_id)
+        : prevStaff?.unique_id || this.generateNextUniqueId('staff');
+      if (!this.isUniqueIdTaken(candidateUid, id)) {
+        updates = { ...updates, unique_id: candidateUid };
+      } else {
+        updates = { ...updates, unique_id: prevStaff?.unique_id || this.generateNextUniqueId('staff') };
+      }
+    }
+
+    if (updates.dob !== undefined) {
+      updates = { ...updates, dob: updates.dob ? updates.dob.trim().slice(0, 10) : undefined };
+    }
 
     // 1. Before mutating staff profile rate, lock the previous rate onto all existing shifts that lack an explicit lock
     if (prevStaff) {
@@ -6841,8 +7304,14 @@ class DataStore {
 
     if (updatedStaff) {
       this.writeStaffStructureCacheEntry(updatedStaff);
+      this.writeIdentityMetaCacheEntry(updatedStaff.id, {
+        unique_id: updatedStaff.unique_id,
+        dob: updatedStaff.dob
+      });
       const diffs = buildRecordDiffs(prevSnapshot, updatedStaff, [
         { key: 'name', label: 'Staff Name' },
+        { key: 'unique_id', label: 'Unique ID' },
+        { key: 'dob', label: 'Date of Birth' },
         { key: 'phone', label: 'Mobile' },
         { key: 'role_title', label: 'Role Title' },
         {
@@ -6857,7 +7326,7 @@ class DataStore {
       ]);
       const encodedDiffs = encodeAuditDetails({
         changes: diffs,
-        note: this.buildStaffStructureAuditTag(updatedStaff),
+        note: `${this.buildStaffStructureAuditTag(updatedStaff)} • ${this.buildIdentityMetaAuditTag(updatedStaff)}`,
         meta: shiftLockMetaTags.length > 0 ? shiftLockMetaTags.slice(0, 40).join(' • ') : undefined
       });
       const policySuffix =

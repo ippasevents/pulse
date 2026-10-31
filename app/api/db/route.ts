@@ -142,7 +142,8 @@ function stripColumn(
 // ---------------------------------------------------------------------------
 async function runSingleCloudSqlOperation(
   pool: Pool,
-  op: DbOperation
+  op: DbOperation,
+  attempt: number = 0
 ): Promise<{ error: any | null }> {
   if (!ALLOWED_TABLES.has(op.table)) {
     return { error: { message: `Disallowed table: ${op.table}` } };
@@ -215,6 +216,19 @@ async function runSingleCloudSqlOperation(
     const msg = err?.message || String(err);
     if (op.table === 'event_expenses' && isMissingTableError(msg)) {
       return { error: null };
+    }
+    const missingCol = extractMissingColumn(msg);
+    if (
+      missingCol &&
+      attempt < 8 &&
+      (op.type === 'insert' || op.type === 'upsert' || op.type === 'update') &&
+      op.values
+    ) {
+      return runSingleCloudSqlOperation(
+        pool,
+        { ...op, values: stripColumn(op.values, missingCol) },
+        attempt + 1
+      );
     }
     return { error: { message: msg } };
   }
